@@ -1,0 +1,51 @@
+.page { display: flex; flex-direction: column; height: 100%; background: var(--bg-primary); }
+
+.topBar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: calc(0.75rem + var(--safe-top)) 1rem 0.75rem;
+  background: var(--bg-secondary); flex-shrink: 0;
+}
+.appTitle { font-size: 1.25rem; font-weight: 700; color: var(--text-primary); }
+.iconBtn  { color: var(--icon); display: flex; align-items: center; padding: 0.25rem; }
+.headerActions { display: flex; align-items: center; gap: 0.25rem; }
+
+/* Auth */
+.authPage {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100%; padding: 1.5rem;
+  background: var(--bg-primary);
+}
+.card {
+  width: 100%; max-width: 360px;
+  display: flex; flex-direction: column; align-items: center; gap: 1rem;
+}
+.logo { font-size: 2.25rem; font-weight: 700; color: var(--accent); }
+.sub  { font-size: 0.9rem; color: var(--text-secondary); text-align: center; }
+
+.form { width: 100%; display: flex; flex-direction: column; gap: 0.75rem; }
+
+.input {
+  width: 100%; padding: 0.875rem 1rem;
+  background: var(--bg-secondary); border-radius: 0.5rem;
+  font-size: 1rem; color: var(--text-primary);
+}
+.input::placeholder { color: var(--text-secondary); }
+
+.error { font-size: 0.875rem; color: var(--danger); text-align: center; }
+
+.tabs { display: flex; width: 100%; border-radius: 0.5rem; overflow: hidden; background: var(--bg-primary); }
+.tab {
+  flex: 1; padding: 0.625rem;
+  font-size: 0.9rem; font-weight: 500;
+  color: var(--text-secondary);
+  transition: background 0.15s, color 0.15s;
+}
+.tabActive { background: var(--accent); color: #fff; }
+
+.btn {
+  width: 100%; padding: 0.875rem;
+  background: var(--accent); border-radius: 0.5rem;
+  font-size: 1rem; font-weight: 600; color: #fff;
+  margin-top: 0.25rem; transition: opacity 0.15s;
+}
+.btn:disabled { opacity: 0.6; }

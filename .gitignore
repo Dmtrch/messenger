@@ -1,0 +1,48 @@
+# Go
+server/bin/
+vendor/
+*.exe
+*.test
+*.out
+go.work.sum
+
+# Node / Vite
+client/node_modules/
+client/dist/
+client/.vite/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Runtime media uploads
+media/
+
+# Secrets
+.env
+
+# Docker
+docker-compose.override.yml
+docker/volumes/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# osgrep semantic index
+.osgrep/
+
+# Temp service worker directories (hex-named)
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]/

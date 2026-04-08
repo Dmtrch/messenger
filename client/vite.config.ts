@@ -1,0 +1,83 @@
+import { defineConfig, Plugin } from 'vite'
+import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// libsodium-wrappers ESM билд содержит сломанный импорт ./libsodium.mjs
+// Перенаправляем на CJS версию через абсолютный путь (обходит exports restrictions)
+const libsodiumCjs = path.resolve(__dirname, 'node_modules/libsodium-wrappers/dist/modules/libsodium-wrappers.js')
+
+const libsodiumCjsPlugin: Plugin = {
+  name: 'libsodium-cjs-resolver',
+  enforce: 'pre',
+  resolveId(id) {
+    if (id === 'libsodium-wrappers') return libsodiumCjs
+  }
+}
+
+export default defineConfig({
+  plugins: [
+    libsodiumCjsPlugin,
+    react(),
+    VitePWA({
+      strategies: 'generateSW',
+      registerType: 'autoUpdate',
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icons/*.png'],
+      manifest: {
+        name: 'Messenger',
+        short_name: 'Messenger',
+        description: 'Secure E2E encrypted messenger',
+        theme_color: '#075E54',
+        background_color: '#111B21',
+        display: 'standalone',
+        orientation: 'portrait',
+        scope: '/',
+        start_url: '/',
+        icons: [
+          {
+            src: '/icons/icon-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any maskable'
+          },
+          {
+            src: '/icons/icon-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any maskable'
+          }
+        ]
+      },
+      workbox: {
+        importScripts: ['/push-handler.js'],
+        runtimeCaching: [
+          {
+            urlPattern: /^\/api\//,
+            handler: 'NetworkFirst',
+            options: { cacheName: 'messenger-api' }
+          },
+          {
+            urlPattern: /^\/media\//,
+            handler: 'CacheFirst',
+            options: { cacheName: 'messenger-media' }
+          }
+        ]
+      },
+      devOptions: { enabled: true }
+    })
+  ],
+  resolve: {
+    alias: { '@': path.resolve(__dirname, 'src') }
+  },
+  server: {
+    port: 3000,
+    proxy: {
+      '/api': { target: 'http://localhost:8080', changeOrigin: true },
+      '/ws': { target: 'ws://localhost:8080', ws: true, changeOrigin: true },
+      '/media': { target: 'http://localhost:8080', changeOrigin: true },
+    },
+  }
+})
