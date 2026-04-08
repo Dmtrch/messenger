@@ -11,12 +11,13 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/messenger/server/db"
 	"github.com/messenger/server/internal/auth"
 	"github.com/messenger/server/internal/chat"
 	"github.com/messenger/server/internal/keys"
 	"github.com/messenger/server/internal/media"
+	secmw "github.com/messenger/server/internal/middleware"
 	"github.com/messenger/server/internal/push"
 	"github.com/messenger/server/internal/users"
 	"github.com/messenger/server/internal/ws"
@@ -32,6 +33,16 @@ func main() {
 	jwtSecret := getenv("JWT_SECRET", "")
 	if jwtSecret == "" {
 		log.Fatal("JWT_SECRET is required")
+	}
+
+	allowedOrigin := getenv("ALLOWED_ORIGIN", "")
+	tlsCert := getenv("TLS_CERT", "")
+	tlsKey := getenv("TLS_KEY", "")
+	isHTTPS := tlsCert != "" && tlsKey != ""
+
+	// Предупреждение: production без TLS небезопасен
+	if !isHTTPS && allowedOrigin != "" {
+		log.Printf("WARNING: ALLOWED_ORIGIN is set but TLS is not configured — traffic is unencrypted")
 	}
 
 	// VAPID ключи для Web Push
@@ -55,7 +66,7 @@ func main() {
 	}
 	defer database.Close()
 
-	hub := ws.NewHub(jwtSecret, database, vapidPrivate, vapidPublic)
+	hub := ws.NewHub(jwtSecret, database, vapidPrivate, vapidPublic, allowedOrigin)
 
 	authHandler := &auth.Handler{DB: database, JWTSecret: []byte(jwtSecret)}
 	chatHandler := &chat.Handler{DB: database, Hub: hub}
@@ -64,15 +75,19 @@ func main() {
 	keysHandler := &keys.Handler{DB: database}
 	pushHandler := &push.Handler{DB: database, VAPIDPublic: vapidPublic, VAPIDPrivate: vapidPrivate}
 
+	// Rate limiter для auth endpoints: 20 запросов в минуту с одного IP
+	authLimiter := secmw.NewRateLimiter(20, time.Minute)
+
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(chimw.Logger)
+	r.Use(chimw.Recoverer)
+	r.Use(chimw.Timeout(30 * time.Second))
+	r.Use(secmw.SecurityHeaders(isHTTPS))
 
 	r.Route("/api", func(r chi.Router) {
-		r.Post("/auth/register", authHandler.Register)
-		r.Post("/auth/login", authHandler.Login)
-		r.Post("/auth/refresh", authHandler.Refresh)
+		r.With(authLimiter.Middleware()).Post("/auth/register", authHandler.Register)
+		r.With(authLimiter.Middleware()).Post("/auth/login", authHandler.Login)
+		r.With(authLimiter.Middleware()).Post("/auth/refresh", authHandler.Refresh)
 		r.Post("/auth/logout", authHandler.Logout)
 
 		r.Get("/push/vapid-public-key", pushHandler.GetVAPIDPublicKey)
@@ -126,11 +141,9 @@ func main() {
 	})
 
 	addr := ":" + port
-	log.Printf("listening on %s", addr)
+	log.Printf("listening on %s (tls=%v)", addr, isHTTPS)
 
-	tlsCert := getenv("TLS_CERT", "")
-	tlsKey := getenv("TLS_KEY", "")
-	if tlsCert != "" && tlsKey != "" {
+	if isHTTPS {
 		log.Fatal(http.ListenAndServeTLS(addr, tlsCert, tlsKey, r))
 	} else {
 		log.Fatal(http.ListenAndServe(addr, r))

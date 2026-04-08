@@ -13,11 +13,11 @@
 - [ ] Перейти с `filename` на `mediaId`
 - [ ] Довести delivery/read receipts до полного realtime-цикла
 - [ ] Реализовать offline history viewing
-- [ ] Сделать TLS обязательным в production
-- [ ] Перевести refresh cookie на `SameSite=Strict`
-- [ ] Зафиксировать bcrypt cost = 12
-- [ ] Добавить rate limiting для auth endpoints
-- [ ] Добавить security headers
+- [x] Сделать TLS обязательным в production
+- [x] Перевести refresh cookie на `SameSite=Strict`
+- [x] Зафиксировать bcrypt cost = 12
+- [x] Добавить rate limiting для auth endpoints
+- [x] Добавить security headers
 
 ## Should
 
@@ -26,7 +26,7 @@
 - [ ] Реализовать серверные `unreadCount`, `updatedAt`, `lastMessage`
 - [ ] Довести lifecycle `prekey_request`
 - [ ] Добавить полноценный offline sync слой поверх IndexedDB
-- [ ] Ограничить `CheckOrigin` для WebSocket
+- [x] Ограничить `CheckOrigin` для WebSocket
 - [ ] Ввести конфигурационный файл сервера
 - [ ] Перейти на versioned migrations и целевую схему БД
 - [ ] Добавить backend tests

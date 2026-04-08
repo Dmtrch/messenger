@@ -15,12 +15,6 @@ import (
 	"github.com/messenger/server/internal/push"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  4096,
-	WriteBufferSize: 4096,
-	CheckOrigin:     func(r *http.Request) bool { return true },
-}
-
 // client is one WebSocket connection (one device).
 type client struct {
 	userID string
@@ -30,22 +24,34 @@ type client struct {
 
 // Hub tracks all active connections.
 type Hub struct {
-	mu           sync.RWMutex
-	byUser       map[string]map[*client]struct{} // userID → set of clients
-	jwtSecret    []byte
-	db           *sql.DB
-	vapidPrivate string
-	vapidPublic  string
+	mu            sync.RWMutex
+	byUser        map[string]map[*client]struct{} // userID → set of clients
+	jwtSecret     []byte
+	db            *sql.DB
+	vapidPrivate  string
+	vapidPublic   string
+	allowedOrigin string // пустая строка = любой origin (dev-режим)
 }
 
-func NewHub(jwtSecret string, database *sql.DB, vapidPrivate, vapidPublic string) *Hub {
+// NewHub создаёт Hub. allowedOrigin — разрешённый Origin заголовок для WS,
+// например "https://messenger.example.com". Пустая строка разрешает все origin.
+func NewHub(jwtSecret string, database *sql.DB, vapidPrivate, vapidPublic, allowedOrigin string) *Hub {
 	return &Hub{
-		byUser:       make(map[string]map[*client]struct{}),
-		jwtSecret:    []byte(jwtSecret),
-		db:           database,
-		vapidPrivate: vapidPrivate,
-		vapidPublic:  vapidPublic,
+		byUser:        make(map[string]map[*client]struct{}),
+		jwtSecret:     []byte(jwtSecret),
+		db:            database,
+		vapidPrivate:  vapidPrivate,
+		vapidPublic:   vapidPublic,
+		allowedOrigin: allowedOrigin,
 	}
+}
+
+// checkOrigin проверяет Origin при WS-апгрейде.
+func (h *Hub) checkOrigin(r *http.Request) bool {
+	if h.allowedOrigin == "" {
+		return true // dev-режим: принимаем любой origin
+	}
+	return r.Header.Get("Origin") == h.allowedOrigin
 }
 
 // ServeWS upgrades HTTP → WebSocket. Auth via ?token=<JWT>.
@@ -55,6 +61,11 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	tokenStr := r.URL.Query().Get("token")
 	userID, authErr := h.verifyJWT(tokenStr)
 
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  4096,
+		WriteBufferSize: 4096,
+		CheckOrigin:     h.checkOrigin,
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ws upgrade: %v", err)

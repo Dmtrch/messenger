@@ -51,7 +51,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
@@ -155,7 +155,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: "refresh_token", Value: "", MaxAge: -1,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		HttpOnly: true, SameSite: http.SameSiteStrictMode,
 	})
 	w.WriteHeader(204)
 }
@@ -183,7 +183,7 @@ func (h *Handler) issueTokens(w http.ResponseWriter, r *http.Request, userID, us
 		return nil, err
 	}
 
-	// Secure только при HTTPS — при локальной разработке по HTTP не ставим
+	// Secure только при HTTPS; SameSite=Strict защищает от CSRF
 	isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
@@ -191,7 +191,7 @@ func (h *Handler) issueTokens(w http.ResponseWriter, r *http.Request, userID, us
 		Expires:  exp,
 		HttpOnly: true,
 		Secure:   isHTTPS,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteStrictMode,
 		Path:     "/api/auth",
 	})
 
