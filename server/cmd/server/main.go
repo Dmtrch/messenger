@@ -70,7 +70,7 @@ func main() {
 
 	authHandler := &auth.Handler{DB: database, JWTSecret: []byte(jwtSecret)}
 	chatHandler := &chat.Handler{DB: database, Hub: hub}
-	mediaHandler := &media.Handler{MediaDir: mediaDir}
+	mediaHandler := &media.Handler{MediaDir: mediaDir, DB: database}
 	usersHandler := &users.Handler{DB: database}
 	keysHandler := &keys.Handler{DB: database}
 	pushHandler := &push.Handler{DB: database, VAPIDPublic: vapidPublic, VAPIDPrivate: vapidPrivate}
@@ -109,9 +109,8 @@ func main() {
 			r.Post("/push/subscribe", pushHandler.Subscribe)
 
 			r.Post("/media/upload", mediaHandler.Upload)
+			r.Get("/media/{id}", mediaHandler.Serve)
 		})
-		// Раздача файлов — без авторизации (имена случайные)
-		r.Get("/media/{filename}", mediaHandler.Serve)
 	})
 
 	r.Get("/ws", hub.ServeWS)

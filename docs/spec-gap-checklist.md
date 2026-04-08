@@ -9,8 +9,8 @@
 - [ ] Реализовать Sender Keys для групп
 - [ ] Добавить skipped message keys в Double Ratchet
 - [ ] Реализовать encrypted media at rest
-- [ ] Защитить `GET /api/media/:id` через JWT
-- [ ] Перейти с `filename` на `mediaId`
+- [x] Защитить `GET /api/media/:id` через JWT
+- [x] Перейти с `filename` на `mediaId`
 - [ ] Довести delivery/read receipts до полного realtime-цикла
 - [ ] Реализовать offline history viewing
 - [x] Сделать TLS обязательным в production

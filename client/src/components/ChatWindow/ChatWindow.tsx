@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useChatStore } from '@/store/chatStore'
 import { useAuthStore } from '@/store/authStore'
 import { useWsStore } from '@/store/wsStore'
@@ -24,7 +24,7 @@ function parsePayload(raw: string): Pick<Message, 'text' | 'mediaId' | 'original
 }
 
 interface PendingMedia {
-  filename: string
+  mediaId: string
   originalName: string
   mediaType: 'image' | 'file'
   previewUrl?: string   // объектный URL для превью изображений
@@ -212,8 +212,8 @@ export default function ChatWindow({ chatId, onBack }: Props) {
 
     setUploading(true)
     try {
-      const res = await api.uploadMedia(file)
-      setPendingMedia({ filename: res.filename, originalName: file.name, mediaType, previewUrl })
+      const res = await api.uploadMedia(file, chatId)
+      setPendingMedia({ mediaId: res.mediaId, originalName: file.name, mediaType, previewUrl })
     } catch {
       // Сообщаем через placeholder в поле ввода
       setText((t) => t || `[ошибка загрузки ${file.name}]`)
@@ -268,7 +268,7 @@ export default function ChatWindow({ chatId, onBack }: Props) {
     if (pendingMedia) {
       msgType = pendingMedia.mediaType
       plainPayload = JSON.stringify({
-        mediaId: pendingMedia.filename,
+        mediaId: pendingMedia.mediaId,
         originalName: pendingMedia.originalName,
         mediaType: pendingMedia.mediaType,
         text: trimmed || undefined,
@@ -284,7 +284,7 @@ export default function ChatWindow({ chatId, onBack }: Props) {
       encryptedPayload: '',
       senderKeyId: 0,
       text: trimmed || pendingMedia?.originalName,
-      mediaId: pendingMedia?.filename,
+      mediaId: pendingMedia?.mediaId,
       originalName: pendingMedia?.originalName,
       timestamp: Date.now(),
       status: 'sending',
@@ -461,24 +461,13 @@ function Bubble({ msg, isOwn, onTouchStart, onTouchEnd, onRightClick }: BubblePr
       onContextMenu={(e) => onRightClick(msg, e)}
     >
       {msg.type === 'image' && msg.mediaId && (
-        <a href={`/api/media/${encodeURIComponent(msg.mediaId)}`} target="_blank" rel="noreferrer">
-          <img
-            src={`/api/media/${encodeURIComponent(msg.mediaId)}`}
-            className={s.bubbleImage}
-            alt={msg.originalName ?? 'изображение'}
-            loading="lazy"
-          />
-        </a>
+        <AuthImage mediaId={msg.mediaId} className={s.bubbleImage} alt={msg.originalName ?? 'изображение'} />
       )}
       {msg.type === 'file' && msg.mediaId && (
-        <a
-          href={`/api/media/${encodeURIComponent(msg.mediaId)}`}
-          download={msg.originalName ?? msg.mediaId}
-          className={s.bubbleFile}
-        >
+        <AuthFileLink mediaId={msg.mediaId} originalName={msg.originalName} className={s.bubbleFile}>
           <FileIcon />
           <span>{msg.originalName ?? msg.mediaId}</span>
-        </a>
+        </AuthFileLink>
       )}
       {msg.text && <p className={s.bubbleText}>{msg.text}</p>}
       <div className={s.meta}>
@@ -538,6 +527,57 @@ function ContextMenu({ x, y, isOwn, onCopy, onEdit, onDelete }: ContextMenuProps
         </button>
       )}
     </div>
+  )
+}
+
+// --- Аутентифицированные медиа-компоненты ---
+
+/** Загружает изображение через authenticated fetch и показывает через object URL. */
+function AuthImage({ mediaId, className, alt }: { mediaId: string; className?: string; alt?: string }) {
+  const [src, setSrc] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    api.fetchMediaBlobUrl(mediaId)
+      .then((url) => { if (!cancelled) setSrc(url) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [mediaId])
+
+  if (!src) {
+    return <div className={className} style={{ background: '#ddd', minHeight: 60, borderRadius: 4 }} />
+  }
+  return (
+    <a href={src} target="_blank" rel="noreferrer">
+      <img src={src} className={className} alt={alt} loading="lazy" />
+    </a>
+  )
+}
+
+/** Ссылка на файл через authenticated fetch + download. */
+function AuthFileLink({
+  mediaId, originalName, className, children,
+}: {
+  mediaId: string
+  originalName?: string
+  className?: string
+  children: React.ReactNode
+}) {
+  const handleClick = useCallback(async (e: React.MouseEvent) => {
+    e.preventDefault()
+    try {
+      const url = await api.fetchMediaBlobUrl(mediaId)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = originalName ?? mediaId
+      a.click()
+    } catch { /* игнорируем */ }
+  }, [mediaId, originalName])
+
+  return (
+    <a href="#" onClick={handleClick} className={className}>
+      {children}
+    </a>
   )
 }
 

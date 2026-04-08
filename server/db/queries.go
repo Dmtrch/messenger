@@ -444,3 +444,41 @@ func GetPushSubs(db *sql.DB, userID string) ([]PushSub, error) {
 	}
 	return subs, rows.Err()
 }
+
+// ─── Media objects ────────────────────────────────────────────────────────────
+
+type MediaObject struct {
+	ID             string
+	UploaderID     string
+	ConversationID string // пустая строка = не привязан к чату
+	Filename       string // имя файла на диске
+	OriginalName   string
+	ContentType    string
+	Size           int64
+	CreatedAt      int64
+}
+
+func InsertMediaObject(db *sql.DB, m MediaObject) error {
+	var convID any
+	if m.ConversationID != "" {
+		convID = m.ConversationID
+	}
+	_, err := db.Exec(`
+		INSERT INTO media_objects (id, uploader_id, conversation_id, filename, original_name, content_type, size, created_at)
+		VALUES (?,?,?,?,?,?,?,?)`,
+		m.ID, m.UploaderID, convID, m.Filename, m.OriginalName, m.ContentType, m.Size, m.CreatedAt,
+	)
+	return err
+}
+
+func GetMediaObject(db *sql.DB, id string) (*MediaObject, error) {
+	m := &MediaObject{}
+	err := db.QueryRow(`
+		SELECT id, uploader_id, COALESCE(conversation_id,''), filename, original_name, content_type, size, created_at
+		FROM media_objects WHERE id=?`, id,
+	).Scan(&m.ID, &m.UploaderID, &m.ConversationID, &m.Filename, &m.OriginalName, &m.ContentType, &m.Size, &m.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return m, err
+}

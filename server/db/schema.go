@@ -131,4 +131,18 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     auth     BLOB NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- Медиафайлы: сервер хранит только ciphertext, доступ по JWT
+CREATE TABLE IF NOT EXISTS media_objects (
+    id              TEXT PRIMARY KEY,           -- UUID = mediaId
+    uploader_id     TEXT NOT NULL,
+    conversation_id TEXT,                       -- NULL до привязки к чату
+    filename        TEXT NOT NULL,              -- имя файла на диске
+    original_name   TEXT NOT NULL,
+    content_type    TEXT NOT NULL,
+    size            INTEGER NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL,
+    FOREIGN KEY (uploader_id)     REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
+);
 `

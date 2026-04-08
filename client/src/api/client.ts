@@ -81,8 +81,9 @@ export interface MessagesPage {
 }
 
 export interface MediaUploadRes {
-  filename: string
-  url: string
+  mediaId: string
+  originalName: string
+  contentType: string
 }
 
 export class ApiError extends Error {
@@ -115,6 +116,10 @@ async function doRefresh(): Promise<string | null> {
     return null
   }
 }
+
+// ── Media blob cache ──────────────────────────────────────
+// Кеш object URL для аутентифицированных медиафайлов.
+const _mediaBlobCache = new Map<string, string>()
 
 // ── Core request ──────────────────────────────────────────
 
@@ -154,6 +159,38 @@ async function req<T>(
 
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
+}
+
+/** Загружает медиафайл с авторизацией и возвращает кешированный object URL. */
+async function fetchMediaBlobUrl(mediaId: string): Promise<string> {
+  const cached = _mediaBlobCache.get(mediaId)
+  if (cached) return cached
+
+  const path = `/api/media/${encodeURIComponent(mediaId)}`
+  const headers: Record<string, string> = _accessToken
+    ? { Authorization: `Bearer ${_accessToken}` }
+    : {}
+
+  let response = await fetch(`${BASE}${path}`, { headers, credentials: 'include' })
+
+  if (response.status === 401) {
+    if (!_refreshInFlight) {
+      _refreshInFlight = doRefresh().finally(() => { _refreshInFlight = null })
+    }
+    const token = await _refreshInFlight
+    if (!token) throw new ApiError(401, 'Сессия истекла')
+    response = await fetch(`${BASE}${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'include',
+    })
+  }
+
+  if (!response.ok) throw new ApiError(response.status, 'media fetch failed')
+
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  _mediaBlobCache.set(mediaId, url)
+  return url
 }
 
 // ── Public API ────────────────────────────────────────────
@@ -201,15 +238,15 @@ export const api = {
   },
 
   // ── Media ─────────────────────────────────────────────────
-  uploadMedia: (file: File) => {
+  uploadMedia: (file: File, chatId?: string) => {
     const form = new FormData()
     form.append('file', file)
+    if (chatId) form.append('chat_id', chatId)
     return req<MediaUploadRes>('/api/media/upload', { method: 'POST', body: form })
   },
 
-  /** Абсолютный URL медиафайла (подставляется в <img src> и т.п.) */
-  mediaUrl: (filename: string) =>
-    `${BASE}/api/media/${encodeURIComponent(filename)}`,
+  /** Загружает медиафайл с авторизацией и возвращает кешированный object URL. */
+  fetchMediaBlobUrl,
 
   // ── Messages ─────────────────────────────────────────────
   deleteMessage: (clientMsgId: string) =>

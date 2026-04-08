@@ -19,8 +19,8 @@ frontend/.vite/
 *.db-shm
 *.db-wal
 
-# Runtime media uploads
-media/
+# Runtime media uploads (только в корне — папка с загруженными файлами)
+/media/
 
 # Secrets
 .env
