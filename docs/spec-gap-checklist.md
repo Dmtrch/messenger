@@ -67,7 +67,7 @@
 
 ### Этап 4 — Message state (пропуски в UI)
 
-- [ ] **markChatRead не вызывается при открытии чата**: `POST /api/chats/{chatId}/read` реализован на сервере, но нигде не вызывается в клиентском коде — `unreadCount` не сбрасывается на сервере после просмотра
+- [x] **markChatRead вызывается при открытии чата**: `api.markChatRead(chatId)` добавлен в useEffect открытия в ChatWindow.tsx
 - [ ] **lastMessage в ChatSummary не расшифровывается**: клиент получает `encryptedPayload`, но preview в списке чатов не отображает расшифрованный текст — нужна логика decrypt при загрузке чатов
 - [x] **Пагинация: nextCursor тип `string`**: `MessagesPage.nextCursor?: string` в `client.ts` — тип корректен везде
 
