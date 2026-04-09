@@ -51,7 +51,7 @@
 ### Этап 1 — Security (закрыт, но требует проверки)
 
 - [x] **CSP совместимость с production bundle**: `script-src 'self'` установлен в security.go; Vite production build совместим
-- [ ] **HSTS за Cloudflare Tunnel**: при HTTP-внутреннем соединении `isHTTPS=false` → HSTS не выставляется; нужен флаг `BEHIND_PROXY=true` или явный `FORCE_HTTPS`
+- [x] **HSTS за Cloudflare Tunnel**: добавлен `BEHIND_PROXY=true` — при установке выставляет HSTS без локальных TLS-сертификатов
 - [ ] **realIP доверяет X-Real-IP без whitelist proxy**: при прямом доступе к серверу заголовок подделывается — зафиксировать в документации или ограничить
 
 ### Этап 2 — Media (есть функциональный пропуск)

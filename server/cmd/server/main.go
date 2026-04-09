@@ -40,9 +40,12 @@ func main() {
 	tlsCert := getenv("TLS_CERT", "")
 	tlsKey := getenv("TLS_KEY", "")
 	isHTTPS := tlsCert != "" && tlsKey != ""
+	// BEHIND_PROXY=true: сервер за reverse proxy (Cloudflare Tunnel, nginx) который терминирует TLS.
+	// Позволяет выставлять HSTS без локальных TLS-сертификатов.
+	behindProxy := getenv("BEHIND_PROXY", "") == "true"
 
 	// Предупреждение: production без TLS небезопасен
-	if !isHTTPS && allowedOrigin != "" {
+	if !isHTTPS && !behindProxy && allowedOrigin != "" {
 		log.Printf("WARNING: ALLOWED_ORIGIN is set but TLS is not configured — traffic is unencrypted")
 	}
 
@@ -92,7 +95,7 @@ func main() {
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Timeout(30 * time.Second))
-	r.Use(secmw.SecurityHeaders(isHTTPS))
+	r.Use(secmw.SecurityHeaders(isHTTPS || behindProxy))
 
 	r.Route("/api", func(r chi.Router) {
 		r.With(authLimiter.Middleware()).Post("/auth/register", authHandler.Register)
