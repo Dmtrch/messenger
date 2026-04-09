@@ -235,6 +235,12 @@ func (h *Hub) readPump(c *client) {
 			h.handleRead(c, msg)
 		case "call_offer":
 			h.handleCallOffer(c, msg)
+		case "call_answer":
+			h.handleCallAnswer(c, msg)
+		case "call_end":
+			h.handleCallEnd(c, msg)
+		case "call_reject":
+			h.handleCallReject(c, msg)
 		default:
 			h.errMsg(c, "unknown type: "+msg.Type)
 		}
@@ -465,6 +471,97 @@ func (h *Hub) handleCallOffer(c *client, msg inMsg) {
 		"isVideo":  msg.IsVideo,
 	})
 	h.Deliver(targetID, offer)
+}
+
+// handleCallAnswer обрабатывает ответ на звонок от целевого пользователя.
+// Останавливает таймер ожидания, переводит сессию в "active" и пересылает SDP инициатору.
+func (h *Hub) handleCallAnswer(c *client, msg inMsg) {
+	if msg.CallID == "" || msg.SDP == "" {
+		h.errMsg(c, "callId and sdp required")
+		return
+	}
+	h.callsMu.Lock()
+	sess, ok := h.calls[msg.CallID]
+	if !ok || sess.targetID != c.userID {
+		h.callsMu.Unlock()
+		h.errMsg(c, "call not found")
+		return
+	}
+	if sess.timer != nil {
+		sess.timer.Stop()
+		sess.timer = nil
+	}
+	sess.state = "active"
+	initiatorID := sess.initiatorID
+	h.callsMu.Unlock()
+
+	answer, _ := json.Marshal(map[string]any{
+		"type":   "call_answer",
+		"callId": msg.CallID,
+		"sdp":    msg.SDP,
+	})
+	h.Deliver(initiatorID, answer)
+}
+
+// handleCallEnd завершает активный звонок. Уведомляет обоих участников (кроме отправителя)
+// и удаляет сессию из map.
+func (h *Hub) handleCallEnd(c *client, msg inMsg) {
+	if msg.CallID == "" {
+		h.errMsg(c, "callId required")
+		return
+	}
+	h.callsMu.Lock()
+	sess, ok := h.calls[msg.CallID]
+	if !ok {
+		h.callsMu.Unlock()
+		return
+	}
+	if sess.timer != nil {
+		sess.timer.Stop()
+	}
+	delete(h.calls, msg.CallID)
+	initiatorID := sess.initiatorID
+	targetID := sess.targetID
+	h.callsMu.Unlock()
+
+	end, _ := json.Marshal(map[string]any{
+		"type":   "call_end",
+		"callId": msg.CallID,
+		"reason": "hangup",
+	})
+	if c.userID != initiatorID {
+		h.Deliver(initiatorID, end)
+	}
+	if c.userID != targetID {
+		h.Deliver(targetID, end)
+	}
+}
+
+// handleCallReject обрабатывает отклонение звонка целевым пользователем.
+// Уведомляет только инициатора и удаляет сессию.
+func (h *Hub) handleCallReject(c *client, msg inMsg) {
+	if msg.CallID == "" {
+		h.errMsg(c, "callId required")
+		return
+	}
+	h.callsMu.Lock()
+	sess, ok := h.calls[msg.CallID]
+	if !ok {
+		h.callsMu.Unlock()
+		return
+	}
+	if sess.timer != nil {
+		sess.timer.Stop()
+	}
+	initiatorID := sess.initiatorID
+	delete(h.calls, msg.CallID)
+	h.callsMu.Unlock()
+
+	reject, _ := json.Marshal(map[string]any{
+		"type":   "call_reject",
+		"callId": msg.CallID,
+	})
+	h.Deliver(initiatorID, reject)
 }
 
 func (h *Hub) errMsg(c *client, reason string) {
