@@ -269,7 +269,7 @@ async function fetchEncryptedMediaBlobUrl(mediaId: string, mediaKey: string, mim
   const key = _sodium.from_base64(mediaKey)
   const plain = _sodium.crypto_secretbox_open_easy(ct, nonce, key)
 
-  const blob = new Blob([plain], { type: mimeType || 'application/octet-stream' })
+  const blob = new Blob([plain.buffer as ArrayBuffer], { type: mimeType || 'application/octet-stream' })
   const url = URL.createObjectURL(blob)
   _mediaBlobCache.set(cacheKey, url)
   return url
