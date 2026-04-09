@@ -234,6 +234,8 @@
 
 `Must`
 
+**Статус**: ✅ Реализовано в этапе 6. `messageDb.ts` — IndexedDB-репозиторий через `idb-keyval`; история чатов и сообщений сохраняется при каждом получении/отправке. При старте `ChatListPage` и `ChatWindow` сначала читают кэш из IDB, затем делают фоновый sync с сервером. `outboxDb.ts` хранит исходящие при offline; `useOfflineSync` автоматически сбрасывает очередь при восстановлении WS.
+
 **Нереализованная задача**
 
 Спецификация требует offline history viewing. Сейчас есть PWA-кэш shell и часть локального состояния, но нет полноценного оффлайн-хранилища истории сообщений.
@@ -451,6 +453,8 @@
 **Приоритет**
 
 `Should`
+
+**Статус**: ✅ Реализовано в этапе 6. `messageDb.ts`/`outboxDb.ts` — offline repository поверх IndexedDB. `useOfflineSync` — background resend из outbox. `OfflineIndicator` — UX-индикация offline/online. Workbox `NetworkFirst` для API получил `networkTimeoutSeconds: 5` для быстрого fallback на кэш.
 
 **Нереализованная задача**
 
@@ -719,10 +723,10 @@ WebRTC mesh (каждый ↔ каждый) нагружает клиент кв
 
 - multi-device модель (архитектурный разрыв)
 - `POST /api/keys/register` (реализован как upsert, но не идемпотентен с device fingerprint)
-- offline history viewing
 
 ### Must — выполнено ✅
 
+- ~~offline history viewing~~ — этап 6
 - ~~Sender Keys~~ — этап 5
 - ~~skipped message keys~~ — этап 5
 - ~~encrypted media at rest~~ — этапы 2 + 5
@@ -738,7 +742,6 @@ WebRTC mesh (каждый ↔ каждый) нагружает клиент кв
 ### Should — остаток
 
 - смена пароля с инвалидцией сессий
-- полноценный offline sync слой поверх IndexedDB
 - конфигурационный файл сервера
 - versioned migrations и целевая схема БД
 - backend tests
@@ -746,6 +749,7 @@ WebRTC mesh (каждый ↔ каждый) нагружает клиент кв
 
 ### Should — выполнено ✅
 
+- ~~полноценный offline sync слой поверх IndexedDB~~ — этап 6
 - ~~пагинация по `messageId`~~ — этап 4
 - ~~серверный `unreadCount` и `updatedAt`~~ — этап 4
 - ~~lifecycle `prekey_request`~~ — этап 5
