@@ -7,6 +7,7 @@ import { useWsStore } from '@/store/wsStore'
 import { decryptMessage, decryptGroupMessage, handleIncomingSKDM } from '@/crypto/session'
 import { appendOneTimePreKeys } from '@/crypto/keystore'
 import { generateDHKeyPair, toBase64 } from '@/crypto/x3dh'
+import { appendMessages } from '@/store/messageDb'
 import type { Chat, Message, WSFrame } from '@/types'
 
 /** Генерирует 20 новых OPK, сохраняет в keystore и загружает на сервер */
@@ -76,11 +77,14 @@ export function useMessengerWS() {
             decryptOp
               .then((raw) => {
                 const parsed = parsePayload(raw)
-                addMessage({
+                const msg: Message = {
                   id: messageId, clientMsgId, chatId, senderId,
                   encryptedPayload: ciphertext, senderKeyId,
                   timestamp, status: 'delivered', ...parsed,
-                }, currentUser?.id)
+                }
+                addMessage(msg, currentUser?.id)
+                // Персистировать расшифрованное сообщение в IndexedDB
+                appendMessages(chatId, [msg]).catch(() => {})
               })
               .catch(() => {
                 addMessage({

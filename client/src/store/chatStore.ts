@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { saveChats } from '@/store/messageDb'
 import type { Chat, Message } from '@/types'
 
 interface ChatState {
@@ -21,7 +22,11 @@ export const useChatStore = create<ChatState>((set) => ({
   messages: {},
   typingUsers: {},
 
-  setChats: (chats) => set({ chats }),
+  setChats: (chats) => {
+    set({ chats })
+    // Персистировать список чатов в IndexedDB для offline-доступа
+    saveChats(chats).catch(() => {})
+  },
 
   upsertChat: (chat) =>
     set((s) => {

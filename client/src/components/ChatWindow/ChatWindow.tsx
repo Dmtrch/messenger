@@ -4,6 +4,9 @@ import { useAuthStore } from '@/store/authStore'
 import { useWsStore } from '@/store/wsStore'
 import { api, uploadEncryptedMedia } from '@/api/client'
 import { encryptMessage, decryptMessage, encryptGroupMessage, decryptGroupMessage } from '@/crypto/session'
+import { loadMessages, appendMessages, saveMessages } from '@/store/messageDb'
+import { enqueueOutbox } from '@/store/outboxDb'
+import type { OutboxItem } from '@/store/outboxDb'
 import type { Message } from '@/types'
 import s from './ChatWindow.module.css'
 
@@ -100,11 +103,20 @@ export default function ChatWindow({ chatId, onBack }: Props) {
     queue.forEach((frame) => wsSend(frame))
   }, [wsSend])
 
-  // Загружаем историю при первом открытии чата
+  // Загружаем историю при первом открытии чата: сначала из IDB, потом фоново с сервера
   const loadHistory = useCallback(async (id: string) => {
     if (historyLoaded.current.has(id)) return
     historyLoaded.current.add(id)
     setLoadingHistory(true)
+
+    // Шаг 1: мгновенная загрузка из IndexedDB
+    const cached = await loadMessages(id)
+    if (cached.length > 0) {
+      prependMessages(id, cached)
+      setLoadingHistory(false)
+    }
+
+    // Шаг 2: фоновая синхронизация с сервером
     try {
       const { messages: msgs } = await api.getMessages(id, { limit: 50 })
       if (msgs.length > 0) {
@@ -132,13 +144,15 @@ export default function ChatWindow({ chatId, onBack }: Props) {
           }
         }))
         prependMessages(id, decoded)
+        // Обновить IDB свежими данными с сервера
+        await saveMessages(id, decoded)
       }
     } catch {
-      // Игнорируем — сообщения уже в store или нет сети
+      // Нет сети или другая ошибка — остаёмся с кэшем из IDB
     } finally {
       setLoadingHistory(false)
     }
-  }, [])
+  }, [prependMessages])
 
   useEffect(() => {
     markRead(chatId)
@@ -311,6 +325,8 @@ export default function ChatWindow({ chatId, onBack }: Props) {
       type: msgType,
     }
     addMessage(msg)
+    // Сохраняем исходящее сообщение в IDB (статус 'sending' перезапишется позже)
+    appendMessages(chatId, [msg]).catch(() => {})
     setText('')
     removePendingMedia()
 
@@ -363,7 +379,16 @@ export default function ChatWindow({ chatId, onBack }: Props) {
     if (wsSend) {
       wsSend(frame)
     } else {
+      // WS недоступен: сохраняем в in-memory очередь (восстановится в этой сессии)
+      // и в персистентный outbox (восстановится после перезагрузки страницы)
       pendingQueue.current.push(frame)
+      enqueueOutbox({
+        id: msgId,
+        chatId,
+        frame: frame as OutboxItem['frame'],
+        optimisticMsg: msg,
+        enqueuedAt: Date.now(),
+      }).catch(() => {})
     }
   }
 

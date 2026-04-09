@@ -5,6 +5,7 @@ import NewChatModal from '@/components/NewChatModal/NewChatModal'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { useChatStore } from '@/store/chatStore'
 import { api } from '@/api/client'
+import { loadChats } from '@/store/messageDb'
 import type { Chat } from '@/types'
 import s from './pages.module.css'
 
@@ -14,11 +15,17 @@ export default function ChatListPage() {
   const [showNewChat, setShowNewChat] = useState(false)
   const setChats = useChatStore((s) => s.setChats)
 
-  // Загрузить чаты с сервера при монтировании
+  // Загрузить чаты: сначала из IDB (мгновенно), потом фоново с сервера
   useEffect(() => {
+    // Шаг 1: кэш из IndexedDB — мгновенный отклик при offline/медленной сети
+    loadChats().then((cached) => {
+      if (cached.length > 0) setChats(cached)
+    }).catch(() => {})
+
+    // Шаг 2: актуальные данные с сервера (перезапишут кэш через setChats → saveChats)
     api.getChats().then((res) => {
       setChats(res.chats as unknown as Chat[])
-    }).catch(() => {/* токен мог истечь — тихо игнорируем */})
+    }).catch(() => {/* offline или токен истёк — используем кэш */})
   }, [setChats])
 
   // Запросить разрешение на push при первом открытии
