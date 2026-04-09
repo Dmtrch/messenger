@@ -109,9 +109,20 @@ func (h *Handler) RegisterDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UnixMilli()
-	deviceID := uuid.New().String()
 
-	// Сохраняем устройство
+	// Идемпотентность: если IK уже зарегистрирован для этого пользователя — то же устройство.
+	// Переиспользуем существующий device_id вместо создания нового при каждом входе.
+	existing, err := db.GetIdentityKeyByIKPublic(h.DB, userID, ikPub)
+	if err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	deviceID := uuid.New().String()
+	if existing != nil && existing.DeviceID != "" {
+		deviceID = existing.DeviceID
+	}
+
+	// Сохраняем/обновляем устройство (last_seen_at обновляется при каждом входе)
 	if err := db.UpsertDevice(h.DB, db.Device{
 		ID:         deviceID,
 		UserID:     userID,
@@ -123,7 +134,7 @@ func (h *Handler) RegisterDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Обновляем identity key с привязкой к устройству
+	// Обновляем identity key (SPK может смениться при ротации)
 	if err := db.UpsertIdentityKey(h.DB, db.IdentityKey{
 		UserID:       userID,
 		DeviceID:     deviceID,

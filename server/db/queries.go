@@ -517,6 +517,24 @@ func GetIdentityKey(db *sql.DB, userID string) (*IdentityKey, error) {
 	return k, err
 }
 
+// GetIdentityKeyByIKPublic ищет запись identity_key по публичному ключу устройства.
+// Используется для идемпотентной регистрации: один и тот же IK = то же устройство.
+func GetIdentityKeyByIKPublic(db *sql.DB, userID string, ikPublic []byte) (*IdentityKey, error) {
+	k := &IdentityKey{}
+	err := db.QueryRow(
+		`SELECT user_id, COALESCE(device_id,''), ik_public, spk_public, spk_signature, spk_id, updated_at
+		 FROM identity_keys WHERE user_id=? AND ik_public=?`,
+		userID, ikPublic,
+	).Scan(&k.UserID, &k.DeviceID, &k.IKPublic, &k.SPKPublic, &k.SPKSignature, &k.SPKId, &k.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return k, nil
+}
+
 // nullableString возвращает nil если строка пустая (для SQL NULL).
 func nullableString(s string) any {
 	if s == "" {
