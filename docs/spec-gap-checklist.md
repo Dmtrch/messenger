@@ -34,16 +34,16 @@
 
 ## Could
 
-- [ ] Подготовить проверенный deployment guide для Cloudflare Tunnel
-- [ ] Описать и автоматизировать update path без потери данных
+- [x] Подготовить проверенный deployment guide для Cloudflare Tunnel
+- [x] Описать и автоматизировать update path без потери данных
 - [ ] Встроить обязательную синхронизацию документации в процесс разработки
 
 ## Звонки (этап 9)
 
-- [ ] Реализовать WebRTC-сигнализацию (call_offer / call_answer / ice_candidate / call_end / call_reject)
-- [ ] Добавить клиентский UI звонков (входящий, активный, управление камерой/микрофоном)
-- [ ] Прописать STUN-конфигурацию в RTCPeerConnection
-- [ ] Добавить поддержку TURN-сервера (coturn + временные credentials через /api/calls/ice-servers)
+- [x] Реализовать WebRTC-сигнализацию (call_offer / call_answer / ice_candidate / call_end / call_reject)
+- [x] Добавить клиентский UI звонков (входящий, активный, управление камерой/микрофоном)
+- [x] Прописать STUN-конфигурацию в RTCPeerConnection
+- [x] Добавить поддержку TURN-сервера (coturn + временные credentials через /api/calls/ice-servers)
 - [ ] Реализовать групповые звонки через SFU (LiveKit)
 
 ## Долг и верификация по этапам 1–4
