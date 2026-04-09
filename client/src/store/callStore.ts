@@ -80,12 +80,12 @@ export const useCallStore = create<CallState>((set) => ({
   setRemoteStream: (stream) => set({ remoteStream: stream }),
 
   toggleMute: () => set((s) => {
-    s.localStream?.getAudioTracks().forEach((t) => { t.enabled = s.isMuted })
+    s.localStream?.getAudioTracks().forEach((t) => { t.enabled = !s.isMuted })
     return { isMuted: !s.isMuted }
   }),
 
   toggleCamera: () => set((s) => {
-    s.localStream?.getVideoTracks().forEach((t) => { t.enabled = s.isCameraOff })
+    s.localStream?.getVideoTracks().forEach((t) => { t.enabled = !s.isCameraOff })
     return { isCameraOff: !s.isCameraOff }
   }),
 
