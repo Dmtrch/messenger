@@ -374,6 +374,10 @@ export const api = {
       body: JSON.stringify({ recipients }),
     }),
 
+  // ── Calls ─────────────────────────────────────────────────
+  getIceServers: (): Promise<{ iceServers: RTCIceServer[] }> =>
+    req<{ iceServers: RTCIceServer[] }>('/api/calls/ice-servers'),
+
   // ── Push ─────────────────────────────────────────────────
   subscribePush: (subscription: PushSubscriptionJSON) =>
     req<void>('/api/push/subscribe', { method: 'POST', body: JSON.stringify(subscription) }),

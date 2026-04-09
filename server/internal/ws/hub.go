@@ -31,6 +31,18 @@ type Hub struct {
 	vapidPrivate  string
 	vapidPublic   string
 	allowedOrigin string // пустая строка = любой origin (dev-режим)
+	calls         map[string]*callSession // callID → активная сессия звонка
+	callsMu       sync.Mutex
+}
+
+// callSession хранит состояние 1-на-1 звонка между двумя пользователями.
+type callSession struct {
+	callID      string
+	chatID      string
+	initiatorID string
+	targetID    string
+	state       string // "ringing" | "active"
+	timer       *time.Timer
 }
 
 // NewHub создаёт Hub. allowedOrigin — разрешённый Origin заголовок для WS,
@@ -38,6 +50,7 @@ type Hub struct {
 func NewHub(jwtSecret string, database *sql.DB, vapidPrivate, vapidPublic, allowedOrigin string) *Hub {
 	return &Hub{
 		byUser:        make(map[string]map[*client]struct{}),
+		calls:         make(map[string]*callSession),
 		jwtSecret:     []byte(jwtSecret),
 		db:            database,
 		vapidPrivate:  vapidPrivate,
@@ -98,14 +111,15 @@ func (h *Hub) register(c *client) {
 
 func (h *Hub) unregister(c *client) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if set, ok := h.byUser[c.userID]; ok {
 		delete(set, c)
 		if len(set) == 0 {
 			delete(h.byUser, c.userID)
 		}
 	}
+	h.mu.Unlock()
 	close(c.send)
+	h.cleanupCallsForUser(c.userID)
 }
 
 // Deliver sends a JSON payload to every connection of a user.
@@ -171,6 +185,13 @@ type inMsg struct {
 
 	// type:"read"
 	MessageID string `json:"messageId"`
+
+	// type:"call_*"
+	CallID    string          `json:"callId"`
+	TargetID  string          `json:"targetId"`
+	SDP       string          `json:"sdp"`
+	IsVideo   bool            `json:"isVideo"`
+	Candidate json.RawMessage `json:"candidate"`
 }
 
 type recipient struct {
@@ -213,6 +234,16 @@ func (h *Hub) readPump(c *client) {
 			h.handleTyping(c, msg)
 		case "read":
 			h.handleRead(c, msg)
+		case "call_offer":
+			h.handleCallOffer(c, msg)
+		case "call_answer":
+			h.handleCallAnswer(c, msg)
+		case "call_end":
+			h.handleCallEnd(c, msg)
+		case "call_reject":
+			h.handleCallReject(c, msg)
+		case "ice_candidate":
+			h.handleIceCandidate(c, msg)
 		default:
 			h.errMsg(c, "unknown type: "+msg.Type)
 		}
@@ -358,6 +389,283 @@ func (h *Hub) handleRead(c *client, msg inMsg) {
 			"readAt":    now,
 		})
 		h.Deliver(m.SenderID, payload)
+	}
+}
+
+// handleCallOffer обрабатывает входящий запрос на звонок от инициатора.
+// Проверяет членство в чате, занятость цели и создаёт сессию с 30-секундным таймером.
+func (h *Hub) handleCallOffer(c *client, msg inMsg) {
+	if msg.CallID == "" || msg.TargetID == "" || msg.SDP == "" || msg.ChatID == "" {
+		h.errMsg(c, "callId, targetId, chatId and sdp required")
+		return
+	}
+	// Проверяем, что инициатор является участником чата
+	ok, err := db.IsConversationMember(h.db, msg.ChatID, c.userID)
+	if err != nil || !ok {
+		h.errMsg(c, "forbidden")
+		return
+	}
+	// Проверяем, что цель звонка также является участником чата
+	okTarget, errTarget := db.IsConversationMember(h.db, msg.ChatID, msg.TargetID)
+	if errTarget != nil || !okTarget {
+		h.errMsg(c, "forbidden")
+		return
+	}
+
+	// Создаём сессию заранее (до блокировки) — timer пока nil
+	callID := msg.CallID
+	initiatorID := c.userID
+	targetID := msg.TargetID
+	sess := &callSession{
+		callID:      callID,
+		chatID:      msg.ChatID,
+		initiatorID: initiatorID,
+		targetID:    targetID,
+		state:       "ringing",
+	}
+
+	// Проверяем занятость цели и атомарно регистрируем сессию в одном lock-блоке,
+	// чтобы исключить гонку между time.AfterFunc и вставкой в map.
+	busy := false
+	h.callsMu.Lock()
+	if _, dup := h.calls[callID]; dup {
+		busy = true
+	}
+	for _, s := range h.calls {
+		if s.initiatorID == msg.TargetID || s.targetID == msg.TargetID ||
+			s.initiatorID == c.userID || s.targetID == c.userID {
+			busy = true
+			break
+		}
+	}
+	if !busy {
+		h.calls[callID] = sess
+		sess.timer = time.AfterFunc(30*time.Second, func() {
+			h.callsMu.Lock()
+			// Проверяем состояние сессии перед действием: если сессия уже
+			// завершена или перешла в "active" (ответ поступил прямо перед
+			// срабатыванием таймера), игнорируем таймаут.
+			cur, ok := h.calls[callID]
+			if !ok || cur.state == "active" {
+				h.callsMu.Unlock()
+				return
+			}
+			delete(h.calls, callID)
+			h.callsMu.Unlock()
+			timeout, _ := json.Marshal(map[string]any{
+				"type":   "call_end",
+				"callId": callID,
+				"reason": "timeout",
+			})
+			h.Deliver(initiatorID, timeout)
+			h.Deliver(targetID, timeout)
+		})
+	}
+	h.callsMu.Unlock()
+
+	if busy {
+		busyMsg, _ := json.Marshal(map[string]any{
+			"type":   "call_busy",
+			"callId": msg.CallID,
+		})
+		h.Deliver(c.userID, busyMsg)
+		return
+	}
+
+	// Передаём offer целевому пользователю
+	offer, _ := json.Marshal(map[string]any{
+		"type":     "call_offer",
+		"callId":   callID,
+		"chatId":   msg.ChatID,
+		"callerId": initiatorID,
+		"sdp":      msg.SDP,
+		"isVideo":  msg.IsVideo,
+	})
+	h.Deliver(targetID, offer)
+}
+
+// handleCallAnswer обрабатывает ответ на звонок от целевого пользователя.
+// Останавливает таймер ожидания, переводит сессию в "active" и пересылает SDP инициатору.
+func (h *Hub) handleCallAnswer(c *client, msg inMsg) {
+	if msg.CallID == "" || msg.SDP == "" {
+		h.errMsg(c, "callId and sdp required")
+		return
+	}
+	h.callsMu.Lock()
+	sess, ok := h.calls[msg.CallID]
+	if !ok || sess.targetID != c.userID {
+		h.callsMu.Unlock()
+		h.errMsg(c, "call not found")
+		return
+	}
+	if sess.timer != nil {
+		sess.timer.Stop()
+	}
+	sess.state = "active"
+	initiatorID := sess.initiatorID
+	callID := msg.CallID
+	// Таймер максимальной длительности активного звонка (4 часа).
+	// Защищает от утечки сессии при одновременном разрыве соединений обоих участников.
+	sess.timer = time.AfterFunc(4*time.Hour, func() {
+		h.callsMu.Lock()
+		cur, ok := h.calls[callID]
+		if !ok {
+			h.callsMu.Unlock()
+			return
+		}
+		delete(h.calls, callID)
+		h.callsMu.Unlock()
+		expired, _ := json.Marshal(map[string]any{
+			"type":   "call_end",
+			"callId": callID,
+			"reason": "max_duration",
+		})
+		h.Deliver(cur.initiatorID, expired)
+		h.Deliver(cur.targetID, expired)
+	})
+	h.callsMu.Unlock()
+
+	answer, _ := json.Marshal(map[string]any{
+		"type":   "call_answer",
+		"callId": msg.CallID,
+		"sdp":    msg.SDP,
+	})
+	h.Deliver(initiatorID, answer)
+}
+
+// handleCallEnd завершает активный звонок. Уведомляет обоих участников (кроме отправителя)
+// и удаляет сессию из map.
+func (h *Hub) handleCallEnd(c *client, msg inMsg) {
+	if msg.CallID == "" {
+		h.errMsg(c, "callId required")
+		return
+	}
+	h.callsMu.Lock()
+	sess, ok := h.calls[msg.CallID]
+	if !ok {
+		h.callsMu.Unlock()
+		return
+	}
+	if sess.initiatorID != c.userID && sess.targetID != c.userID {
+		h.callsMu.Unlock()
+		h.errMsg(c, "call not found")
+		return
+	}
+	if sess.timer != nil {
+		sess.timer.Stop()
+	}
+	delete(h.calls, msg.CallID)
+	initiatorID := sess.initiatorID
+	targetID := sess.targetID
+	h.callsMu.Unlock()
+
+	end, _ := json.Marshal(map[string]any{
+		"type":   "call_end",
+		"callId": msg.CallID,
+		"reason": "hangup",
+	})
+	if c.userID != initiatorID {
+		h.Deliver(initiatorID, end)
+	}
+	if c.userID != targetID {
+		h.Deliver(targetID, end)
+	}
+}
+
+// handleCallReject обрабатывает отклонение звонка целевым пользователем.
+// Уведомляет только инициатора и удаляет сессию.
+func (h *Hub) handleCallReject(c *client, msg inMsg) {
+	if msg.CallID == "" {
+		h.errMsg(c, "callId required")
+		return
+	}
+	h.callsMu.Lock()
+	sess, ok := h.calls[msg.CallID]
+	if !ok {
+		h.callsMu.Unlock()
+		return
+	}
+	if sess.targetID != c.userID {
+		h.callsMu.Unlock()
+		h.errMsg(c, "call not found")
+		return
+	}
+	if sess.timer != nil {
+		sess.timer.Stop()
+	}
+	initiatorID := sess.initiatorID
+	delete(h.calls, msg.CallID)
+	h.callsMu.Unlock()
+
+	reject, _ := json.Marshal(map[string]any{
+		"type":   "call_reject",
+		"callId": msg.CallID,
+	})
+	h.Deliver(initiatorID, reject)
+}
+
+// handleIceCandidate ретранслирует ICE-кандидата собеседнику в звонке.
+func (h *Hub) handleIceCandidate(c *client, msg inMsg) {
+	if msg.CallID == "" || len(msg.Candidate) == 0 {
+		h.errMsg(c, "callId and candidate required")
+		return
+	}
+	h.callsMu.Lock()
+	sess, ok := h.calls[msg.CallID]
+	if !ok {
+		h.callsMu.Unlock()
+		return
+	}
+	var peerID string
+	if c.userID == sess.initiatorID {
+		peerID = sess.targetID
+	} else if c.userID == sess.targetID {
+		peerID = sess.initiatorID
+	} else {
+		h.callsMu.Unlock()
+		h.errMsg(c, "not a participant")
+		return
+	}
+	h.callsMu.Unlock()
+
+	payload, _ := json.Marshal(map[string]any{
+		"type":      "ice_candidate",
+		"callId":    msg.CallID,
+		"candidate": msg.Candidate,
+	})
+	h.Deliver(peerID, payload)
+}
+
+// cleanupCallsForUser завершает все звонки пользователя при разрыве соединения.
+func (h *Hub) cleanupCallsForUser(userID string) {
+	h.callsMu.Lock()
+	type callCleanup struct {
+		callID string
+		peerID string
+	}
+	var toClean []callCleanup
+	for id, s := range h.calls {
+		if s.initiatorID == userID || s.targetID == userID {
+			if s.timer != nil {
+				s.timer.Stop()
+			}
+			peer := s.targetID
+			if s.initiatorID != userID {
+				peer = s.initiatorID
+			}
+			toClean = append(toClean, callCleanup{callID: id, peerID: peer})
+			delete(h.calls, id)
+		}
+	}
+	h.callsMu.Unlock()
+
+	for _, cc := range toClean {
+		end, _ := json.Marshal(map[string]any{
+			"type":   "call_end",
+			"callId": cc.callID,
+			"reason": "hangup",
+		})
+		h.Deliver(cc.peerID, end)
 	}
 }
 

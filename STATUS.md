@@ -64,13 +64,16 @@ cd client && npm run dev                   # Vite dev :5173 (proxy → :8080)
 
 3. **Редактирование с E2E**: при PATCH перешифровывает для всех участников — работает только если сессия уже установлена
 
-### 🔴 Следующая сессия — ПРИОРИТЕТ
+### ✅ Реализовано в Stage 9 (WebRTC звонки)
 
-0. **Аудио и видео звонки в чатах**
-   - WebRTC peer-to-peer (или через TURN/STUN сервер)
-   - Сигнализация через WebSocket (offer/answer/ICE candidates)
-   - UI: кнопка звонка в чате, входящий звонок (модал), активный звонок (управление микрофоном/камерой)
-   - Нужны новые WS-события: `call_offer`, `call_answer`, `call_ice`, `call_end`
+0. **Аудио и видео звонки в чатах** ✅
+   - WebRTC peer-to-peer через STUN/TURN (env: STUN_URL, TURN_URL, TURN_SECRET)
+   - Сигнализация через WebSocket Hub: `call_offer`, `call_answer`, `call_end`, `call_reject`, `call_busy`, `ice_candidate`
+   - Сервер — relay only (SDP не инспектируется), сессии с 30-секундным таймаутом + 4-часовой guard активного звонка
+   - UI: `CallOverlay` (входящий / исходящий / активный), кнопки звонка в ChatWindow, Web Audio рингтон
+   - ICE-кандидаты буферизуются до `setRemoteDescription`
+
+### 🔴 Следующая сессия — ПРИОРИТЕТ
 
 ### 🟢 Желательно (улучшения)
 

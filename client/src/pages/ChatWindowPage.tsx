@@ -5,7 +5,11 @@ import { useChatStore } from '@/store/chatStore'
 import { api } from '@/api/client'
 import type { Chat } from '@/types'
 
-export default function ChatWindowPage() {
+interface Props {
+  initiateCall?: (chatId: string, targetId: string, isVideo: boolean) => void
+}
+
+export default function ChatWindowPage({ initiateCall }: Props) {
   const { chatId } = useParams<{ chatId: string }>()
   const navigate = useNavigate()
   const chat = useChatStore((s) => s.chats.find((c) => c.id === chatId))
@@ -21,5 +25,5 @@ export default function ChatWindowPage() {
 
   if (!chatId) return null
 
-  return <ChatWindow chatId={chatId} onBack={() => navigate('/')} />
+  return <ChatWindow chatId={chatId} onBack={() => navigate('/')} onCall={initiateCall} />
 }

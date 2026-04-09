@@ -4,6 +4,7 @@ import { setAccessToken, api } from '@/api/client'
 import { useChatStore } from '@/store/chatStore'
 import { useAuthStore } from '@/store/authStore'
 import { useWsStore } from '@/store/wsStore'
+import { useCallStore } from '@/store/callStore'
 import { decryptMessage, decryptGroupMessage, handleIncomingSKDM } from '@/crypto/session'
 import { appendOneTimePreKeys } from '@/crypto/keystore'
 import { generateDHKeyPair, toBase64 } from '@/crypto/x3dh'
@@ -154,6 +155,20 @@ export function useMessengerWS() {
             // Если читатель — текущий пользователь, сбрасываем счётчик непрочитанных
             if (frame.userId === currentUser?.id) {
               markRead(frame.chatId)
+            }
+            break
+          }
+
+          case 'call_offer':
+          case 'call_answer':
+          case 'call_end':
+          case 'call_reject':
+          case 'call_busy':
+          case 'ice_candidate': {
+            // Делегируем в useCallHandler через callStore._callFrameHandler
+            const handler = useCallStore.getState()._callFrameHandler
+            if (handler) {
+              handler(frame as Parameters<NonNullable<typeof handler>>[0])
             }
             break
           }

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { useChatStore } from '@/store/chatStore'
 import { useAuthStore } from '@/store/authStore'
 import { useWsStore } from '@/store/wsStore'
+import { useCallStore } from '@/store/callStore'
 import { api, uploadEncryptedMedia } from '@/api/client'
 import { encryptMessage, decryptMessage, encryptGroupMessage, decryptGroupMessage } from '@/crypto/session'
 import { loadMessages, appendMessages, saveMessages } from '@/store/messageDb'
@@ -68,9 +69,10 @@ interface MenuState {
 interface Props {
   chatId: string
   onBack: () => void
+  onCall?: (chatId: string, targetId: string, isVideo: boolean) => void
 }
 
-export default function ChatWindow({ chatId, onBack }: Props) {
+export default function ChatWindow({ chatId, onBack, onCall }: Props) {
   const chat = useChatStore((st) => st.chats.find((c) => c.id === chatId))
   const messages = useChatStore((st) => st.messages[chatId] ?? [])
   const typingUsers = useChatStore((st) => st.typingUsers[chatId] ?? [])
@@ -81,6 +83,7 @@ export default function ChatWindow({ chatId, onBack }: Props) {
   const markRead = useChatStore((st) => st.markRead)
   const currentUser = useAuthStore((st) => st.currentUser)
   const wsSend = useWsStore((st) => st.send)
+  const callStatus = useCallStore((s) => s.status)
   const [text, setText] = useState('')
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -91,6 +94,11 @@ export default function ChatWindow({ chatId, onBack }: Props) {
   const historyLoaded = useRef<Set<string>>(new Set())
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Peer ID для direct-чатов (используется кнопками звонков)
+  const peerId = chat?.type === 'direct'
+    ? (chat.members ?? []).find((id: string) => id !== currentUser?.id) ?? null
+    : null
 
   // Очередь сообщений ожидающих подключения WS
   type PendingFrame = Parameters<NonNullable<typeof wsSend>>[0]
@@ -411,6 +419,26 @@ export default function ChatWindow({ chatId, onBack }: Props) {
             <span className={s.typing}>печатает...</span>
           )}
         </div>
+        {onCall && peerId && callStatus === 'idle' && (
+          <div className={s.callBtns}>
+            <button
+              className={s.callBtn}
+              onClick={() => onCall(chatId, peerId, false)}
+              aria-label="Аудио звонок"
+              title="Аудио звонок"
+            >
+              📞
+            </button>
+            <button
+              className={s.callBtn}
+              onClick={() => onCall(chatId, peerId, true)}
+              aria-label="Видео звонок"
+              title="Видео звонок"
+            >
+              📹
+            </button>
+          </div>
+        )}
       </header>
 
       <div className={s.messages} role="log" aria-live="polite">
