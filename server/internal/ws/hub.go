@@ -516,6 +516,11 @@ func (h *Hub) handleCallEnd(c *client, msg inMsg) {
 		h.callsMu.Unlock()
 		return
 	}
+	if sess.initiatorID != c.userID && sess.targetID != c.userID {
+		h.callsMu.Unlock()
+		h.errMsg(c, "call not found")
+		return
+	}
 	if sess.timer != nil {
 		sess.timer.Stop()
 	}
@@ -548,6 +553,11 @@ func (h *Hub) handleCallReject(c *client, msg inMsg) {
 	sess, ok := h.calls[msg.CallID]
 	if !ok {
 		h.callsMu.Unlock()
+		return
+	}
+	if sess.targetID != c.userID {
+		h.callsMu.Unlock()
+		h.errMsg(c, "call not found")
 		return
 	}
 	if sess.timer != nil {

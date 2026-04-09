@@ -320,6 +320,9 @@ func TestHandleCallAnswer_RelaysToInitiator(t *testing.T) {
 	if sess == nil || sess.state != "active" {
 		t.Errorf("expected session state=active, got %v", sess)
 	}
+	if sess.timer != nil {
+		t.Error("expected timer to be nil after answer")
+	}
 }
 
 func TestHandleCallEnd_NotifiesBothParties(t *testing.T) {
