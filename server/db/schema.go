@@ -27,17 +27,8 @@ func Open(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
 
-	// Миграция для существующих БД — ошибки игнорируются (колонка уже есть)
-	for _, m := range []string{
-		`ALTER TABLE messages ADD COLUMN client_msg_id TEXT`,
-		`ALTER TABLE messages ADD COLUMN recipient_id TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE messages ADD COLUMN edited_at INTEGER`,
-		// Этап 3: device model — device_id nullable для backward compat
-		`ALTER TABLE identity_keys ADD COLUMN device_id TEXT`,
-		`ALTER TABLE pre_keys ADD COLUMN device_id TEXT`,
-	} {
-		db.Exec(m) //nolint:errcheck
+	if err := RunMigrations(db); err != nil {
+		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
 	return db, nil
