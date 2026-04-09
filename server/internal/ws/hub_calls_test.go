@@ -69,3 +69,79 @@ func stopAllTimers(h *Hub) {
 		}
 	}
 }
+
+func TestHandleCallOffer_RelaysToTarget(t *testing.T) {
+	h := setupTestHub(t)
+	t.Cleanup(func() { stopAllTimers(h) })
+	setupConversation(t, h.db, "chat1", []string{"alice", "bob"})
+
+	aliceCh, aliceClient := addMockClient(h, "alice")
+	bobCh, _ := addMockClient(h, "bob")
+
+	h.handleCallOffer(aliceClient, inMsg{
+		Type:     "call_offer",
+		CallID:   "call-1",
+		ChatID:   "chat1",
+		TargetID: "bob",
+		SDP:      "sdp-offer",
+		IsVideo:  true,
+	})
+
+	// alice не должна получить ничего
+	if f := readFrame(aliceCh); f != nil {
+		t.Errorf("alice should not receive frame, got %v", f)
+	}
+
+	// bob должен получить call_offer
+	f := readFrame(bobCh)
+	if f == nil {
+		t.Fatal("bob did not receive call_offer")
+	}
+	if f["type"] != "call_offer" {
+		t.Errorf("expected call_offer, got %v", f["type"])
+	}
+	if f["callerId"] != "alice" {
+		t.Errorf("expected callerId=alice, got %v", f["callerId"])
+	}
+	if f["isVideo"] != true {
+		t.Errorf("expected isVideo=true, got %v", f["isVideo"])
+	}
+}
+
+func TestHandleCallOffer_BusyTarget(t *testing.T) {
+	h := setupTestHub(t)
+	t.Cleanup(func() { stopAllTimers(h) })
+	setupConversation(t, h.db, "chat1", []string{"alice", "bob"})
+	setupConversation(t, h.db, "chat2", []string{"carol", "bob"})
+
+	aliceCh, aliceClient := addMockClient(h, "alice")
+	_, _ = addMockClient(h, "bob")
+
+	// bob уже в звонке с carol
+	h.callsMu.Lock()
+	h.calls["existing"] = &callSession{
+		callID:      "existing",
+		chatID:      "chat2",
+		initiatorID: "carol",
+		targetID:    "bob",
+		state:       "ringing",
+		timer:       time.AfterFunc(30*time.Second, func() {}),
+	}
+	h.callsMu.Unlock()
+
+	h.handleCallOffer(aliceClient, inMsg{
+		Type:     "call_offer",
+		CallID:   "call-2",
+		ChatID:   "chat1",
+		TargetID: "bob",
+		SDP:      "sdp",
+	})
+
+	f := readFrame(aliceCh)
+	if f == nil {
+		t.Fatal("alice should receive call_busy")
+	}
+	if f["type"] != "call_busy" {
+		t.Errorf("expected call_busy, got %v", f["type"])
+	}
+}

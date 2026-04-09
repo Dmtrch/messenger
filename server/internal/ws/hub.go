@@ -381,6 +381,72 @@ func (h *Hub) handleRead(c *client, msg inMsg) {
 	}
 }
 
+// handleCallOffer обрабатывает входящий запрос на звонок от инициатора.
+// Проверяет членство в чате, занятость цели и создаёт сессию с 30-секундным таймером.
+func (h *Hub) handleCallOffer(c *client, msg inMsg) {
+	if msg.CallID == "" || msg.TargetID == "" || msg.SDP == "" || msg.ChatID == "" {
+		h.errMsg(c, "callId, targetId, chatId and sdp required")
+		return
+	}
+	// Проверяем, что инициатор является участником чата
+	ok, err := db.IsConversationMember(h.db, msg.ChatID, c.userID)
+	if err != nil || !ok {
+		h.errMsg(c, "forbidden")
+		return
+	}
+
+	// Проверяем, не занят ли целевой пользователь в другом звонке
+	h.callsMu.Lock()
+	for _, s := range h.calls {
+		if s.initiatorID == msg.TargetID || s.targetID == msg.TargetID {
+			h.callsMu.Unlock()
+			busy, _ := json.Marshal(map[string]any{
+				"type":   "call_busy",
+				"callId": msg.CallID,
+			})
+			h.Deliver(c.userID, busy)
+			return
+		}
+	}
+
+	// Создаём сессию и запускаем 30-секундный таймер ожидания ответа
+	callID := msg.CallID
+	initiatorID := c.userID
+	targetID := msg.TargetID
+	sess := &callSession{
+		callID:      callID,
+		chatID:      msg.ChatID,
+		initiatorID: initiatorID,
+		targetID:    targetID,
+		state:       "ringing",
+	}
+	sess.timer = time.AfterFunc(30*time.Second, func() {
+		h.callsMu.Lock()
+		delete(h.calls, callID)
+		h.callsMu.Unlock()
+		timeout, _ := json.Marshal(map[string]any{
+			"type":   "call_end",
+			"callId": callID,
+			"reason": "timeout",
+		})
+		h.Deliver(initiatorID, timeout)
+		h.Deliver(targetID, timeout)
+	})
+	h.calls[callID] = sess
+	h.callsMu.Unlock()
+
+	// Передаём offer целевому пользователю
+	offer, _ := json.Marshal(map[string]any{
+		"type":     "call_offer",
+		"callId":   callID,
+		"chatId":   msg.ChatID,
+		"callerId": initiatorID,
+		"sdp":      msg.SDP,
+		"isVideo":  msg.IsVideo,
+	})
+	h.Deliver(targetID, offer)
+}
+
 func (h *Hub) errMsg(c *client, reason string) {
 	b, _ := json.Marshal(map[string]string{"type": "error", "error": reason})
 	select {
