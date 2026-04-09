@@ -585,3 +585,43 @@ func TestHandleCallOffer_TargetNotMember(t *testing.T) {
 		t.Error("call-x session should NOT be stored when target is not a chat member")
 	}
 }
+
+func TestHandleIceCandidate_RejectsThirdParty(t *testing.T) {
+	h := setupTestHub(t)
+	t.Cleanup(func() { stopAllTimers(h) })
+
+	aliceCh, _ := addMockClient(h, "alice")
+	bobCh, _ := addMockClient(h, "bob")
+	carolCh, carolClient := addMockClient(h, "carol")
+
+	h.callsMu.Lock()
+	h.calls["call-1"] = &callSession{
+		callID:      "call-1",
+		chatID:      "chat1",
+		initiatorID: "alice",
+		targetID:    "bob",
+		state:       "active",
+	}
+	h.callsMu.Unlock()
+
+	candidate := json.RawMessage(`{"candidate":"x"}`)
+	h.handleIceCandidate(carolClient, inMsg{
+		Type:      "ice_candidate",
+		CallID:    "call-1",
+		Candidate: candidate,
+	})
+
+	// carol должна получить ошибку
+	f := readFrame(carolCh)
+	if f == nil || f["type"] != "error" {
+		t.Errorf("carol should receive error, got %v", f)
+	}
+
+	// alice и bob не должны ничего получить
+	if f := readFrame(aliceCh); f != nil {
+		t.Errorf("alice should not receive candidate, got %v", f)
+	}
+	if f := readFrame(bobCh); f != nil {
+		t.Errorf("bob should not receive candidate, got %v", f)
+	}
+}

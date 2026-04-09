@@ -597,9 +597,15 @@ func (h *Hub) handleIceCandidate(c *client, msg inMsg) {
 		h.callsMu.Unlock()
 		return
 	}
-	peerID := sess.initiatorID
+	var peerID string
 	if c.userID == sess.initiatorID {
 		peerID = sess.targetID
+	} else if c.userID == sess.targetID {
+		peerID = sess.initiatorID
+	} else {
+		h.callsMu.Unlock()
+		h.errMsg(c, "not a participant")
+		return
 	}
 	h.callsMu.Unlock()
 
