@@ -22,6 +22,10 @@ type iceServerEntry struct {
 func iceServersHandler(stunURL, turnURL, turnSecret string, ttl int64) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := auth.UserIDFromCtx(r)
+		if userID == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		servers := []iceServerEntry{{URLs: stunURL}}
 		if turnURL != "" && turnSecret != "" {
 			username, credential := generateTurnCredentials(turnSecret, userID, ttl)
@@ -32,6 +36,7 @@ func iceServersHandler(stunURL, turnURL, turnSecret string, ttl int64) http.Hand
 			})
 		}
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]any{"iceServers": servers}) //nolint:errcheck
 	}
 }
