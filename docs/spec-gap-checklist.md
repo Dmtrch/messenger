@@ -6,9 +6,9 @@
 
 - [ ] Ввести полноценную multi-device модель
 - [ ] Реализовать `POST /api/keys/register`
-- [ ] Реализовать Sender Keys для групп
-- [ ] Добавить skipped message keys в Double Ratchet
-- [ ] Реализовать encrypted media at rest
+- [x] Реализовать Sender Keys для групп
+- [x] Добавить skipped message keys в Double Ratchet
+- [x] Реализовать encrypted media at rest
 - [x] Защитить `GET /api/media/:id` через JWT
 - [x] Перейти с `filename` на `mediaId`
 - [ ] Довести delivery/read receipts до полного realtime-цикла
