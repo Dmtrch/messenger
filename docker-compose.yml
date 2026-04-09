@@ -1,4 +1,5 @@
 version: '3.8'
+
 services:
   messenger:
     build:
@@ -11,12 +12,42 @@ services:
     environment:
       PORT: "8080"
       DB_PATH: /data/messenger.db
-      JWT_SECRET: ${JWT_SECRET:-change-this-secret-in-production}
       MEDIA_DIR: /data/media
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      # Прямой TLS (оставьте пустым при использовании Cloudflare Tunnel)
+      TLS_CERT: ${TLS_CERT:-}
+      TLS_KEY: ${TLS_KEY:-}
+      # WebRTC
+      STUN_URL: ${STUN_URL:-stun:stun.l.google.com:19302}
+      TURN_URL: ${TURN_URL:-}
+      TURN_SECRET: ${TURN_SECRET:-}
+      TURN_CREDENTIAL_TTL: ${TURN_CREDENTIAL_TTL:-86400}
     volumes:
       - messenger_data:/data
+    networks:
+      - messenger_net
+
+  # Cloudflare Tunnel (опционально)
+  # Запуск: docker compose --profile cloudflare up -d
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN is required for cloudflare profile}
+    depends_on:
+      - messenger
+    networks:
+      - messenger_net
+    profiles:
+      - cloudflare
+
+networks:
+  messenger_net:
+    driver: bridge
 
 volumes:
   messenger_data:
