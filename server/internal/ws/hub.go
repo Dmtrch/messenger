@@ -396,6 +396,12 @@ func (h *Hub) handleCallOffer(c *client, msg inMsg) {
 		h.errMsg(c, "forbidden")
 		return
 	}
+	// Проверяем, что цель звонка также является участником чата
+	okTarget, errTarget := db.IsConversationMember(h.db, msg.ChatID, msg.TargetID)
+	if errTarget != nil || !okTarget {
+		h.errMsg(c, "forbidden")
+		return
+	}
 
 	// Создаём сессию заранее (до блокировки) — timer пока nil
 	callID := msg.CallID

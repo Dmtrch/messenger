@@ -276,3 +276,39 @@ func TestHandleCallOffer_InitiatorAlreadyInCall(t *testing.T) {
 	h.callsMu.Unlock()
 	existingTimer.Stop()
 }
+
+func TestHandleCallOffer_TargetNotMember(t *testing.T) {
+	h := setupTestHub(t)
+	t.Cleanup(func() { stopAllTimers(h) })
+	// chat1 содержит только alice — bob НЕ является участником
+	setupConversation(t, h.db, "chat1", []string{"alice"})
+
+	aliceCh, aliceClient := addMockClient(h, "alice")
+	_, _ = addMockClient(h, "bob")
+
+	// alice пытается позвонить bob в чате, где bob не состоит
+	h.handleCallOffer(aliceClient, inMsg{
+		Type:     "call_offer",
+		CallID:   "call-x",
+		ChatID:   "chat1",
+		TargetID: "bob",
+		SDP:      "sdp-offer",
+	})
+
+	f := readFrame(aliceCh)
+	if f == nil {
+		t.Fatal("alice should receive an error frame")
+	}
+	tp, _ := f["type"].(string)
+	if tp != "error" {
+		t.Errorf("expected type=error, got %v", tp)
+	}
+
+	// Сессия не должна быть сохранена
+	h.callsMu.Lock()
+	_, stored := h.calls["call-x"]
+	h.callsMu.Unlock()
+	if stored {
+		t.Error("call-x session should NOT be stored when target is not a chat member")
+	}
+}
