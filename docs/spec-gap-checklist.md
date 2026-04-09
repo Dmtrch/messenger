@@ -62,7 +62,7 @@
 ### Этап 3 — Device model (архитектурный пропуск)
 
 - [x] **identity_keys — PK по user_id, не по device_id**: migration #7 пересоздаёт таблицу с PK `(user_id, device_id)`; schema.go обновлён для свежих установок; `UpsertIdentityKey` переключён на `ON CONFLICT(user_id, device_id)`
-- [ ] **PopPreKey не учитывает device_id**: `SELECT ... WHERE user_id=?` смешивает ключи всех устройств одного пользователя — получатель может получить OPK не от того устройства
+- [x] **PopPreKey не учитывает device_id**: `PopPreKey(userID, deviceID)` фильтрует `WHERE user_id=? AND device_id=?`; `GetBundle` передаёт `ik.DeviceID`; WS hub передаёт `""` для суммарного подсчёта
 - [ ] **POST /api/keys/register не идемпотентен**: каждый вход создаёт новое устройство — нужен device fingerprint или проверка существующего устройства
 
 ### Этап 4 — Message state (пропуски в UI)
