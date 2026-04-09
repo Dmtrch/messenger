@@ -60,9 +60,20 @@ export type WSFrame =
   | { type: 'message_deleted'; chatId: string; clientMsgId: string }
   | { type: 'message_edited'; chatId: string; clientMsgId: string; ciphertext: string; editedAt: number }
   | { type: 'skdm'; chatId: string; senderId: string; ciphertext: string }
+  | { type: 'call_offer';    callId: string; chatId: string; callerId: string; sdp: string; isVideo: boolean }
+  | { type: 'call_answer';   callId: string; sdp: string }
+  | { type: 'call_end';      callId: string; reason?: 'timeout' | 'rejected' | 'hangup' }
+  | { type: 'call_reject';   callId: string }
+  | { type: 'call_busy';     callId: string }
+  | { type: 'ice_candidate'; callId: string; candidate: RTCIceCandidateInit }
 
 export type WSSendFrame =
   | { type: 'message'; chatId: string; clientMsgId: string; senderKeyId: number; recipients: Array<{ userId: string; ciphertext: string }> }
   | { type: 'skdm'; chatId: string; recipients: Array<{ userId: string; ciphertext: string }> }
   | { type: 'typing'; chatId: string }
   | { type: 'read'; chatId: string; messageId: string }
+  | { type: 'call_offer';    callId: string; chatId: string; targetId: string; sdp: string; isVideo: boolean }
+  | { type: 'call_answer';   callId: string; sdp: string }
+  | { type: 'call_end';      callId: string }
+  | { type: 'call_reject';   callId: string }
+  | { type: 'ice_candidate'; callId: string; candidate: RTCIceCandidateInit }
