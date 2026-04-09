@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { useChatStore } from '@/store/chatStore'
 import { useAuthStore } from '@/store/authStore'
 import { useWsStore } from '@/store/wsStore'
+import { useCallStore } from '@/store/callStore'
 import { api, uploadEncryptedMedia } from '@/api/client'
 import { encryptMessage, decryptMessage, encryptGroupMessage, decryptGroupMessage } from '@/crypto/session'
 import { loadMessages, appendMessages, saveMessages } from '@/store/messageDb'
@@ -82,6 +83,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
   const markRead = useChatStore((st) => st.markRead)
   const currentUser = useAuthStore((st) => st.currentUser)
   const wsSend = useWsStore((st) => st.send)
+  const callStatus = useCallStore((s) => s.status)
   const [text, setText] = useState('')
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -417,7 +419,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
             <span className={s.typing}>печатает...</span>
           )}
         </div>
-        {onCall && peerId && (
+        {onCall && peerId && callStatus === 'idle' && (
           <div className={s.callBtns}>
             <button
               className={s.callBtn}

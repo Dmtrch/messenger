@@ -47,6 +47,13 @@ interface CallState {
    */
   _callFrameHandler: ((frame: CallWSFrame) => void) | null
   setCallFrameHandler: (fn: ((frame: CallWSFrame) => void) | null) => void
+
+  /**
+   * Устанавливается useCallHandler при монтировании.
+   * ChatWindowPage вызывает эту функцию для инициирования звонка.
+   */
+  _initiateCall: ((chatId: string, targetId: string, isVideo: boolean) => void) | null
+  setInitiateCall: (fn: ((chatId: string, targetId: string, isVideo: boolean) => void) | null) => void
 }
 
 const emptyState = {
@@ -98,4 +105,7 @@ export const useCallStore = create<CallState>((set) => ({
   }),
 
   setCallFrameHandler: (fn) => set({ _callFrameHandler: fn }),
+
+  _initiateCall: null,
+  setInitiateCall: (fn) => set({ _initiateCall: fn }),
 }))

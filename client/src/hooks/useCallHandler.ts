@@ -19,6 +19,7 @@ export interface CallActions {
 export function useCallHandler(): CallActions {
   const webRTC = useWebRTC()
   const setCallFrameHandler = useCallStore((s) => s.setCallFrameHandler)
+  const setInitiateCall = useCallStore((s) => s.setInitiateCall)
   const setIncoming = useCallStore((s) => s.setIncoming)
   const setNotification = useCallStore((s) => s.setNotification)
   const send = useWsStore((s) => s.send)
@@ -82,6 +83,12 @@ export function useCallHandler(): CallActions {
       useCallStore.getState().reset()
     })
   }, [webRTC])
+
+  // Регистрируем initiateCall в store, чтобы AppRoutes мог получить его без дублирования хука
+  useEffect(() => {
+    setInitiateCall(initiateCall)
+    return () => setInitiateCall(null)
+  }, [initiateCall, setInitiateCall])
 
   const acceptCall = useCallback(() => {
     const { incomingOffer } = useCallStore.getState()
