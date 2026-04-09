@@ -98,13 +98,16 @@ CREATE INDEX IF NOT EXISTS idx_messages_conv_time
     ON messages(conversation_id, created_at DESC);
 
 -- Signal Protocol key material (public keys only)
+-- PK составной (user_id, device_id) для поддержки multi-device модели
 CREATE TABLE IF NOT EXISTS identity_keys (
-    user_id       TEXT PRIMARY KEY,
+    user_id       TEXT NOT NULL,
+    device_id     TEXT NOT NULL DEFAULT '',
     ik_public     BLOB NOT NULL,
     spk_public    BLOB NOT NULL,
     spk_signature BLOB NOT NULL,
     spk_id        INTEGER NOT NULL,
     updated_at    INTEGER NOT NULL,
+    PRIMARY KEY (user_id, device_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 

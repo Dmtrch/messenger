@@ -8,20 +8,43 @@ import (
 )
 
 // Migration описывает одну версионированную миграцию схемы БД.
+// Если заполнен Steps, все шаги выполняются в одной транзакции (для DDL из нескольких операторов).
+// Иначе используется единственный оператор SQL.
 type Migration struct {
-	ID  int
-	SQL string
+	ID    int
+	SQL   string
+	Steps []string
 }
 
 // migrations — список всех миграций в порядке применения.
 // Для добавления новой: append с следующим ID.
 var migrations = []Migration{
-	{1, `ALTER TABLE messages ADD COLUMN client_msg_id TEXT`},
-	{2, `ALTER TABLE messages ADD COLUMN recipient_id TEXT NOT NULL DEFAULT ''`},
-	{3, `ALTER TABLE messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`},
-	{4, `ALTER TABLE messages ADD COLUMN edited_at INTEGER`},
-	{5, `ALTER TABLE identity_keys ADD COLUMN device_id TEXT`},
-	{6, `ALTER TABLE pre_keys ADD COLUMN device_id TEXT`},
+	{ID: 1, SQL: `ALTER TABLE messages ADD COLUMN client_msg_id TEXT`},
+	{ID: 2, SQL: `ALTER TABLE messages ADD COLUMN recipient_id TEXT NOT NULL DEFAULT ''`},
+	{ID: 3, SQL: `ALTER TABLE messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`},
+	{ID: 4, SQL: `ALTER TABLE messages ADD COLUMN edited_at INTEGER`},
+	{ID: 5, SQL: `ALTER TABLE identity_keys ADD COLUMN device_id TEXT`},
+	{ID: 6, SQL: `ALTER TABLE pre_keys ADD COLUMN device_id TEXT`},
+	// Migration 7: меняем PK identity_keys с user_id на (user_id, device_id).
+	// SQLite не поддерживает ALTER TABLE для смены PK — пересоздаём таблицу.
+	{ID: 7, Steps: []string{
+		`CREATE TABLE identity_keys_new (
+			user_id       TEXT NOT NULL,
+			device_id     TEXT NOT NULL DEFAULT '',
+			ik_public     BLOB NOT NULL,
+			spk_public    BLOB NOT NULL,
+			spk_signature BLOB NOT NULL,
+			spk_id        INTEGER NOT NULL,
+			updated_at    INTEGER NOT NULL,
+			PRIMARY KEY (user_id, device_id),
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		)`,
+		`INSERT INTO identity_keys_new
+			SELECT user_id, COALESCE(device_id,''), ik_public, spk_public, spk_signature, spk_id, updated_at
+			FROM identity_keys`,
+		`DROP TABLE identity_keys`,
+		`ALTER TABLE identity_keys_new RENAME TO identity_keys`,
+	}},
 }
 
 // RunMigrations создаёт таблицу schema_migrations и применяет все
@@ -63,10 +86,22 @@ func RunMigrations(db *sql.DB) error {
 			return fmt.Errorf("begin migration %d: %w", m.ID, err)
 		}
 
-		if _, err := tx.Exec(m.SQL); err != nil {
+		// Выполняем один оператор SQL или несколько шагов (Steps)
+		stmts := m.Steps
+		if len(stmts) == 0 {
+			stmts = []string{m.SQL}
+		}
+		var execErr error
+		for _, stmt := range stmts {
+			if _, err := tx.Exec(stmt); err != nil {
+				execErr = err
+				break
+			}
+		}
+		if execErr != nil {
 			_ = tx.Rollback()
 			// Идемпотентность: свежие установки уже содержат колонки в schema
-			if strings.Contains(err.Error(), "duplicate column name") {
+			if strings.Contains(execErr.Error(), "duplicate column name") {
 				// tx уже откатана выше; INSERT записываем вне транзакции
 				if _, err2 := db.Exec(
 					`INSERT INTO schema_migrations(id, applied_at) VALUES(?, ?)`,
@@ -76,7 +111,7 @@ func RunMigrations(db *sql.DB) error {
 				}
 				continue
 			}
-			return fmt.Errorf("migration %d: %w", m.ID, err)
+			return fmt.Errorf("migration %d: %w", m.ID, execErr)
 		}
 
 		if _, err := tx.Exec(

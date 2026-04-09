@@ -490,8 +490,7 @@ func UpsertIdentityKey(db *sql.DB, k IdentityKey) error {
 	_, err := db.Exec(`
 		INSERT INTO identity_keys (user_id, device_id, ik_public, spk_public, spk_signature, spk_id, updated_at)
 		VALUES (?,?,?,?,?,?,?)
-		ON CONFLICT(user_id) DO UPDATE SET
-			device_id=excluded.device_id,
+		ON CONFLICT(user_id, device_id) DO UPDATE SET
 			ik_public=excluded.ik_public,
 			spk_public=excluded.spk_public,
 			spk_signature=excluded.spk_signature,
