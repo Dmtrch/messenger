@@ -34,10 +34,11 @@ func SecurityHeaders(isHTTPS bool) func(http.Handler) http.Handler {
 
 // RateLimiter — простой in-memory per-IP ограничитель на основе sliding window.
 type RateLimiter struct {
-	mu      sync.Mutex
-	entries map[string]*rlEntry
-	limit   int
-	window  time.Duration
+	mu          sync.Mutex
+	entries     map[string]*rlEntry
+	limit       int
+	window      time.Duration
+	behindProxy bool // доверять X-Real-IP / X-Forwarded-For только если true
 }
 
 type rlEntry struct {
@@ -46,11 +47,13 @@ type rlEntry struct {
 }
 
 // NewRateLimiter создаёт лимитер: limit запросов за window.
-func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
+// behindProxy=true: доверять прокси-заголовкам для определения реального IP.
+func NewRateLimiter(limit int, window time.Duration, behindProxy bool) *RateLimiter {
 	rl := &RateLimiter{
-		entries: make(map[string]*rlEntry),
-		limit:   limit,
-		window:  window,
+		entries:     make(map[string]*rlEntry),
+		limit:       limit,
+		window:      window,
+		behindProxy: behindProxy,
 	}
 	go rl.cleanupLoop()
 	return rl
@@ -76,7 +79,7 @@ func (rl *RateLimiter) Allow(ip string) bool {
 func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !rl.Allow(realIP(r)) {
+			if !rl.Allow(realIP(r, rl.behindProxy)) {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Retry-After", "60")
 				w.WriteHeader(http.StatusTooManyRequests)
@@ -103,17 +106,20 @@ func (rl *RateLimiter) cleanupLoop() {
 	}
 }
 
-// realIP извлекает IP клиента. Доверяет X-Real-IP / X-Forwarded-For только
-// если сервер стоит за доверенным reverse proxy (Cloudflare, nginx).
-func realIP(r *http.Request) string {
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return strings.TrimSpace(ip)
-	}
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		if idx := strings.IndexByte(fwd, ','); idx != -1 {
-			return strings.TrimSpace(fwd[:idx])
+// realIP извлекает IP клиента.
+// Прокси-заголовки X-Real-IP / X-Forwarded-For читаются только при behindProxy=true —
+// иначе они могут быть подделаны клиентом для обхода rate limiting.
+func realIP(r *http.Request, behindProxy bool) string {
+	if behindProxy {
+		if ip := r.Header.Get("X-Real-IP"); ip != "" {
+			return strings.TrimSpace(ip)
 		}
-		return strings.TrimSpace(fwd)
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			if idx := strings.IndexByte(fwd, ','); idx != -1 {
+				return strings.TrimSpace(fwd[:idx])
+			}
+			return strings.TrimSpace(fwd)
+		}
 	}
 	// RemoteAddr имеет вид "ip:port"
 	addr := r.RemoteAddr

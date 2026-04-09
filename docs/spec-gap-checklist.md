@@ -52,7 +52,7 @@
 
 - [x] **CSP совместимость с production bundle**: `script-src 'self'` установлен в security.go; Vite production build совместим
 - [x] **HSTS за Cloudflare Tunnel**: добавлен `BEHIND_PROXY=true` — при установке выставляет HSTS без локальных TLS-сертификатов
-- [ ] **realIP доверяет X-Real-IP без whitelist proxy**: при прямом доступе к серверу заголовок подделывается — зафиксировать в документации или ограничить
+- [x] **realIP доверяет прокси-заголовкам только при BEHIND_PROXY=true**: при прямом доступе всегда используется RemoteAddr
 
 ### Этап 2 — Media (есть функциональный пропуск)
 

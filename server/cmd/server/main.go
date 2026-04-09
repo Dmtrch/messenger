@@ -89,7 +89,7 @@ func main() {
 	pushHandler := &push.Handler{DB: database, VAPIDPublic: vapidPublic, VAPIDPrivate: vapidPrivate}
 
 	// Rate limiter для auth endpoints: 20 запросов в минуту с одного IP
-	authLimiter := secmw.NewRateLimiter(20, time.Minute)
+	authLimiter := secmw.NewRateLimiter(20, time.Minute, behindProxy)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
