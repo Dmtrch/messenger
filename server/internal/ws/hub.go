@@ -31,6 +31,18 @@ type Hub struct {
 	vapidPrivate  string
 	vapidPublic   string
 	allowedOrigin string // пустая строка = любой origin (dev-режим)
+	calls         map[string]*callSession // callID → активная сессия звонка
+	callsMu       sync.Mutex
+}
+
+// callSession хранит состояние 1-на-1 звонка между двумя пользователями.
+type callSession struct {
+	callID      string
+	chatID      string
+	initiatorID string
+	targetID    string
+	state       string // "ringing" | "active"
+	timer       *time.Timer
 }
 
 // NewHub создаёт Hub. allowedOrigin — разрешённый Origin заголовок для WS,
@@ -38,6 +50,7 @@ type Hub struct {
 func NewHub(jwtSecret string, database *sql.DB, vapidPrivate, vapidPublic, allowedOrigin string) *Hub {
 	return &Hub{
 		byUser:        make(map[string]map[*client]struct{}),
+		calls:         make(map[string]*callSession),
 		jwtSecret:     []byte(jwtSecret),
 		db:            database,
 		vapidPrivate:  vapidPrivate,
@@ -171,6 +184,13 @@ type inMsg struct {
 
 	// type:"read"
 	MessageID string `json:"messageId"`
+
+	// type:"call_*"
+	CallID    string          `json:"callId"`
+	TargetID  string          `json:"targetId"`
+	SDP       string          `json:"sdp"`
+	IsVideo   bool            `json:"isVideo"`
+	Candidate json.RawMessage `json:"candidate"`
 }
 
 type recipient struct {
