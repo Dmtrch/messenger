@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,6 +61,15 @@ func main() {
 		}
 	}
 
+	stunURL    := getenv("STUN_URL", "stun:stun.l.google.com:19302")
+	turnURL    := getenv("TURN_URL", "")
+	turnSecret := getenv("TURN_SECRET", "")
+	turnTTLStr := getenv("TURN_CREDENTIAL_TTL", "86400")
+	turnTTL    := int64(86400)
+	if v, err := strconv.ParseInt(turnTTLStr, 10, 64); err == nil {
+		turnTTL = v
+	}
+
 	database, err := db.Open(dbPath)
 	if err != nil {
 		log.Fatalf("open db: %v", err)
@@ -112,6 +122,8 @@ func main() {
 
 			r.Post("/media/upload", mediaHandler.Upload)
 			r.Get("/media/{id}", mediaHandler.Serve)
+
+			r.Get("/calls/ice-servers", iceServersHandler(stunURL, turnURL, turnSecret, turnTTL))
 		})
 	})
 
