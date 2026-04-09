@@ -67,6 +67,7 @@ func RunMigrations(db *sql.DB) error {
 			_ = tx.Rollback()
 			// Идемпотентность: свежие установки уже содержат колонки в schema
 			if strings.Contains(err.Error(), "duplicate column name") {
+				// tx уже откатана выше; INSERT записываем вне транзакции
 				if _, err2 := db.Exec(
 					`INSERT INTO schema_migrations(id, applied_at) VALUES(?, ?)`,
 					m.ID, time.Now().Unix(),
@@ -82,6 +83,7 @@ func RunMigrations(db *sql.DB) error {
 			`INSERT INTO schema_migrations(id, applied_at) VALUES(?, ?)`,
 			m.ID, time.Now().Unix(),
 		); err != nil {
+			// Откатываем транзакцию при ошибке INSERT
 			_ = tx.Rollback()
 			return fmt.Errorf("record migration %d: %w", m.ID, err)
 		}
