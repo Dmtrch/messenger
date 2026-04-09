@@ -29,6 +29,7 @@ export interface Message {
   // Декодированные поля — только в памяти, не хранятся на сервере
   text?: string
   mediaId?: string
+  mediaKey?: string    // base64, ключ расшифровки медиафайла (из E2E payload)
   originalName?: string
   timestamp: number
   status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
@@ -54,11 +55,14 @@ export type WSFrame =
   | { type: 'typing'; chatId: string; userId: string }
   | { type: 'presence'; userId: string; status: 'online' | 'offline' }
   | { type: 'prekey_request' }
+  | { type: 'prekey_low'; count: number }
   | { type: 'read'; chatId: string; messageId: string; userId: string }
   | { type: 'message_deleted'; chatId: string; clientMsgId: string }
   | { type: 'message_edited'; chatId: string; clientMsgId: string; ciphertext: string; editedAt: number }
+  | { type: 'skdm'; chatId: string; senderId: string; ciphertext: string }
 
 export type WSSendFrame =
   | { type: 'message'; chatId: string; clientMsgId: string; senderKeyId: number; recipients: Array<{ userId: string; ciphertext: string }> }
+  | { type: 'skdm'; chatId: string; recipients: Array<{ userId: string; ciphertext: string }> }
   | { type: 'typing'; chatId: string }
   | { type: 'read'; chatId: string; messageId: string }

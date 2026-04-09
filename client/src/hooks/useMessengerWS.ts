@@ -4,17 +4,27 @@ import { setAccessToken, api } from '@/api/client'
 import { useChatStore } from '@/store/chatStore'
 import { useAuthStore } from '@/store/authStore'
 import { useWsStore } from '@/store/wsStore'
-import { decryptMessage } from '@/crypto/session'
+import { decryptMessage, decryptGroupMessage, handleIncomingSKDM } from '@/crypto/session'
+import { appendOneTimePreKeys } from '@/crypto/keystore'
+import { generateDHKeyPair, toBase64 } from '@/crypto/x3dh'
 import type { Chat, Message, WSFrame } from '@/types'
 
+/** Генерирует 20 новых OPK, сохраняет в keystore и загружает на сервер */
+async function replenishPreKeys(): Promise<void> {
+  const rawKeys = Array.from({ length: 20 }, () => generateDHKeyPair())
+  const saved = await appendOneTimePreKeys(rawKeys)
+  await api.uploadPreKeys(saved.map((k) => ({ id: k.id, key: toBase64(k.publicKey) })))
+}
+
 /** Разбирает расшифрованный payload — текст или медиа-JSON */
-function parsePayload(raw: string): Pick<Message, 'text' | 'mediaId' | 'originalName' | 'type'> {
+function parsePayload(raw: string): Pick<Message, 'text' | 'mediaId' | 'mediaKey' | 'originalName' | 'type'> {
   try {
     const obj = JSON.parse(raw) as Record<string, unknown>
     if (obj && typeof obj.mediaId === 'string') {
       return {
         type: (obj.mediaType as Message['type']) ?? 'file',
         mediaId: obj.mediaId,
+        mediaKey: typeof obj.mediaKey === 'string' ? obj.mediaKey : undefined,
         originalName: typeof obj.originalName === 'string' ? obj.originalName : undefined,
         text: typeof obj.text === 'string' ? obj.text : undefined,
       }
@@ -55,8 +65,14 @@ export function useMessengerWS() {
             )
             if (existingMsg) break
 
-            // Расшифровываем асинхронно, потом обновляем стор
-            decryptMessage(chatId, senderId, ciphertext)
+            // Определяем тип шифрования и расшифровываем
+            const isGroupPayload = (() => {
+              try { return JSON.parse(atob(ciphertext))?.type === 'group' } catch { return false }
+            })()
+            const decryptOp = isGroupPayload
+              ? decryptGroupMessage(chatId, senderId, ciphertext)
+              : decryptMessage(chatId, senderId, ciphertext)
+            decryptOp
               .then((raw) => {
                 const parsed = parsePayload(raw)
                 addMessage({
@@ -68,7 +84,7 @@ export function useMessengerWS() {
               .catch(() => {
                 addMessage({
                   id: messageId, clientMsgId, chatId, senderId,
-                  encryptedPayload: ciphertext, senderKeyId,
+                  encryptedPayload: ciphertext, senderKeyId: senderKeyId ?? 0,
                   timestamp, status: 'delivered', type: 'text',
                   text: '[зашифровано]',
                 })
@@ -107,8 +123,25 @@ export function useMessengerWS() {
           case 'presence':
             break
 
+          case 'skdm': {
+            // Входящий Sender Key Distribution Message — сохраняем ключ отправителя
+            const { chatId, senderId, ciphertext } = frame
+            handleIncomingSKDM(chatId, senderId, ciphertext).catch((e) =>
+              console.error('SKDM processing failed', e)
+            )
+            break
+          }
+
           case 'prekey_request':
             break
+
+          case 'prekey_low': {
+            // Пополняем одноразовые ключи: генерируем 20 новых и загружаем на сервер
+            replenishPreKeys().catch((e) =>
+              console.error('prekey replenish failed', e)
+            )
+            break
+          }
 
           case 'read':
             updateMessageStatus(frame.chatId, frame.messageId, 'read')

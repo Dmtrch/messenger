@@ -82,6 +82,8 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	c := &client{userID: userID, conn: conn, send: make(chan []byte, 256)}
 	h.register(c)
 	go c.writePump(h)
+	// Проверяем запас одноразовых ключей — уведомляем если мало
+	go h.checkAndNotifyPrekeys(userID)
 	h.readPump(c)
 }
 
@@ -138,10 +140,22 @@ func (h *Hub) BroadcastToConversation(convID string, payload []byte) {
 	}
 }
 
-// NotifyPreKeyLow sends a prekey_request event to all devices of a user.
-func (h *Hub) NotifyPreKeyLow(userID string) {
-	msg, _ := json.Marshal(map[string]string{"type": "prekey_request"})
+// checkAndNotifyPrekeys проверяет запас OPK и уведомляет клиент если < 10.
+func (h *Hub) checkAndNotifyPrekeys(userID string) {
+	count, err := db.CountFreePreKeys(h.db, userID)
+	if err != nil || count >= 10 {
+		return
+	}
+	msg, _ := json.Marshal(map[string]any{
+		"type":  "prekey_low",
+		"count": count,
+	})
 	h.Deliver(userID, msg)
+}
+
+// NotifyPreKeyLow sends a prekey_low event to all devices of a user.
+func (h *Hub) NotifyPreKeyLow(userID string) {
+	h.checkAndNotifyPrekeys(userID)
 }
 
 // ─── Incoming message types ───────────────────────────────────────────────────
@@ -193,6 +207,8 @@ func (h *Hub) readPump(c *client) {
 		switch msg.Type {
 		case "message":
 			h.handleMessage(c, msg)
+		case "skdm":
+			h.handleSKDM(c, msg)
 		case "typing":
 			h.handleTyping(c, msg)
 		case "read":
@@ -271,6 +287,29 @@ func (h *Hub) handleMessage(c *client, msg inMsg) {
 	select {
 	case c.send <- ack:
 	default:
+	}
+}
+
+// handleSKDM доставляет Sender Key Distribution Message получателям (точка-точка).
+func (h *Hub) handleSKDM(c *client, msg inMsg) {
+	if msg.ChatID == "" || len(msg.Recipients) == 0 {
+		h.errMsg(c, "chatId and recipients required for skdm")
+		return
+	}
+	// Проверяем что отправитель является участником чата
+	ok, err := db.IsConversationMember(h.db, msg.ChatID, c.userID)
+	if err != nil || !ok {
+		h.errMsg(c, "forbidden")
+		return
+	}
+	for _, r := range msg.Recipients {
+		payload, _ := json.Marshal(map[string]any{
+			"type":       "skdm",
+			"chatId":     msg.ChatID,
+			"senderId":   c.userID,
+			"ciphertext": r.Ciphertext,
+		})
+		h.Deliver(r.UserID, payload)
 	}
 }
 
