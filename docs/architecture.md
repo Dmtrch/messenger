@@ -114,10 +114,13 @@ Self-hosted мессенджер с E2E-шифрованием, серверно
 ### 4. Групповые чаты
 
 ```
-Sender Keys (как в Signal):
-  - Каждый участник генерирует SenderKey
-  - Распространяет его остальным через X3DH-сессии (индивидуально)
-  - Сообщения шифруются один раз SenderKey → доставляются всем
+Sender Keys (lazy distribution, как в Signal):
+  - Каждый участник генерирует SenderKey (chain_key + signing keypair)
+  - При первом сообщении в группе: SKDM рассылается каждому участнику
+    индивидуально через X3DH/Double Ratchet E2E-сессию
+  - Групповое сообщение шифруется один раз SenderKey (AES-CBC + HMAC)
+    → все участники расшифровывают одним SenderKey
+  - При смене состава — ротация SenderKey (TODO: не реализована)
 ```
 
 ---
@@ -129,13 +132,22 @@ Sender Keys (как в Signal):
 ```
 POST /api/auth/register        — регистрация пользователя
 POST /api/auth/login           — вход, получение JWT
+POST /api/auth/refresh         — обновление access token
+POST /api/auth/logout          — выход, инвалидация refresh cookie
 GET  /api/keys/:userId         — получение публичных ключей пользователя
 POST /api/keys/prekeys         — загрузка новых одноразовых ключей
-GET  /api/chats                — список чатов
-GET  /api/chats/:id/messages   — история сообщений (пагинация)
-POST /api/media/upload         — загрузка медиафайлов
-GET  /api/media/:id            — скачивание медиафайла
+POST /api/keys/register        — регистрация/обновление device key bundle
+GET  /api/chats                — список чатов (unreadCount, updatedAt, lastMessage)
+POST /api/chats                — создание чата (direct / group)
+GET  /api/chats/:id/messages   — история сообщений (opaque cursor)
+POST /api/chats/:id/read       — сброс unreadCount для чата
+DELETE /api/messages/:id       — удаление сообщения (soft-delete, broadcast)
+PATCH  /api/messages/:id       — редактирование сообщения (broadcast)
+POST /api/media/upload         — загрузка зашифрованного blob (ciphertext only)
+GET  /api/media/:id            — скачивание медиафайла (JWT required)
+PATCH /api/media/:id           — привязка медиафайла к чату (chat_id)
 POST /api/push/subscribe       — регистрация Push-подписки
+GET  /api/users/search         — поиск пользователей по username
 ```
 
 ### WebSocket протокол
@@ -144,16 +156,21 @@ POST /api/push/subscribe       — регистрация Push-подписки
 Соединение: WSS /ws?token=<JWT>
 
 Входящие события (сервер → клиент):
-  { type: "message", chatId, encryptedPayload, senderKeyId, timestamp }
-  { type: "ack", messageId }
-  { type: "typing", chatId, userId }
-  { type: "presence", userId, status }
-  { type: "prekey_request" }  // просьба загрузить новые одноразовые ключи
+  { type: "message",         chatId, messageId, clientMsgId, senderId, ciphertext, senderKeyId, timestamp }
+  { type: "ack",             chatId, clientMsgId, timestamp }
+  { type: "message_deleted", chatId, clientMsgId }
+  { type: "message_edited",  chatId, clientMsgId, ciphertext, editedAt }
+  { type: "typing",          chatId, userId }
+  { type: "read",            chatId, messageId, userId }
+  { type: "skdm",            chatId, senderId, ciphertext }    // Sender Key Distribution Message
+  { type: "prekey_low",      count }                           // OPK < 10, нужно пополнить
+  { type: "prekey_request" }                                   // устаревший; заменён prekey_low
 
 Исходящие события (клиент → сервер):
-  { type: "message", chatId, recipients: [{userId, encryptedPayload}] }
-  { type: "typing", chatId }
-  { type: "read", chatId, messageId }
+  { type: "message",  chatId, recipients: [{userId, ciphertext}] }
+  { type: "typing",   chatId }
+  { type: "read",     chatId, messageId }
+  { type: "skdm",     chatId, recipients: [{userId, ciphertext}] }  // рассылка SenderKey
 ```
 
 ---
@@ -166,13 +183,24 @@ CREATE TABLE users (
     id TEXT PRIMARY KEY,       -- UUID
     username TEXT UNIQUE,
     display_name TEXT,
+    password_hash TEXT,
     avatar_path TEXT,
     created_at INTEGER
 );
 
+-- Устройства (один пользователь — несколько устройств)
+CREATE TABLE devices (
+    id TEXT PRIMARY KEY,       -- UUID
+    user_id TEXT NOT NULL,
+    device_name TEXT,
+    created_at INTEGER,
+    last_seen_at INTEGER,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
 -- Публичные ключи (для E2E)
 CREATE TABLE identity_keys (
-    user_id TEXT PRIMARY KEY,
+    user_id TEXT PRIMARY KEY,  -- TODO: мигрировать на (user_id, device_id)
     ik_public BLOB,            -- Identity Key
     spk_public BLOB,           -- Signed PreKey
     spk_signature BLOB,
@@ -181,39 +209,71 @@ CREATE TABLE identity_keys (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
-CREATE TABLE one_time_prekeys (
+CREATE TABLE one_time_prekeys (   -- a.k.a. pre_keys
     id INTEGER PRIMARY KEY,
     user_id TEXT,
     key_public BLOB,
-    used INTEGER DEFAULT 0,    -- 0/1
+    used INTEGER DEFAULT 0,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- Сообщения (хранятся в зашифрованном виде)
-CREATE TABLE messages (
+-- Сессии (refresh tokens)
+CREATE TABLE sessions (
     id TEXT PRIMARY KEY,
-    chat_id TEXT,
-    sender_id TEXT,
-    encrypted_payload BLOB,    -- шифрованное содержимое
-    sender_key_id INTEGER,     -- какой ключ использован
-    timestamp INTEGER,
-    delivered INTEGER DEFAULT 0,
-    read INTEGER DEFAULT 0
+    user_id TEXT,
+    token_hash TEXT,
+    expires_at INTEGER
 );
 
--- Чаты
-CREATE TABLE chats (
+-- Чаты (conversations)
+CREATE TABLE conversations (
     id TEXT PRIMARY KEY,
     type TEXT,                 -- 'direct' | 'group'
     name TEXT,
     created_at INTEGER
 );
 
-CREATE TABLE chat_members (
-    chat_id TEXT,
+CREATE TABLE conversation_members (
+    conversation_id TEXT,
     user_id TEXT,
     joined_at INTEGER,
-    PRIMARY KEY (chat_id, user_id)
+    PRIMARY KEY (conversation_id, user_id)
+);
+
+-- Состояние чата на пользователя (unread, last_read)
+CREATE TABLE chat_user_state (
+    conversation_id TEXT,
+    user_id TEXT,
+    last_read_message_id TEXT,
+    unread_count INTEGER DEFAULT 0,
+    PRIMARY KEY (conversation_id, user_id)
+);
+
+-- Сообщения (хранятся в зашифрованном виде, копия на получателя)
+CREATE TABLE messages (
+    id TEXT PRIMARY KEY,
+    client_msg_id TEXT,        -- UUID от отправителя, общий для всех копий
+    conversation_id TEXT,
+    sender_id TEXT,
+    recipient_id TEXT,         -- конкретный получатель этой копии
+    ciphertext TEXT,           -- зашифрованный payload (base64)
+    sender_key_id INTEGER,
+    is_deleted INTEGER DEFAULT 0,
+    edited_at INTEGER,
+    created_at INTEGER,
+    delivered_at INTEGER,
+    read_at INTEGER
+);
+
+-- Медиафайлы
+CREATE TABLE media_objects (
+    id TEXT PRIMARY KEY,       -- mediaId (UUID)
+    uploader_id TEXT,
+    conversation_id TEXT,      -- может быть NULL до привязки к чату
+    storage_path TEXT,
+    content_type TEXT,
+    size_bytes INTEGER,
+    created_at INTEGER
 );
 
 -- Push-подписки
@@ -233,36 +293,43 @@ CREATE TABLE push_subscriptions (
 ```
 messenger/
 ├── docs/
-│   └── architecture.md        ← этот файл
+│   ├── architecture.md        ← этот файл
+│   ├── technical-documentation.md
+│   ├── unimplemented-spec-tasks.md
+│   ├── spec-gap-checklist.md
+│   └── v1-gap-remediation.md
 ├── server/                    ← Go backend
-│   ├── main.go
-│   ├── config/
-│   ├── api/
-│   │   ├── auth.go
-│   │   ├── keys.go
-│   │   ├── messages.go
-│   │   └── media.go
-│   ├── ws/
-│   │   └── hub.go
-│   ├── db/
-│   │   ├── schema.sql
-│   │   └── queries.go
-│   ├── crypto/
-│   │   └── push.go            ← VAPID Web Push
-│   └── storage/
-│       └── media.go
+│   ├── cmd/server/main.go     ← точка входа, роутинг, middleware
+│   ├── internal/
+│   │   ├── auth/              ← JWT, bcrypt, refresh rotation
+│   │   ├── chat/              ← чаты, история, delete/edit
+│   │   ├── keys/              ← X3DH key bundles, prekey management
+│   │   ├── media/             ← upload/download (JWT required)
+│   │   ├── push/              ← VAPID Web Push
+│   │   ├── users/             ← поиск пользователей
+│   │   └── ws/                ← WebSocket Hub (gorilla)
+│   └── db/
+│       ├── schema.go          ← схема + ALTER TABLE миграции
+│       └── queries.go         ← типизированные SQL-запросы
 ├── client/                    ← React PWA
 │   ├── public/
-│   │   ├── manifest.json
-│   │   └── sw.js              ← Service Worker
+│   │   └── push-handler.js    ← Service Worker (push + cache)
 │   ├── src/
+│   │   ├── api/
+│   │   │   ├── client.ts      ← REST + encrypted media helpers
+│   │   │   └── websocket.ts   ← WS с reconnect + auth failure
 │   │   ├── crypto/
-│   │   │   ├── x3dh.ts        ← X3DH key exchange
-│   │   │   ├── ratchet.ts     ← Double Ratchet
-│   │   │   └── keystore.ts    ← IndexedDB key storage
+│   │   │   ├── x3dh.ts        ← X3DH initiator/responder
+│   │   │   ├── ratchet.ts     ← Double Ratchet + skipped keys
+│   │   │   ├── session.ts     ← E2E session manager (direct + group)
+│   │   │   ├── senderkey.ts   ← Sender Keys для групп
+│   │   │   └── keystore.ts    ← IndexedDB (keys, ratchet, sender keys)
 │   │   ├── store/             ← Zustand stores
+│   │   ├── hooks/
+│   │   │   ├── useMessengerWS.ts ← WS orchestration
+│   │   │   └── usePushNotifications.ts
 │   │   ├── components/
-│   │   └── api/
+│   │   └── pages/
 │   ├── vite.config.ts
 │   └── package.json
 └── README.md
@@ -298,10 +365,15 @@ cloudflared tunnel --url http://localhost:8080
 1. **Ключи никогда не покидают устройство** — сервер хранит только публичные ключи
 2. **Perfect Forward Secrecy** — компрометация ключа не раскрывает прошлые сообщения
 3. **Break-in Recovery** — DH Ratchet ограничивает ущерб от компрометации текущего состояния
-4. **JWT с коротким TTL** (15 мин) + Refresh Token (7 дней) в httpOnly cookie
-5. **Rate limiting** на все эндпоинты
-6. **Медиафайлы** хранятся с рандомизированными именами, не публичны без токена
-7. **TLS обязателен** — HTTP запрещён даже в локальной сети
+4. **Skipped message keys** — кэш пропущенных ключей (MAX_SKIP=100) обеспечивает корректную расшифровку при out-of-order доставке
+5. **JWT с коротким TTL** (15 мин) + Refresh Token (7 дней) в httpOnly `SameSite=Strict` cookie
+6. **Rate limiting** — token bucket на `/api/auth/*`
+7. **Security headers** — CSP, HSTS, X-Frame-Options, X-Content-Type-Options
+8. **Медиафайлы зашифрованы** — XSalsa20-Poly1305 на клиенте до upload; сервер хранит только ciphertext; ключ встроен в зашифрованный message payload
+9. **Медиадоступ защищён JWT** — `GET /api/media/:id` требует валидный Bearer token
+10. **TLS обязателен** — при отсутствии сертификатов сервер выдаёт предупреждение
+11. **WS origin allowlist** — `CheckOrigin` ограничен `ALLOWED_ORIGINS` из env
+12. **bcrypt cost = 12** — зафиксирован в константе
 
 ---
 

@@ -74,6 +74,8 @@
 
 `Must`
 
+**Статус**: ✅ Реализовано в этапе 5 (ветка `feature/stage5-crypto`, коммит `b5d76bd`). Lazy SKDM при первом сообщении, симметричный рэтчет, `senderkey.ts`, IndexedDB-хранение.
+
 **Нереализованная задача**
 
 Спецификация требует Sender Keys для групповых чатов. Сейчас клиент шифрует одно и то же сообщение отдельно для каждого получателя.
@@ -102,6 +104,8 @@
 
 `Must`
 
+**Статус**: ✅ Реализовано в этапе 5. `RatchetState` расширен полями `prevSendCount` и `skippedKeys`, кэш ограничен MAX_SKIP=100, скипованные ключи сериализуются в IndexedDB.
+
 **Нереализованная задача**
 
 В `client/README.md` и по факту кода отсутствует полноценная поддержка skipped message keys, необходимых для корректной работы при сообщениях вне порядка доставки.
@@ -126,6 +130,8 @@
 **Приоритет**
 
 `Must`
+
+**Статус**: ✅ Реализовано в этапе 2 (JWT, mediaId, media_objects) и этапе 5 (client-side XSalsa20-Poly1305, ключ в payload, расшифровка на скачивании).
 
 **Нереализованная задача**
 
@@ -155,6 +161,8 @@
 
 `Must`
 
+**Статус**: ✅ Реализовано в этапе 2. `GET /api/media/:id` требует JWT, введена таблица `media_objects` с проверкой доступа по chat membership.
+
 **Нереализованная задача**
 
 Спецификация требует, чтобы медиафайлы были недоступны без валидного JWT. Сейчас `GET /api/media/{filename}` публичный.
@@ -181,6 +189,8 @@
 
 `Must`
 
+**Статус**: ✅ Реализовано в этапе 2. API теперь работает с `mediaId` (UUID), payload содержит `mediaId` вместо `filename`.
+
 **Нереализованная задача**
 
 Спецификация описывает `GET /api/media/:id`, а текущий код работает с случайным `filename` и напрямую светит имя файла наружу.
@@ -197,6 +207,8 @@
 **Приоритет**
 
 `Must`
+
+**Статус**: ✅ Реализовано в этапе 4. WS-события `ack` и `read` замкнуты в полный realtime-цикл; `unreadCount` обнуляется по событию; клиент обновляет статусы по внешним событиям.
 
 **Нереализованная задача**
 
@@ -242,6 +254,8 @@
 
 `Must`
 
+**Статус**: ✅ Реализовано в этапе 1. Production-режим без TLS-сертификатов выдаёт предупреждение в логе; HSTS выставляется при HTTPS.
+
 **Нереализованная задача**
 
 Спецификация требует обязательный TLS для всех соединений. Сейчас сервер умеет стартовать и по обычному HTTP.
@@ -260,6 +274,8 @@
 **Приоритет**
 
 `Must`
+
+**Статус**: ✅ Реализовано в этапе 1.
 
 **Нереализованная задача**
 
@@ -280,6 +296,8 @@
 
 `Must`
 
+**Статус**: ✅ Реализовано в этапе 1. Константа `bcryptCost = 12` зафиксирована в `auth/handler.go`.
+
 **Нереализованная задача**
 
 Спецификация требует `bcrypt cost=12`. Сейчас используется `bcrypt.DefaultCost`.
@@ -295,6 +313,8 @@
 **Приоритет**
 
 `Must`
+
+**Статус**: ✅ Реализовано в этапе 1. In-memory token bucket для `/api/auth/register`, `/api/auth/login`, `/api/auth/refresh`.
 
 **Нереализованная задача**
 
@@ -315,6 +335,8 @@
 **Приоритет**
 
 `Must`
+
+**Статус**: ✅ Реализовано в этапе 1. CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, HSTS — middleware в `main.go`.
 
 **Нереализованная задача**
 
@@ -362,6 +384,8 @@
 
 `Should`
 
+**Статус**: ✅ Реализовано в этапе 4. Курсор перешёл на opaque string (base64-encoded timestamp+id), `MessagesPage.nextCursor` — строковый.
+
 **Нереализованная задача**
 
 Спецификация описывает `GET /api/chats/:id/messages?before=<messageId>&limit=50`. Сейчас курсор основан на timestamp `before=<ts>`.
@@ -380,6 +404,8 @@
 **Приоритет**
 
 `Should`
+
+**Статус**: ✅ Реализовано в этапе 4. `GET /api/chats` возвращает `unreadCount`, `updatedAt`, `lastMessageText`, `lastMessageTs`; введена таблица `chat_user_state`.
 
 **Нереализованная задача**
 
@@ -403,6 +429,8 @@
 **Приоритет**
 
 `Should`
+
+**Статус**: ✅ Реализовано в этапе 5. Сервер проверяет остаток OPK после выдачи bundle и при WS-подключении; при OPK < 10 отправляет `{"type":"prekey_low","count":N}`; клиент автоматически генерирует и загружает 20 новых ключей.
 
 **Нереализованная задача**
 
@@ -445,6 +473,8 @@
 **Приоритет**
 
 `Should`
+
+**Статус**: ✅ Реализовано в этапе 1. `CheckOrigin` читает `ALLOWED_ORIGINS` из env и допускает только указанные origin-ы (dev-fallback: `localhost`).
 
 **Нереализованная задача**
 
@@ -624,35 +654,41 @@
 
 ## Итоговая группировка по приоритету
 
-### Must
+### Must — остаток
 
-- multi-device модель
-- `POST /api/keys/register`
-- Sender Keys
-- skipped message keys
-- encrypted media at rest
-- JWT-защита медиа
-- `mediaId` вместо filename
-- delivery/read receipts
-- offline history
-- TLS policy
-- `SameSite=Strict`
-- bcrypt cost 12
-- rate limiting
-- security headers
+- multi-device модель (архитектурный разрыв)
+- `POST /api/keys/register` (реализован как upsert, но не идемпотентен с device fingerprint)
+- offline history viewing
 
-### Should
+### Must — выполнено ✅
+
+- ~~Sender Keys~~ — этап 5
+- ~~skipped message keys~~ — этап 5
+- ~~encrypted media at rest~~ — этапы 2 + 5
+- ~~JWT-защита медиа~~ — этап 2
+- ~~`mediaId` вместо filename~~ — этап 2
+- ~~delivery/read receipts~~ — этап 4
+- ~~TLS policy~~ — этап 1
+- ~~`SameSite=Strict`~~ — этап 1
+- ~~bcrypt cost 12~~ — этап 1
+- ~~rate limiting~~ — этап 1
+- ~~security headers~~ — этап 1
+
+### Should — остаток
 
 - смена пароля с инвалидцией сессий
-- пагинация по `messageId`
-- серверный `unreadCount` и `updatedAt`
-- lifecycle `prekey_request`
-- полноценный offline sync слой
-- WS origin allowlist
-- конфигурационный файл
+- полноценный offline sync слой поверх IndexedDB
+- конфигурационный файл сервера
 - versioned migrations и целевая схема БД
 - backend tests
 - frontend tests
+
+### Should — выполнено ✅
+
+- ~~пагинация по `messageId`~~ — этап 4
+- ~~серверный `unreadCount` и `updatedAt`~~ — этап 4
+- ~~lifecycle `prekey_request`~~ — этап 5
+- ~~WS origin allowlist~~ — этап 1
 
 ### Could
 
