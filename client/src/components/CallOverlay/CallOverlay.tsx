@@ -41,21 +41,22 @@ export default function CallOverlay({ onAccept, onReject, onHangUp }: Props) {
   // Ringtone при входящем звонке
   useEffect(() => {
     if (status !== 'ringing') return
-    return startRingtone()
+    const stop = startRingtone()
+    return () => stop?.()
   }, [status])
 
-  // Привязка потоков к video-элементам
+  // Привязка потоков к video-элементам (зависим от status, чтобы поймать момент монтирования элементов)
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream
     }
-  }, [localStream])
+  }, [localStream, status])
 
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream
     }
-  }, [remoteStream])
+  }, [remoteStream, status])
 
   if (status === 'idle' && !notification) return null
 
@@ -95,7 +96,7 @@ export default function CallOverlay({ onAccept, onReject, onHangUp }: Props) {
           </div>
           <div className={s.peerName}>{peerLabel}</div>
           <div className={s.statusText}>
-            {status === 'ringing' && 'Входящий звонок'}
+            {status === 'ringing' && (isVideo ? 'Входящий видеозвонок' : 'Входящий аудиозвонок')}
             {status === 'calling' && 'Вызов...'}
             {status === 'active'  && formatDuration(elapsed)}
           </div>
