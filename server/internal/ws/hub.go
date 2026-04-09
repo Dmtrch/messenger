@@ -395,21 +395,7 @@ func (h *Hub) handleCallOffer(c *client, msg inMsg) {
 		return
 	}
 
-	// Проверяем, не занят ли целевой пользователь в другом звонке
-	h.callsMu.Lock()
-	for _, s := range h.calls {
-		if s.initiatorID == msg.TargetID || s.targetID == msg.TargetID {
-			h.callsMu.Unlock()
-			busy, _ := json.Marshal(map[string]any{
-				"type":   "call_busy",
-				"callId": msg.CallID,
-			})
-			h.Deliver(c.userID, busy)
-			return
-		}
-	}
-
-	// Создаём сессию и запускаем 30-секундный таймер ожидания ответа
+	// Создаём сессию заранее (до блокировки) — timer пока nil
 	callID := msg.CallID
 	initiatorID := c.userID
 	targetID := msg.TargetID
@@ -420,20 +406,42 @@ func (h *Hub) handleCallOffer(c *client, msg inMsg) {
 		targetID:    targetID,
 		state:       "ringing",
 	}
-	sess.timer = time.AfterFunc(30*time.Second, func() {
-		h.callsMu.Lock()
-		delete(h.calls, callID)
-		h.callsMu.Unlock()
-		timeout, _ := json.Marshal(map[string]any{
-			"type":   "call_end",
-			"callId": callID,
-			"reason": "timeout",
+
+	// Проверяем занятость цели и атомарно регистрируем сессию в одном lock-блоке,
+	// чтобы исключить гонку между time.AfterFunc и вставкой в map.
+	busy := false
+	h.callsMu.Lock()
+	for _, s := range h.calls {
+		if s.initiatorID == msg.TargetID || s.targetID == msg.TargetID {
+			busy = true
+			break
+		}
+	}
+	if !busy {
+		h.calls[callID] = sess
+		sess.timer = time.AfterFunc(30*time.Second, func() {
+			h.callsMu.Lock()
+			delete(h.calls, callID)
+			h.callsMu.Unlock()
+			timeout, _ := json.Marshal(map[string]any{
+				"type":   "call_end",
+				"callId": callID,
+				"reason": "timeout",
+			})
+			h.Deliver(initiatorID, timeout)
+			h.Deliver(targetID, timeout)
 		})
-		h.Deliver(initiatorID, timeout)
-		h.Deliver(targetID, timeout)
-	})
-	h.calls[callID] = sess
+	}
 	h.callsMu.Unlock()
+
+	if busy {
+		busyMsg, _ := json.Marshal(map[string]any{
+			"type":   "call_busy",
+			"callId": msg.CallID,
+		})
+		h.Deliver(c.userID, busyMsg)
+		return
+	}
 
 	// Передаём offer целевому пользователю
 	offer, _ := json.Marshal(map[string]any{

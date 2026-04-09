@@ -144,4 +144,70 @@ func TestHandleCallOffer_BusyTarget(t *testing.T) {
 	if f["type"] != "call_busy" {
 		t.Errorf("expected call_busy, got %v", f["type"])
 	}
+
+	// call-2 не должен быть сохранён в map — цель занята
+	h.callsMu.Lock()
+	_, stored := h.calls["call-2"]
+	h.callsMu.Unlock()
+	if stored {
+		t.Error("call-2 session should NOT be stored when target is busy")
+	}
+}
+
+func TestHandleCallOffer_MissingFields(t *testing.T) {
+	h := setupTestHub(t)
+	t.Cleanup(func() { stopAllTimers(h) })
+	setupConversation(t, h.db, "chat1", []string{"alice", "bob"})
+
+	aliceCh, aliceClient := addMockClient(h, "alice")
+
+	// CallID пустой — должна прийти ошибка, сессия не сохраняется
+	h.handleCallOffer(aliceClient, inMsg{
+		Type:     "call_offer",
+		CallID:   "",
+		ChatID:   "chat1",
+		TargetID: "bob",
+		SDP:      "sdp-offer",
+	})
+
+	f := readFrame(aliceCh)
+	if f == nil || f["type"] != "error" {
+		t.Errorf("expected error frame, got %v", f)
+	}
+
+	h.callsMu.Lock()
+	count := len(h.calls)
+	h.callsMu.Unlock()
+	if count != 0 {
+		t.Errorf("expected no sessions stored, got %d", count)
+	}
+}
+
+func TestHandleCallOffer_NonMember(t *testing.T) {
+	h := setupTestHub(t)
+	t.Cleanup(func() { stopAllTimers(h) })
+	// Чат содержит только bob — alice не является участником
+	setupConversation(t, h.db, "chat1", []string{"bob"})
+
+	aliceCh, aliceClient := addMockClient(h, "alice")
+
+	h.handleCallOffer(aliceClient, inMsg{
+		Type:     "call_offer",
+		CallID:   "call-x",
+		ChatID:   "chat1",
+		TargetID: "bob",
+		SDP:      "sdp-offer",
+	})
+
+	f := readFrame(aliceCh)
+	if f == nil || f["type"] != "error" {
+		t.Errorf("expected error frame for non-member, got %v", f)
+	}
+
+	h.callsMu.Lock()
+	_, stored := h.calls["call-x"]
+	h.callsMu.Unlock()
+	if stored {
+		t.Error("call-x session should NOT be stored for non-member")
+	}
 }
