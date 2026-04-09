@@ -111,14 +111,15 @@ func (h *Hub) register(c *client) {
 
 func (h *Hub) unregister(c *client) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if set, ok := h.byUser[c.userID]; ok {
 		delete(set, c)
 		if len(set) == 0 {
 			delete(h.byUser, c.userID)
 		}
 	}
+	h.mu.Unlock()
 	close(c.send)
+	h.cleanupCallsForUser(c.userID)
 }
 
 // Deliver sends a JSON payload to every connection of a user.
@@ -241,6 +242,8 @@ func (h *Hub) readPump(c *client) {
 			h.handleCallEnd(c, msg)
 		case "call_reject":
 			h.handleCallReject(c, msg)
+		case "ice_candidate":
+			h.handleIceCandidate(c, msg)
 		default:
 			h.errMsg(c, "unknown type: "+msg.Type)
 		}
@@ -580,6 +583,65 @@ func (h *Hub) handleCallReject(c *client, msg inMsg) {
 		"callId": msg.CallID,
 	})
 	h.Deliver(initiatorID, reject)
+}
+
+// handleIceCandidate ретранслирует ICE-кандидата собеседнику в звонке.
+func (h *Hub) handleIceCandidate(c *client, msg inMsg) {
+	if msg.CallID == "" || len(msg.Candidate) == 0 {
+		h.errMsg(c, "callId and candidate required")
+		return
+	}
+	h.callsMu.Lock()
+	sess, ok := h.calls[msg.CallID]
+	if !ok {
+		h.callsMu.Unlock()
+		return
+	}
+	peerID := sess.initiatorID
+	if c.userID == sess.initiatorID {
+		peerID = sess.targetID
+	}
+	h.callsMu.Unlock()
+
+	payload, _ := json.Marshal(map[string]any{
+		"type":      "ice_candidate",
+		"callId":    msg.CallID,
+		"candidate": msg.Candidate,
+	})
+	h.Deliver(peerID, payload)
+}
+
+// cleanupCallsForUser завершает все звонки пользователя при разрыве соединения.
+func (h *Hub) cleanupCallsForUser(userID string) {
+	h.callsMu.Lock()
+	type callCleanup struct {
+		callID string
+		peerID string
+	}
+	var toClean []callCleanup
+	for id, s := range h.calls {
+		if s.initiatorID == userID || s.targetID == userID {
+			if s.timer != nil {
+				s.timer.Stop()
+			}
+			peer := s.targetID
+			if s.initiatorID != userID {
+				peer = s.initiatorID
+			}
+			toClean = append(toClean, callCleanup{callID: id, peerID: peer})
+			delete(h.calls, id)
+		}
+	}
+	h.callsMu.Unlock()
+
+	for _, cc := range toClean {
+		end, _ := json.Marshal(map[string]any{
+			"type":   "call_end",
+			"callId": cc.callID,
+			"reason": "hangup",
+		})
+		h.Deliver(cc.peerID, end)
+	}
 }
 
 func (h *Hub) errMsg(c *client, reason string) {

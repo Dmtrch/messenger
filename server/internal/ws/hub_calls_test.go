@@ -464,6 +464,92 @@ func TestHandleCallEnd_RejectsThirdParty(t *testing.T) {
 	h.callsMu.Unlock()
 }
 
+func TestHandleIceCandidate_RelaysToPeer(t *testing.T) {
+	h := setupTestHub(t)
+	t.Cleanup(func() { stopAllTimers(h) })
+
+	aliceCh, _ := addMockClient(h, "alice")
+	bobCh, bobClient := addMockClient(h, "bob")
+
+	h.callsMu.Lock()
+	h.calls["call-1"] = &callSession{
+		callID:      "call-1",
+		chatID:      "chat1",
+		initiatorID: "alice",
+		targetID:    "bob",
+		state:       "active",
+	}
+	h.callsMu.Unlock()
+
+	candidate := json.RawMessage(`{"candidate":"ufrag","sdpMid":"0","sdpMLineIndex":0}`)
+	h.handleIceCandidate(bobClient, inMsg{
+		Type:      "ice_candidate",
+		CallID:    "call-1",
+		Candidate: candidate,
+	})
+
+	// bob не должен получить свой же кандидат
+	if f := readFrame(bobCh); f != nil {
+		t.Errorf("bob should not receive own candidate, got %v", f)
+	}
+
+	// alice должна получить кандидат
+	f := readFrame(aliceCh)
+	if f == nil {
+		t.Fatal("alice should receive ice_candidate")
+	}
+	if f["type"] != "ice_candidate" {
+		t.Errorf("expected ice_candidate, got %v", f["type"])
+	}
+}
+
+func TestUnregisterCleansUpCall(t *testing.T) {
+	h := setupTestHub(t)
+	t.Cleanup(func() { stopAllTimers(h) })
+
+	aliceCh, aliceClient := addMockClient(h, "alice")
+	bobCh, _ := addMockClient(h, "bob")
+
+	timer := time.AfterFunc(30*time.Second, func() {})
+	h.callsMu.Lock()
+	h.calls["call-1"] = &callSession{
+		callID:      "call-1",
+		chatID:      "chat1",
+		initiatorID: "alice",
+		targetID:    "bob",
+		state:       "active",
+		timer:       timer,
+	}
+	h.callsMu.Unlock()
+
+	// Alice отключается
+	h.unregister(aliceClient)
+	_ = aliceCh
+
+	// Дать горутине время завершиться
+	time.Sleep(10 * time.Millisecond)
+
+	// Bob должен получить call_end
+	f := readFrame(bobCh)
+	if f == nil {
+		t.Fatal("bob should receive call_end after alice disconnects")
+	}
+	if f["type"] != "call_end" {
+		t.Errorf("expected call_end, got %v", f["type"])
+	}
+	if f["reason"] != "hangup" {
+		t.Errorf("expected reason=hangup, got %v", f["reason"])
+	}
+
+	// Сессия должна быть удалена
+	h.callsMu.Lock()
+	_, exists := h.calls["call-1"]
+	h.callsMu.Unlock()
+	if exists {
+		t.Error("session should be deleted after disconnect")
+	}
+}
+
 func TestHandleCallOffer_TargetNotMember(t *testing.T) {
 	h := setupTestHub(t)
 	t.Cleanup(func() { stopAllTimers(h) })
