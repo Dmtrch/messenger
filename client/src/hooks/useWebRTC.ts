@@ -8,12 +8,17 @@ export interface WebRTCControls {
   acceptOffer: (callId: string, sdp: string, isVideo: boolean) => Promise<void>
   handleAnswer: (sdp: string) => Promise<void>
   addIceCandidate: (candidate: RTCIceCandidateInit) => Promise<void>
+  /** Завершить звонок и отправить call_end серверу */
   hangUp: () => void
+  /** Закрыть PeerConnection без отправки call_end (для входящих call_end/reject/busy) */
+  closeOnly: () => void
 }
 
 export function useWebRTC(): WebRTCControls {
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const callIdRef = useRef<string | null>(null)
+  // ICE-кандидаты могут прийти до setRemoteDescription — буферизуем
+  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([])
 
   // ref для hangUp — разрывает circular dependency в createPC
   const hangUpRef = useRef<() => void>(() => undefined)
@@ -38,6 +43,7 @@ export function useWebRTC(): WebRTCControls {
     const pc = new RTCPeerConnection({ iceServers })
     callIdRef.current = callId
     pcRef.current = pc
+    pendingCandidatesRef.current = []
 
     pc.onicecandidate = ({ candidate }) => {
       if (candidate && callIdRef.current) {
@@ -71,6 +77,19 @@ export function useWebRTC(): WebRTCControls {
     return stream
   }, [setLocalStream])
 
+  /** Сбросить буфер ICE-кандидатов после setRemoteDescription */
+  const flushPendingCandidates = useCallback(async (pc: RTCPeerConnection): Promise<void> => {
+    const candidates = pendingCandidatesRef.current
+    pendingCandidatesRef.current = []
+    for (const c of candidates) {
+      try {
+        await pc.addIceCandidate(c)
+      } catch {
+        // Устаревший кандидат — игнорируем
+      }
+    }
+  }, [])
+
   const initiateCall = useCallback(async (
     callId: string,
     chatId: string,
@@ -100,6 +119,9 @@ export function useWebRTC(): WebRTCControls {
     stream.getTracks().forEach((track) => pc.addTrack(track, stream))
 
     await pc.setRemoteDescription({ type: 'offer', sdp })
+    // Добавляем буферизованные кандидаты после установки remote description
+    await flushPendingCandidates(pc)
+
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
     setActive()
@@ -109,20 +131,32 @@ export function useWebRTC(): WebRTCControls {
       callId,
       sdp: answer.sdp!,
     })
-  }, [createPC, getLocalStream, send, setActive])
+  }, [createPC, getLocalStream, send, setActive, flushPendingCandidates])
 
   const handleAnswer = useCallback(async (sdp: string) => {
     if (!pcRef.current) return
     await pcRef.current.setRemoteDescription({ type: 'answer', sdp })
+    // Добавляем буферизованные кандидаты после установки remote description
+    await flushPendingCandidates(pcRef.current)
     setActive()
-  }, [setActive])
+  }, [setActive, flushPendingCandidates])
 
   const addIceCandidate = useCallback(async (candidate: RTCIceCandidateInit) => {
-    if (!pcRef.current) return
+    const pc = pcRef.current
+    if (!pc) {
+      // PC ещё не создан — буферизуем
+      pendingCandidatesRef.current.push(candidate)
+      return
+    }
+    if (pc.remoteDescription === null) {
+      // Remote description ещё не установлен — буферизуем
+      pendingCandidatesRef.current.push(candidate)
+      return
+    }
     try {
-      await pcRef.current.addIceCandidate(candidate)
+      await pc.addIceCandidate(candidate)
     } catch {
-      // ICE candidate может прийти до setRemoteDescription — игнорируем
+      // Устаревший кандидат после setRemoteDescription — игнорируем
     }
   }, [])
 
@@ -134,12 +168,24 @@ export function useWebRTC(): WebRTCControls {
     pcRef.current?.close()
     pcRef.current = null
     callIdRef.current = null
+    pendingCandidatesRef.current = []
     reset()
   }, [send, reset])
+
+  /** Закрыть PeerConnection без отправки call_end серверу.
+   *  Используется при получении call_end/call_reject/call_busy от удалённой стороны.
+   */
+  const closeOnly = useCallback(() => {
+    pcRef.current?.close()
+    pcRef.current = null
+    callIdRef.current = null
+    pendingCandidatesRef.current = []
+    reset()
+  }, [reset])
 
   // обновляем ref при каждом ре-рендере, чтобы createPC.onconnectionstatechange
   // всегда вызывал актуальную версию hangUp
   hangUpRef.current = hangUp
 
-  return { initiateCall, acceptOffer, handleAnswer, addIceCandidate, hangUp }
+  return { initiateCall, acceptOffer, handleAnswer, addIceCandidate, hangUp, closeOnly }
 }

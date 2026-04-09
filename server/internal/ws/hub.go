@@ -500,10 +500,29 @@ func (h *Hub) handleCallAnswer(c *client, msg inMsg) {
 	}
 	if sess.timer != nil {
 		sess.timer.Stop()
-		sess.timer = nil
 	}
 	sess.state = "active"
 	initiatorID := sess.initiatorID
+	callID := msg.CallID
+	// Таймер максимальной длительности активного звонка (4 часа).
+	// Защищает от утечки сессии при одновременном разрыве соединений обоих участников.
+	sess.timer = time.AfterFunc(4*time.Hour, func() {
+		h.callsMu.Lock()
+		cur, ok := h.calls[callID]
+		if !ok {
+			h.callsMu.Unlock()
+			return
+		}
+		delete(h.calls, callID)
+		h.callsMu.Unlock()
+		expired, _ := json.Marshal(map[string]any{
+			"type":   "call_end",
+			"callId": callID,
+			"reason": "max_duration",
+		})
+		h.Deliver(cur.initiatorID, expired)
+		h.Deliver(cur.targetID, expired)
+	})
 	h.callsMu.Unlock()
 
 	answer, _ := json.Marshal(map[string]any{

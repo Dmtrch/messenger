@@ -1,16 +1,23 @@
 /**
  * Ringtone на Web Audio API — пульсирующий тональный сигнал без внешних файлов.
+ * Один AudioContext переиспользуется для всех импульсов, чтобы не превысить
+ * браузерный лимит (~6 контекстов на страницу).
  * Возвращает функцию остановки.
  */
 export function startRingtone(): () => void {
   let active = true
-  let currentCtx: AudioContext | null = null
+  let ctx: AudioContext | null = null
+
+  try {
+    ctx = new AudioContext()
+  } catch {
+    // AudioContext недоступен (нет звуковой подсистемы) — ничего не делаем
+    return () => undefined
+  }
 
   function beep(): void {
-    if (!active) return
+    if (!active || !ctx) return
     try {
-      const ctx = new AudioContext()
-      currentCtx = ctx
       const osc = ctx.createOscillator()
       const gain = ctx.createGain()
 
@@ -20,18 +27,17 @@ export function startRingtone(): () => void {
       osc.type = 'sine'
       osc.frequency.value = 440
 
-      gain.gain.setValueAtTime(0.15, ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7)
+      const t = ctx.currentTime
+      gain.gain.setValueAtTime(0.15, t)
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.7)
 
-      osc.start()
-      osc.stop(ctx.currentTime + 0.7)
+      osc.start(t)
+      osc.stop(t + 0.7)
       osc.onended = () => {
-        ctx.close()
-        currentCtx = null
         if (active) setTimeout(beep, 600)
       }
     } catch {
-      // AudioContext может быть недоступен в некоторых окружениях
+      // Контекст мог быть закрыт — игнорируем
     }
   }
 
@@ -39,7 +45,7 @@ export function startRingtone(): () => void {
 
   return () => {
     active = false
-    currentCtx?.close()
-    currentCtx = null
+    ctx?.close()
+    ctx = null
   }
 }

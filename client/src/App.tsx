@@ -19,7 +19,7 @@ function AppRoutes() {
   // Сброс outbox при восстановлении WS-соединения
   useOfflineSync()
   // initiateCall берём из store — зарегистрировано в CallHandlerBridge через useCallHandler
-  const initiateCall = useCallStore((s) => s._initiateCall) ?? ((_chatId: string, _targetId: string, _isVideo: boolean) => {})
+  const initiateCall = useCallStore((s) => s._initiateCall) ?? undefined
 
   if (!isAuthenticated) {
     return (

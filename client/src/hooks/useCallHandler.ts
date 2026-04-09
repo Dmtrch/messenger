@@ -50,17 +50,18 @@ export function useCallHandler(): CallActions {
         break
 
       case 'call_end':
-        useCallStore.getState().reset()
+        // closeOnly закрывает PC без повторной отправки call_end серверу
+        webRTC.closeOnly()
         break
 
       case 'call_reject':
-        useCallStore.getState().reset()
+        webRTC.closeOnly()
         setNotification('Звонок отклонён')
         setTimeout(() => setNotification(null), 3000)
         break
 
       case 'call_busy':
-        useCallStore.getState().reset()
+        webRTC.closeOnly()
         setNotification('Абонент занят')
         setTimeout(() => setNotification(null), 3000)
         break

@@ -6,7 +6,7 @@ import { api } from '@/api/client'
 import type { Chat } from '@/types'
 
 interface Props {
-  initiateCall: (chatId: string, targetId: string, isVideo: boolean) => void
+  initiateCall?: (chatId: string, targetId: string, isVideo: boolean) => void
 }
 
 export default function ChatWindowPage({ initiateCall }: Props) {
