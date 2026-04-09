@@ -256,8 +256,8 @@ func TestHandleCallOffer_InitiatorAlreadyInCall(t *testing.T) {
 		t.Fatal("alice should receive call_busy when she is already in a call")
 	}
 	tp, _ := f["type"].(string)
-	if tp != "call_busy" && tp != "error" {
-		t.Errorf("expected call_busy or error, got %v", tp)
+	if tp != "call_busy" {
+		t.Errorf("expected call_busy, got %v", tp)
 	}
 
 	// call-new не должен быть сохранён — инициатор занят

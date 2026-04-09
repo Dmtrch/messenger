@@ -233,6 +233,8 @@ func (h *Hub) readPump(c *client) {
 			h.handleTyping(c, msg)
 		case "read":
 			h.handleRead(c, msg)
+		case "call_offer":
+			h.handleCallOffer(c, msg)
 		default:
 			h.errMsg(c, "unknown type: "+msg.Type)
 		}
@@ -411,6 +413,9 @@ func (h *Hub) handleCallOffer(c *client, msg inMsg) {
 	// чтобы исключить гонку между time.AfterFunc и вставкой в map.
 	busy := false
 	h.callsMu.Lock()
+	if _, dup := h.calls[callID]; dup {
+		busy = true
+	}
 	for _, s := range h.calls {
 		if s.initiatorID == msg.TargetID || s.targetID == msg.TargetID ||
 			s.initiatorID == c.userID || s.targetID == c.userID {
