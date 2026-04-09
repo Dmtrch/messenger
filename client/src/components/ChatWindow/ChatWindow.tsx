@@ -166,6 +166,8 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
     markRead(chatId)
     loadHistory(chatId)
     bottomRef.current?.scrollIntoView({ behavior: 'instant' })
+    // Сообщаем серверу что чат прочитан — сбрасывает unreadCount на сервере
+    api.markChatRead(chatId).catch(() => {})
   }, [chatId, markRead, loadHistory])
 
   useEffect(() => {
