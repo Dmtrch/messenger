@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 )
 
 // ─── User ────────────────────────────────────────────────────────────────────
@@ -657,4 +658,45 @@ func GetMediaObject(db *sql.DB, id string) (*MediaObject, error) {
 		return nil, nil
 	}
 	return m, err
+}
+
+// DeleteOrphanedMedia удаляет записи media_objects без привязки к чату
+// (conversation_id = ''), созданные раньше olderThanUnixMs.
+// Возвращает имена файлов на диске для последующего удаления.
+func DeleteOrphanedMedia(db *sql.DB, olderThanUnixMs int64) ([]string, error) {
+	rows, err := db.Query(`
+		SELECT filename FROM media_objects
+		WHERE COALESCE(conversation_id,'') = '' AND created_at < ?`,
+		olderThanUnixMs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query orphaned media: %w", err)
+	}
+	defer rows.Close()
+
+	var filenames []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan orphaned media: %w", err)
+		}
+		filenames = append(filenames, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate orphaned media: %w", err)
+	}
+
+	if len(filenames) == 0 {
+		return nil, nil
+	}
+
+	if _, err := db.Exec(`
+		DELETE FROM media_objects
+		WHERE COALESCE(conversation_id,'') = '' AND created_at < ?`,
+		olderThanUnixMs,
+	); err != nil {
+		return nil, fmt.Errorf("delete orphaned media: %w", err)
+	}
+
+	return filenames, nil
 }

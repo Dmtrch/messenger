@@ -57,7 +57,7 @@
 ### Этап 2 — Media (есть функциональный пропуск)
 
 - [x] **conversation_id привязывается при upload**: `media/handler.go` читает `chat_id` из form-field и сохраняет в `ConversationID` при вставке
-- [ ] **Нет очистки orphaned media**: загруженные но не отправленные файлы остаются на диске навсегда — нужен cron-cleanup по `conversation_id IS NULL AND created_at < now-24h`
+- [x] **Очистка orphaned media**: `StartOrphanCleaner` — горутина раз в час удаляет записи и файлы без привязки к чату старше 24 часов
 
 ### Этап 3 — Device model (архитектурный пропуск)
 

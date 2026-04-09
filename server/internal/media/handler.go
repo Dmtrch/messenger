@@ -194,6 +194,31 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, path)
 }
 
+// StartOrphanCleaner запускает фоновую горутину, которая раз в час удаляет
+// медиафайлы без привязки к чату (conversation_id = ''), загруженные более 24 часов назад.
+func StartOrphanCleaner(database *sql.DB, mediaDir string) {
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			cleanOrphans(database, mediaDir)
+		}
+	}()
+}
+
+func cleanOrphans(database *sql.DB, mediaDir string) {
+	cutoff := time.Now().Add(-24*time.Hour).UnixMilli()
+	filenames, err := db.DeleteOrphanedMedia(database, cutoff)
+	if err != nil {
+		// Не фатально — попробуем в следующий раз
+		return
+	}
+	for _, name := range filenames {
+		path := filepath.Join(mediaDir, filepath.Clean(name))
+		os.Remove(path) //nolint:errcheck
+	}
+}
+
 // escapeFilename убирает кавычки из имени файла для Content-Disposition.
 func escapeFilename(name string) string {
 	return strings.ReplaceAll(name, `"`, `'`)

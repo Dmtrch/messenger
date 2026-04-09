@@ -84,6 +84,7 @@ func main() {
 	authHandler := &auth.Handler{DB: database, JWTSecret: []byte(jwtSecret)}
 	chatHandler := &chat.Handler{DB: database, Hub: hub}
 	mediaHandler := &media.Handler{MediaDir: mediaDir, DB: database}
+	media.StartOrphanCleaner(database, mediaDir)
 	usersHandler := &users.Handler{DB: database}
 	keysHandler := &keys.Handler{DB: database}
 	pushHandler := &push.Handler{DB: database, VAPIDPublic: vapidPublic, VAPIDPrivate: vapidPrivate}
