@@ -12,7 +12,7 @@
 - [x] Защитить `GET /api/media/:id` через JWT
 - [x] Перейти с `filename` на `mediaId`
 - [x] Довести delivery/read receipts до полного realtime-цикла
-- [ ] Реализовать offline history viewing
+- [x] Реализовать offline history viewing
 - [x] Сделать TLS обязательным в production
 - [x] Перевести refresh cookie на `SameSite=Strict`
 - [x] Зафиксировать bcrypt cost = 12
@@ -25,7 +25,7 @@
 - [x] Перейти на пагинацию истории по `messageId` или opaque cursor
 - [x] Реализовать серверные `unreadCount`, `updatedAt`, `lastMessage`
 - [x] Довести lifecycle `prekey_request`
-- [ ] Добавить полноценный offline sync слой поверх IndexedDB
+- [x] Добавить полноценный offline sync слой поверх IndexedDB
 - [x] Ограничить `CheckOrigin` для WebSocket
 - [ ] Ввести конфигурационный файл сервера
 - [ ] Перейти на versioned migrations и целевую схему БД
