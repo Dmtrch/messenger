@@ -553,8 +553,10 @@ func insertPreKeysWithDevice(db *sql.DB, userID, deviceID string, keys [][]byte)
 	return tx.Commit()
 }
 
-// PopPreKey atomically returns and marks used one unused pre-key.
-func PopPreKey(db *sql.DB, userID string) (id int64, pub []byte, err error) {
+// PopPreKey atomically возвращает и помечает использованным один свободный OPK.
+// deviceID должен соответствовать устройству, чей identity_key был выдан GetBundle,
+// чтобы не выдать OPK от другого устройства того же пользователя.
+func PopPreKey(db *sql.DB, userID, deviceID string) (id int64, pub []byte, err error) {
 	tx, err := db.Begin()
 	if err != nil {
 		return 0, nil, err
@@ -562,7 +564,8 @@ func PopPreKey(db *sql.DB, userID string) (id int64, pub []byte, err error) {
 	defer tx.Rollback()
 
 	err = tx.QueryRow(
-		`SELECT id, key_public FROM pre_keys WHERE user_id=? AND used=0 LIMIT 1`, userID,
+		`SELECT id, key_public FROM pre_keys WHERE user_id=? AND device_id=? AND used=0 LIMIT 1`,
+		userID, deviceID,
 	).Scan(&id, &pub)
 	if err == sql.ErrNoRows {
 		return 0, nil, nil
@@ -576,9 +579,21 @@ func PopPreKey(db *sql.DB, userID string) (id int64, pub []byte, err error) {
 	return id, pub, tx.Commit()
 }
 
-func CountFreePreKeys(db *sql.DB, userID string) (int, error) {
+// CountFreePreKeys возвращает число неиспользованных OPK.
+// Если deviceID непустой — только для данного устройства; иначе — сумма по всем устройствам пользователя.
+func CountFreePreKeys(db *sql.DB, userID, deviceID string) (int, error) {
 	var n int
-	err := db.QueryRow(`SELECT COUNT(*) FROM pre_keys WHERE user_id=? AND used=0`, userID).Scan(&n)
+	var err error
+	if deviceID != "" {
+		err = db.QueryRow(
+			`SELECT COUNT(*) FROM pre_keys WHERE user_id=? AND device_id=? AND used=0`,
+			userID, deviceID,
+		).Scan(&n)
+	} else {
+		err = db.QueryRow(
+			`SELECT COUNT(*) FROM pre_keys WHERE user_id=? AND used=0`, userID,
+		).Scan(&n)
+	}
 	return n, err
 }
 

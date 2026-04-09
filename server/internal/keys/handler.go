@@ -27,14 +27,14 @@ func (h *Handler) GetBundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	opkID, opkPub, err := db.PopPreKey(h.DB, targetID)
+	opkID, opkPub, err := db.PopPreKey(h.DB, targetID, ik.DeviceID)
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
 	}
 
-	// Уведомить через WS если OPK закончились
-	if count, _ := db.CountFreePreKeys(h.DB, targetID); count < 5 {
+	// Уведомить через WS если OPK закончились (проверяем конкретное устройство)
+	if count, _ := db.CountFreePreKeys(h.DB, targetID, ik.DeviceID); count < 5 {
 		// Хаб недоступен отсюда — клиент сам запросит при следующем подключении
 		_ = count
 	}

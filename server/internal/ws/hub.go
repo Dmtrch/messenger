@@ -156,7 +156,8 @@ func (h *Hub) BroadcastToConversation(convID string, payload []byte) {
 
 // checkAndNotifyPrekeys проверяет запас OPK и уведомляет клиент если < 10.
 func (h *Hub) checkAndNotifyPrekeys(userID string) {
-	count, err := db.CountFreePreKeys(h.db, userID)
+	// deviceID="" — проверяем суммарный запас по всем устройствам пользователя
+	count, err := db.CountFreePreKeys(h.db, userID, "")
 	if err != nil || count >= 10 {
 		return
 	}
