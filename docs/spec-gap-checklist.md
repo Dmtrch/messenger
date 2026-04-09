@@ -28,7 +28,7 @@
 - [x] Добавить полноценный offline sync слой поверх IndexedDB
 - [x] Ограничить `CheckOrigin` для WebSocket
 - [ ] Ввести конфигурационный файл сервера
-- [ ] Перейти на versioned migrations и целевую схему БД
+- [x] Перейти на versioned migrations и целевую схему БД
 - [ ] Добавить backend tests
 - [ ] Добавить frontend tests
 
