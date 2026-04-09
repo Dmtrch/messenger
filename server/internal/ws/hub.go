@@ -439,6 +439,14 @@ func (h *Hub) handleCallOffer(c *client, msg inMsg) {
 		h.calls[callID] = sess
 		sess.timer = time.AfterFunc(30*time.Second, func() {
 			h.callsMu.Lock()
+			// Проверяем состояние сессии перед действием: если сессия уже
+			// завершена или перешла в "active" (ответ поступил прямо перед
+			// срабатыванием таймера), игнорируем таймаут.
+			cur, ok := h.calls[callID]
+			if !ok || cur.state == "active" {
+				h.callsMu.Unlock()
+				return
+			}
 			delete(h.calls, callID)
 			h.callsMu.Unlock()
 			timeout, _ := json.Marshal(map[string]any{

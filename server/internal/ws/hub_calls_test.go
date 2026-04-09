@@ -411,6 +411,59 @@ func TestHandleCallReject_NotifiesInitiator(t *testing.T) {
 	}
 }
 
+func TestHandleCallEnd_RejectsThirdParty(t *testing.T) {
+	h := setupTestHub(t)
+	t.Cleanup(func() { stopAllTimers(h) })
+
+	aliceCh, _ := addMockClient(h, "alice")
+	bobCh, _ := addMockClient(h, "bob")
+	carolCh, carolClient := addMockClient(h, "carol")
+
+	timer := time.AfterFunc(30*time.Second, func() {})
+	h.callsMu.Lock()
+	h.calls["call-1"] = &callSession{
+		callID:      "call-1",
+		chatID:      "chat1",
+		initiatorID: "alice",
+		targetID:    "bob",
+		state:       "active",
+		timer:       timer,
+	}
+	h.callsMu.Unlock()
+
+	// carol (не участник звонка) пытается завершить его
+	h.handleCallEnd(carolClient, inMsg{Type: "call_end", CallID: "call-1"})
+
+	// carol должна получить ошибку
+	f := readFrame(carolCh)
+	if f == nil || f["type"] != "error" {
+		t.Errorf("carol should receive error, got %v", f)
+	}
+
+	// alice и bob не должны получить call_end
+	if f := readFrame(aliceCh); f != nil {
+		t.Errorf("alice should not receive call_end, got %v", f)
+	}
+	if f := readFrame(bobCh); f != nil {
+		t.Errorf("bob should not receive call_end, got %v", f)
+	}
+
+	// Сессия должна остаться
+	h.callsMu.Lock()
+	_, exists := h.calls["call-1"]
+	h.callsMu.Unlock()
+	if !exists {
+		t.Error("session should NOT be deleted when third party sends call_end")
+	}
+
+	// Убираем таймер явно
+	h.callsMu.Lock()
+	if s, ok := h.calls["call-1"]; ok && s.timer != nil {
+		s.timer.Stop()
+	}
+	h.callsMu.Unlock()
+}
+
 func TestHandleCallOffer_TargetNotMember(t *testing.T) {
 	h := setupTestHub(t)
 	t.Cleanup(func() { stopAllTimers(h) })
