@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/messenger/server/db"
 	"github.com/messenger/server/internal/auth"
 )
@@ -45,11 +46,106 @@ func (h *Handler) GetBundle(w http.ResponseWriter, r *http.Request) {
 		"spkPublic":    base64.StdEncoding.EncodeToString(ik.SPKPublic),
 		"spkSignature": base64.StdEncoding.EncodeToString(ik.SPKSignature),
 	}
+	// Возвращаем deviceId если он есть (поддержка multi-device)
+	if ik.DeviceID != "" {
+		resp["deviceId"] = ik.DeviceID
+	}
 	if opkPub != nil {
 		resp["opkId"] = opkID
 		resp["opkPublic"] = base64.StdEncoding.EncodeToString(opkPub)
 	}
 	reply(w, 200, resp)
+}
+
+// POST /api/keys/register — регистрация устройства и загрузка ключей
+func (h *Handler) RegisterDevice(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromCtx(r)
+
+	var req struct {
+		DeviceName   string   `json:"deviceName"`
+		IKPublic     string   `json:"ikPublic"`
+		SPKId        int      `json:"spkId"`
+		SPKPublic    string   `json:"spkPublic"`
+		SPKSignature string   `json:"spkSignature"`
+		OPKPublics   []string `json:"opkPublics"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, "invalid body", 400)
+		return
+	}
+	if req.IKPublic == "" || req.SPKPublic == "" || req.SPKSignature == "" {
+		httpErr(w, "ikPublic, spkPublic and spkSignature are required", 400)
+		return
+	}
+	if req.DeviceName == "" {
+		req.DeviceName = "Unknown device"
+	}
+
+	ikPub, err := base64.StdEncoding.DecodeString(req.IKPublic)
+	if err != nil {
+		httpErr(w, "invalid ikPublic base64", 400)
+		return
+	}
+	spkPub, err := base64.StdEncoding.DecodeString(req.SPKPublic)
+	if err != nil {
+		httpErr(w, "invalid spkPublic base64", 400)
+		return
+	}
+	spkSig, err := base64.StdEncoding.DecodeString(req.SPKSignature)
+	if err != nil {
+		httpErr(w, "invalid spkSignature base64", 400)
+		return
+	}
+
+	// Декодируем одноразовые ключи
+	opkBytes := make([][]byte, 0, len(req.OPKPublics))
+	for _, opk := range req.OPKPublics {
+		b, err := base64.StdEncoding.DecodeString(opk)
+		if err != nil {
+			httpErr(w, "invalid opkPublics base64", 400)
+			return
+		}
+		opkBytes = append(opkBytes, b)
+	}
+
+	now := time.Now().UnixMilli()
+	deviceID := uuid.New().String()
+
+	// Сохраняем устройство
+	if err := db.UpsertDevice(h.DB, db.Device{
+		ID:         deviceID,
+		UserID:     userID,
+		DeviceName: req.DeviceName,
+		CreatedAt:  now,
+		LastSeenAt: now,
+	}); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+
+	// Обновляем identity key с привязкой к устройству
+	if err := db.UpsertIdentityKey(h.DB, db.IdentityKey{
+		UserID:       userID,
+		DeviceID:     deviceID,
+		IKPublic:     ikPub,
+		SPKPublic:    spkPub,
+		SPKSignature: spkSig,
+		SPKId:        req.SPKId,
+		UpdatedAt:    now,
+	}); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+
+	// Сохраняем одноразовые ключи с привязкой к устройству
+	if len(opkBytes) > 0 {
+		if err := db.InsertPreKeysForDevice(h.DB, userID, deviceID, opkBytes); err != nil {
+			httpErr(w, "server error", 500)
+			return
+		}
+	}
+
+	reply(w, 200, map[string]string{"deviceId": deviceID})
 }
 
 // POST /api/keys/prekeys — загрузить новые одноразовые ключи

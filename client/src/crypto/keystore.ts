@@ -116,6 +116,18 @@ export async function loadPeerSenderKey(chatId: string, senderId: string): Promi
   return get<string>(`peer_sender_key:${chatId}:${senderId}`, keyStore)
 }
 
+// ── Device ID ─────────────────────────────────────────────────
+
+/** Сохраняет ID устройства, полученный от сервера при регистрации. */
+export async function saveDeviceId(id: string): Promise<void> {
+  await set('device_id', id, keyStore)
+}
+
+/** Загружает сохранённый ID устройства. */
+export async function loadDeviceId(): Promise<string | undefined> {
+  return get<string>('device_id', keyStore)
+}
+
 // ── Push subscription ─────────────────────────────────────
 
 export async function savePushSubscription(sub: PushSubscriptionJSON): Promise<void> {

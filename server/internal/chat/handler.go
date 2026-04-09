@@ -26,11 +26,22 @@ type Handler struct {
 }
 
 type ChatDTO struct {
-	ID        string   `json:"id"`
-	Type      string   `json:"type"`
-	Name      string   `json:"name"`
-	Members   []string `json:"members"`
-	CreatedAt int64    `json:"createdAt"`
+	ID          string          `json:"id"`
+	Type        string          `json:"type"`
+	Name        string          `json:"name"`
+	Members     []string        `json:"members"`
+	CreatedAt   int64           `json:"createdAt"`
+	UpdatedAt   int64           `json:"updatedAt"`
+	UnreadCount int64           `json:"unreadCount"`
+	LastMessage *LastMessageDTO `json:"lastMessage,omitempty"`
+}
+
+// LastMessageDTO — последнее сообщение чата (зашифровано, клиент расшифрует сам).
+type LastMessageDTO struct {
+	ID               string `json:"id"`
+	SenderID         string `json:"senderId"`
+	EncryptedPayload string `json:"encryptedPayload"`
+	Timestamp        int64  `json:"timestamp"`
 }
 
 type MessageDTO struct {
@@ -47,19 +58,19 @@ type MessageDTO struct {
 // GET /api/chats — список чатов текущего пользователя
 func (h *Handler) ListChats(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromCtx(r)
-	convs, err := db.GetUserConversations(h.DB, userID)
+	summaries, err := db.GetUserConversationSummaries(h.DB, userID)
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
 	}
 
-	result := make([]ChatDTO, 0, len(convs))
-	for _, c := range convs {
-		members, _ := db.GetConversationMembers(h.DB, c.ID)
+	result := make([]ChatDTO, 0, len(summaries))
+	for _, s := range summaries {
+		members, _ := db.GetConversationMembers(h.DB, s.ID)
 		name := ""
-		if c.Name.Valid {
-			name = c.Name.String
-		} else if c.Type == "direct" {
+		if s.Name.Valid {
+			name = s.Name.String
+		} else if s.Type == "direct" {
 			for _, uid := range members {
 				if uid != userID {
 					u, _ := db.GetUserByID(h.DB, uid)
@@ -70,13 +81,30 @@ func (h *Handler) ListChats(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		result = append(result, ChatDTO{
-			ID:        c.ID,
-			Type:      c.Type,
-			Name:      name,
-			Members:   members,
-			CreatedAt: c.CreatedAt,
-		})
+
+		dto := ChatDTO{
+			ID:          s.ID,
+			Type:        s.Type,
+			Name:        name,
+			Members:     members,
+			CreatedAt:   s.CreatedAt,
+			UpdatedAt:   s.UpdatedAt,
+			UnreadCount: s.UnreadCount,
+		}
+
+		// Прикладываем последнее сообщение (зашифровано — клиент расшифрует)
+		if s.LastMsgID != "" {
+			if m, err := db.GetMessageByID(h.DB, s.LastMsgID); err == nil && m != nil {
+				dto.LastMessage = &LastMessageDTO{
+					ID:               m.ID,
+					SenderID:         m.SenderID,
+					EncryptedPayload: base64.StdEncoding.EncodeToString(m.Ciphertext),
+					Timestamp:        m.CreatedAt,
+				}
+			}
+		}
+
+		result = append(result, dto)
 	}
 	reply(w, 200, map[string]any{"chats": result})
 }
@@ -160,7 +188,8 @@ func (h *Handler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	}})
 }
 
-// GET /api/chats/{chatId}/messages?before=<ts>&limit=<n>
+// GET /api/chats/{chatId}/messages?before=<messageId>&limit=<n>
+// before — opaque cursor: messageId (UUID) последнего полученного сообщения.
 func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromCtx(r)
 	chatID := chi.URLParam(r, "chatId")
@@ -171,18 +200,15 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var before int64
+	beforeMsgID := r.URL.Query().Get("before")
 	limit := 50
-	if s := r.URL.Query().Get("before"); s != "" {
-		before, _ = strconv.ParseInt(s, 10, 64)
-	}
 	if s := r.URL.Query().Get("limit"); s != "" {
 		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 100 {
 			limit = n
 		}
 	}
 
-	msgs, err := db.GetMessages(h.DB, chatID, userID, before, limit)
+	msgs, err := db.GetMessages(h.DB, chatID, userID, beforeMsgID, limit)
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
@@ -201,7 +227,59 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 			Read:             m.ReadAt.Valid,
 		})
 	}
-	reply(w, 200, map[string]any{"messages": result, "nextCursor": nextCursor(msgs)})
+	reply(w, 200, map[string]any{"messages": result, "nextCursor": nextCursorID(msgs)})
+}
+
+// POST /api/chats/{chatId}/read — отметить сообщения в чате прочитанными.
+// Тело (необязательно): {"messageId": "<uuid>"} — если не указан, берётся последнее сообщение.
+func (h *Handler) MarkChatRead(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromCtx(r)
+	chatID := chi.URLParam(r, "chatId")
+
+	member, err := db.IsConversationMember(h.DB, chatID, userID)
+	if err != nil || !member {
+		httpErr(w, "not found", 404)
+		return
+	}
+
+	var req struct {
+		MessageID string `json:"messageId"`
+	}
+	json.NewDecoder(r.Body).Decode(&req) //nolint:errcheck
+
+	var target *db.Message
+	if req.MessageID != "" {
+		target, _ = db.GetMessageByID(h.DB, req.MessageID)
+	}
+	if target == nil {
+		// Нет явного messageId — берём последнее сообщение пользователя в чате
+		msgs, _ := db.GetMessages(h.DB, chatID, userID, "", 1)
+		if len(msgs) > 0 {
+			target = &msgs[0]
+		}
+	}
+
+	if target == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	now := time.Now().UnixMilli()
+	db.UpsertChatUserState(h.DB, chatID, userID, target.ID, target.CreatedAt) //nolint:errcheck
+
+	// Уведомляем всех участников о прочтении (отправители узнают о доставке)
+	if h.Hub != nil {
+		payload, _ := json.Marshal(map[string]any{
+			"type":      "read",
+			"chatId":    chatID,
+			"messageId": target.ID,
+			"userId":    userID,
+			"readAt":    now,
+		})
+		h.Hub.BroadcastToConversation(chatID, payload)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // DELETE /api/messages/{clientMsgId}
@@ -288,12 +366,13 @@ func (h *Handler) EditMessage(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, map[string]any{"editedAt": now})
 }
 
-func nextCursor(msgs []db.Message) *int64 {
+// nextCursorID возвращает ID последнего сообщения как opaque cursor для пагинации.
+func nextCursorID(msgs []db.Message) *string {
 	if len(msgs) == 0 {
 		return nil
 	}
-	ts := msgs[len(msgs)-1].CreatedAt
-	return &ts
+	id := msgs[len(msgs)-1].ID
+	return &id
 }
 
 func httpErr(w http.ResponseWriter, msg string, code int) {

@@ -11,7 +11,7 @@
 - [x] Реализовать encrypted media at rest
 - [x] Защитить `GET /api/media/:id` через JWT
 - [x] Перейти с `filename` на `mediaId`
-- [ ] Довести delivery/read receipts до полного realtime-цикла
+- [x] Довести delivery/read receipts до полного realtime-цикла
 - [ ] Реализовать offline history viewing
 - [x] Сделать TLS обязательным в production
 - [x] Перевести refresh cookie на `SameSite=Strict`
@@ -22,9 +22,9 @@
 ## Should
 
 - [ ] Добавить смену пароля с инвалидцией всех сессий
-- [ ] Перейти на пагинацию истории по `messageId` или opaque cursor
-- [ ] Реализовать серверные `unreadCount`, `updatedAt`, `lastMessage`
-- [ ] Довести lifecycle `prekey_request`
+- [x] Перейти на пагинацию истории по `messageId` или opaque cursor
+- [x] Реализовать серверные `unreadCount`, `updatedAt`, `lastMessage`
+- [x] Довести lifecycle `prekey_request`
 - [ ] Добавить полноценный offline sync слой поверх IndexedDB
 - [x] Ограничить `CheckOrigin` для WebSocket
 - [ ] Ввести конфигурационный файл сервера
@@ -37,6 +37,31 @@
 - [ ] Подготовить проверенный deployment guide для Cloudflare Tunnel
 - [ ] Описать и автоматизировать update path без потери данных
 - [ ] Встроить обязательную синхронизацию документации в процесс разработки
+
+## Долг и верификация по этапам 1–4
+
+### Этап 1 — Security (закрыт, но требует проверки)
+
+- [ ] **CSP совместимость с production bundle**: `script-src 'self'` может блокировать Vite-inline chunks — проверить сборку `npm run build` под CSP
+- [ ] **HSTS за Cloudflare Tunnel**: при HTTP-внутреннем соединении `isHTTPS=false` → HSTS не выставляется; нужен флаг `BEHIND_PROXY=true` или явный `FORCE_HTTPS`
+- [ ] **realIP доверяет X-Real-IP без whitelist proxy**: при прямом доступе к серверу заголовок подделывается — зафиксировать в документации или ограничить
+
+### Этап 2 — Media (есть функциональный пропуск)
+
+- [ ] **conversation_id не привязывается при отправке сообщения**: если клиент не передаёт `chat_id` при upload (загрузка до отправки), `ConversationID = ""` → получатель не может скачать файл (только загрузчик). Нужен endpoint `PATCH /api/media/{id}` для привязки к чату после отправки сообщения
+- [ ] **Нет очистки orphaned media**: загруженные но не отправленные файлы остаются на диске навсегда — нужен cron-cleanup по `conversation_id IS NULL AND created_at < now-24h`
+
+### Этап 3 — Device model (архитектурный пропуск)
+
+- [ ] **identity_keys — PK по user_id, не по device_id**: `UpsertIdentityKey` при каждом `POST /api/keys/register` перезаписывает единственную запись → ключи предыдущего устройства теряются; настоящий multi-device требует PK `(user_id, device_id)` + миграция таблицы
+- [ ] **PopPreKey не учитывает device_id**: `SELECT ... WHERE user_id=?` смешивает ключи всех устройств одного пользователя — получатель может получить OPK не от того устройства
+- [ ] **POST /api/keys/register не идемпотентен**: каждый вход создаёт новое устройство — нужен device fingerprint или проверка существующего устройства
+
+### Этап 4 — Message state (пропуски в UI)
+
+- [ ] **markChatRead не вызывается при открытии чата**: `POST /api/chats/{chatId}/read` реализован на сервере, но нигде не вызывается в клиентском коде — `unreadCount` не сбрасывается на сервере после просмотра
+- [ ] **lastMessage в ChatSummary не расшифровывается**: клиент получает `encryptedPayload`, но preview в списке чатов не отображает расшифрованный текст — нужна логика decrypt при загрузке чатов
+- [ ] **Пагинация: проверить call sites**: `MessagesPage.nextCursor` изменился с `number` на `string` — необходимо проверить `ChatWindow` и другие компоненты, которые читают `nextCursor` для подгрузки истории
 
 ## Контрольные вехи
 

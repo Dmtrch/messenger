@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import { initSodium, generateIdentityKeyPair, generateDHKeyPair, signData, toBase64 } from '@/crypto/x3dh'
-import { saveIdentityKey, saveSignedPreKey, saveOneTimePreKeys } from '@/crypto/keystore'
+import { saveIdentityKey, saveSignedPreKey, saveOneTimePreKeys, saveDeviceId } from '@/crypto/keystore'
 import { api, setAccessToken } from '@/api/client'
 import type { User } from '@/types'
 import s from './pages.module.css'
@@ -85,6 +85,21 @@ export default function AuthPage() {
       })
 
       setAccessToken(accessToken)
+
+      // Регистрируем устройство на сервере и сохраняем deviceId локально
+      try {
+        const { deviceId } = await api.registerKeys({
+          deviceName: navigator.userAgent.substring(0, 100),
+          ikPublic: toBase64(identityKey.publicKey),
+          spkId: signedPreKey.id,
+          spkPublic: toBase64(signedPreKey.publicKey),
+          spkSignature: toBase64(spkSignature),
+          opkPublics: opks.map((k) => toBase64(k.publicKey)),
+        })
+        await saveDeviceId(deviceId)
+      } catch {
+        // Не критично — deviceId можно получить позже
+      }
 
       const user: User = {
         id: userId,

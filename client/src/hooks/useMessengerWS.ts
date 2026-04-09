@@ -37,8 +37,9 @@ export function useMessengerWS() {
   const wsRef = useRef<MessengerWS | null>(null)
   const token = useAuthStore((s) => s.accessToken)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const currentUser = useAuthStore((s) => s.currentUser)
   const logout = useAuthStore((s) => s.logout)
-  const { addMessage, updateMessageStatus, setTyping, upsertChat, deleteMessage, editMessage } = useChatStore()
+  const { addMessage, updateMessageStatus, setTyping, upsertChat, deleteMessage, editMessage, markRead } = useChatStore()
   const setSend = useWsStore((s) => s.setSend)
 
   useEffect(() => {
@@ -79,7 +80,7 @@ export function useMessengerWS() {
                   id: messageId, clientMsgId, chatId, senderId,
                   encryptedPayload: ciphertext, senderKeyId,
                   timestamp, status: 'delivered', ...parsed,
-                })
+                }, currentUser?.id)
               })
               .catch(() => {
                 addMessage({
@@ -87,7 +88,7 @@ export function useMessengerWS() {
                   encryptedPayload: ciphertext, senderKeyId: senderKeyId ?? 0,
                   timestamp, status: 'delivered', type: 'text',
                   text: '[зашифровано]',
-                })
+                }, currentUser?.id)
               })
             break
           }
@@ -143,9 +144,15 @@ export function useMessengerWS() {
             break
           }
 
-          case 'read':
+          case 'read': {
+            // Обновляем статус конкретного сообщения
             updateMessageStatus(frame.chatId, frame.messageId, 'read')
+            // Если читатель — текущий пользователь, сбрасываем счётчик непрочитанных
+            if (frame.userId === currentUser?.id) {
+              markRead(frame.chatId)
+            }
             break
+          }
         }
       },
       () => {
@@ -170,7 +177,7 @@ export function useMessengerWS() {
       wsRef.current = null
       setSend(null)
     }
-  }, [isAuthenticated, token, addMessage, updateMessageStatus, setTyping, logout, setSend])
+  }, [isAuthenticated, token, currentUser, addMessage, updateMessageStatus, setTyping, logout, setSend, markRead])
 
   return wsRef
 }

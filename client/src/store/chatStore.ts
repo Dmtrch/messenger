@@ -7,7 +7,7 @@ interface ChatState {
   typingUsers: Record<string, string[]>  // chatId → userId[]
   setChats: (chats: Chat[]) => void
   upsertChat: (chat: Chat) => void
-  addMessage: (msg: Message) => void
+  addMessage: (msg: Message, currentUserId?: string) => void
   prependMessages: (chatId: string, msgs: Message[]) => void
   updateMessageStatus: (chatId: string, msgId: string, status: Message['status']) => void
   deleteMessage: (chatId: string, msgId: string) => void
@@ -33,22 +33,29 @@ export const useChatStore = create<ChatState>((set) => ({
       }
     }),
 
-  addMessage: (msg) =>
+  addMessage: (msg, currentUserId) =>
     set((s) => {
       const existing = s.messages[msg.chatId] ?? []
       // Дедупликация по id — игнорируем если уже есть
       if (existing.some((m) => m.id === msg.id)) return s
+      // Входящее сообщение от другого пользователя увеличивает счётчик непрочитанных
+      const isIncoming = currentUserId != null && msg.senderId !== currentUserId
       return {
-      messages: {
-        ...s.messages,
-        [msg.chatId]: [...existing, msg],
-      },
-      chats: s.chats.map((c) =>
-        c.id === msg.chatId
-          ? { ...c, lastMessage: msg, updatedAt: msg.timestamp }
-          : c
-      ),
-    }
+        messages: {
+          ...s.messages,
+          [msg.chatId]: [...existing, msg],
+        },
+        chats: s.chats.map((c) =>
+          c.id === msg.chatId
+            ? {
+                ...c,
+                lastMessage: msg,
+                updatedAt: msg.timestamp,
+                unreadCount: isIncoming ? (c.unreadCount ?? 0) + 1 : (c.unreadCount ?? 0),
+              }
+            : c
+        ),
+      }
     }),
 
   prependMessages: (chatId, msgs) =>

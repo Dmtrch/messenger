@@ -178,6 +178,81 @@ func GetUserConversations(db *sql.DB, userID string) ([]Conversation, error) {
 	return convs, rows.Err()
 }
 
+// ConversationSummary — чат с серверными метриками для списка чатов.
+type ConversationSummary struct {
+	ID          string
+	Type        string
+	Name        sql.NullString
+	CreatedAt   int64
+	UpdatedAt   int64  // max created_at сообщений (или CreatedAt если нет сообщений)
+	LastMsgID   string // ID последнего сообщения для данного пользователя
+	UnreadCount int64  // непрочитанные сообщения от других участников
+}
+
+// GetUserConversationSummaries возвращает список чатов с серверными unreadCount и updatedAt.
+func GetUserConversationSummaries(db *sql.DB, userID string) ([]ConversationSummary, error) {
+	rows, err := db.Query(`
+		SELECT
+		    c.id, c.type, c.name, c.created_at,
+		    COALESCE((
+		        SELECT MAX(m_all.created_at) FROM messages m_all
+		        WHERE m_all.conversation_id = c.id
+		          AND COALESCE(m_all.is_deleted,0) = 0
+		    ), c.created_at) AS updated_at,
+		    COALESCE((
+		        SELECT m_last.id FROM messages m_last
+		        WHERE m_last.conversation_id = c.id
+		          AND (m_last.recipient_id = ? OR m_last.recipient_id = '')
+		          AND COALESCE(m_last.is_deleted,0) = 0
+		        ORDER BY m_last.created_at DESC LIMIT 1
+		    ), '') AS last_msg_id,
+		    (
+		        SELECT COUNT(*) FROM messages m_unread
+		        WHERE m_unread.conversation_id = c.id
+		          AND (m_unread.recipient_id = ? OR m_unread.recipient_id = '')
+		          AND COALESCE(m_unread.is_deleted,0) = 0
+		          AND m_unread.sender_id != ?
+		          AND m_unread.created_at > COALESCE((
+		              SELECT cus.last_read_at FROM chat_user_state cus
+		              WHERE cus.conversation_id = c.id AND cus.user_id = ?
+		          ), 0)
+		    ) AS unread_count
+		FROM conversations c
+		JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ?
+		ORDER BY updated_at DESC`,
+		userID, userID, userID, userID, userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []ConversationSummary
+	for rows.Next() {
+		var s ConversationSummary
+		if err := rows.Scan(&s.ID, &s.Type, &s.Name, &s.CreatedAt, &s.UpdatedAt, &s.LastMsgID, &s.UnreadCount); err != nil {
+			return nil, err
+		}
+		result = append(result, s)
+	}
+	return result, rows.Err()
+}
+
+// UpsertChatUserState обновляет позицию прочитанности пользователя в чате.
+// Монотонно: указатель никогда не откатывается назад.
+func UpsertChatUserState(db *sql.DB, convID, userID, lastReadMsgID string, lastReadAt int64) error {
+	_, err := db.Exec(`
+		INSERT INTO chat_user_state (conversation_id, user_id, last_read_msg_id, last_read_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(conversation_id, user_id) DO UPDATE SET
+		    last_read_msg_id = CASE WHEN excluded.last_read_at > last_read_at
+		                            THEN excluded.last_read_msg_id
+		                            ELSE last_read_msg_id END,
+		    last_read_at = MAX(last_read_at, excluded.last_read_at)`,
+		convID, userID, lastReadMsgID, lastReadAt,
+	)
+	return err
+}
+
 func GetConversationMembers(db *sql.DB, conversationID string) ([]string, error) {
 	rows, err := db.Query(
 		`SELECT user_id FROM conversation_members WHERE conversation_id=?`, conversationID,
@@ -232,8 +307,29 @@ func SaveMessage(db *sql.DB, m Message) error {
 	return err
 }
 
+// GetMessageByID возвращает одно сообщение по серверному ID.
+func GetMessageByID(db *sql.DB, id string) (*Message, error) {
+	m := &Message{}
+	var isDeleted int
+	err := db.QueryRow(`
+		SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
+		       ciphertext, sender_key_id, COALESCE(is_deleted,0), edited_at, created_at, delivered_at, read_at
+		FROM messages WHERE id=?`, id,
+	).Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
+		&m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	m.IsDeleted = isDeleted == 1
+	return m, nil
+}
+
 // GetMessages возвращает сообщения чата для конкретного получателя (не удалённые).
-func GetMessages(db *sql.DB, conversationID, recipientID string, before int64, limit int) ([]Message, error) {
+// beforeMsgID — opaque cursor: если задан, возвращаются сообщения строго до этого сообщения.
+func GetMessages(db *sql.DB, conversationID, recipientID, beforeMsgID string, limit int) ([]Message, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
@@ -242,9 +338,9 @@ func GetMessages(db *sql.DB, conversationID, recipientID string, before int64, l
 	             ciphertext, sender_key_id, COALESCE(is_deleted,0), edited_at, created_at, delivered_at, read_at
 	      FROM messages
 	      WHERE conversation_id=? AND (recipient_id=? OR recipient_id='') AND COALESCE(is_deleted,0)=0`
-	if before > 0 {
-		q += ` AND created_at < ?`
-		args = append(args, before)
+	if beforeMsgID != "" {
+		q += ` AND created_at < (SELECT created_at FROM messages WHERE id = ?)`
+		args = append(args, beforeMsgID)
 	}
 	q += ` ORDER BY created_at DESC LIMIT ?`
 	args = append(args, limit)
@@ -320,10 +416,68 @@ func MarkRead(db *sql.DB, msgID string, ts int64) error {
 	return err
 }
 
+// ─── Devices ──────────────────────────────────────────────────────────────────
+
+// Device представляет зарегистрированное устройство пользователя.
+type Device struct {
+	ID         string
+	UserID     string
+	DeviceName string
+	CreatedAt  int64
+	LastSeenAt int64
+}
+
+// UpsertDevice создаёт или обновляет запись устройства.
+func UpsertDevice(db *sql.DB, d Device) error {
+	_, err := db.Exec(`
+		INSERT INTO devices (id, user_id, device_name, created_at, last_seen_at)
+		VALUES (?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET
+			device_name=excluded.device_name,
+			last_seen_at=excluded.last_seen_at`,
+		d.ID, d.UserID, d.DeviceName, d.CreatedAt, d.LastSeenAt,
+	)
+	return err
+}
+
+// GetDeviceByID возвращает устройство по его ID.
+func GetDeviceByID(db *sql.DB, id string) (*Device, error) {
+	d := &Device{}
+	err := db.QueryRow(
+		`SELECT id, user_id, device_name, created_at, last_seen_at FROM devices WHERE id=?`, id,
+	).Scan(&d.ID, &d.UserID, &d.DeviceName, &d.CreatedAt, &d.LastSeenAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return d, err
+}
+
+// GetDevicesByUserID возвращает все устройства пользователя.
+func GetDevicesByUserID(db *sql.DB, userID string) ([]Device, error) {
+	rows, err := db.Query(
+		`SELECT id, user_id, device_name, created_at, last_seen_at FROM devices WHERE user_id=? ORDER BY created_at DESC`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var devices []Device
+	for rows.Next() {
+		var d Device
+		if err := rows.Scan(&d.ID, &d.UserID, &d.DeviceName, &d.CreatedAt, &d.LastSeenAt); err != nil {
+			return nil, err
+		}
+		devices = append(devices, d)
+	}
+	return devices, rows.Err()
+}
+
 // ─── Identity Keys (Signal Protocol) ─────────────────────────────────────────
 
 type IdentityKey struct {
 	UserID       string
+	DeviceID     string // ID устройства (пустая строка для старых записей)
 	IKPublic     []byte
 	SPKPublic    []byte
 	SPKSignature []byte
@@ -333,44 +487,66 @@ type IdentityKey struct {
 
 func UpsertIdentityKey(db *sql.DB, k IdentityKey) error {
 	_, err := db.Exec(`
-		INSERT INTO identity_keys (user_id, ik_public, spk_public, spk_signature, spk_id, updated_at)
-		VALUES (?,?,?,?,?,?)
+		INSERT INTO identity_keys (user_id, device_id, ik_public, spk_public, spk_signature, spk_id, updated_at)
+		VALUES (?,?,?,?,?,?,?)
 		ON CONFLICT(user_id) DO UPDATE SET
+			device_id=excluded.device_id,
 			ik_public=excluded.ik_public,
 			spk_public=excluded.spk_public,
 			spk_signature=excluded.spk_signature,
 			spk_id=excluded.spk_id,
 			updated_at=excluded.updated_at`,
-		k.UserID, k.IKPublic, k.SPKPublic, k.SPKSignature, k.SPKId, k.UpdatedAt,
+		k.UserID, nullableString(k.DeviceID), k.IKPublic, k.SPKPublic, k.SPKSignature, k.SPKId, k.UpdatedAt,
 	)
 	return err
 }
 
 func GetIdentityKey(db *sql.DB, userID string) (*IdentityKey, error) {
 	k := &IdentityKey{}
+	var deviceID sql.NullString
 	err := db.QueryRow(
-		`SELECT user_id, ik_public, spk_public, spk_signature, spk_id, updated_at
+		`SELECT user_id, COALESCE(device_id,''), ik_public, spk_public, spk_signature, spk_id, updated_at
 		 FROM identity_keys WHERE user_id=?`, userID,
-	).Scan(&k.UserID, &k.IKPublic, &k.SPKPublic, &k.SPKSignature, &k.SPKId, &k.UpdatedAt)
+	).Scan(&k.UserID, &deviceID, &k.IKPublic, &k.SPKPublic, &k.SPKSignature, &k.SPKId, &k.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
+	}
+	if deviceID.Valid {
+		k.DeviceID = deviceID.String
 	}
 	return k, err
 }
 
+// nullableString возвращает nil если строка пустая (для SQL NULL).
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 func InsertPreKeys(db *sql.DB, userID string, keys [][]byte) error {
+	return insertPreKeysWithDevice(db, userID, "", keys)
+}
+
+// InsertPreKeysForDevice сохраняет одноразовые ключи с привязкой к устройству.
+func InsertPreKeysForDevice(db *sql.DB, userID, deviceID string, keys [][]byte) error {
+	return insertPreKeysWithDevice(db, userID, deviceID, keys)
+}
+
+func insertPreKeysWithDevice(db *sql.DB, userID, deviceID string, keys [][]byte) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	stmt, err := tx.Prepare(`INSERT INTO pre_keys (user_id, key_public) VALUES (?,?)`)
+	stmt, err := tx.Prepare(`INSERT INTO pre_keys (user_id, device_id, key_public) VALUES (?,?,?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 	for _, k := range keys {
-		if _, err := stmt.Exec(userID, k); err != nil {
+		if _, err := stmt.Exec(userID, nullableString(deviceID), k); err != nil {
 			return err
 		}
 	}

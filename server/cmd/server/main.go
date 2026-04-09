@@ -100,11 +100,13 @@ func main() {
 			r.Get("/chats", chatHandler.ListChats)
 			r.Post("/chats", chatHandler.CreateChat)
 			r.Get("/chats/{chatId}/messages", chatHandler.ListMessages)
+			r.Post("/chats/{chatId}/read", chatHandler.MarkChatRead)
 			r.Delete("/messages/{clientMsgId}", chatHandler.DeleteMessage)
 			r.Patch("/messages/{clientMsgId}", chatHandler.EditMessage)
 
 			r.Get("/keys/{userId}", keysHandler.GetBundle)
 			r.Post("/keys/prekeys", keysHandler.UploadPreKeys)
+			r.Post("/keys/register", keysHandler.RegisterDevice)
 
 			r.Post("/push/subscribe", pushHandler.Subscribe)
 

@@ -33,6 +33,9 @@ func Open(dbPath string) (*sql.DB, error) {
 		`ALTER TABLE messages ADD COLUMN recipient_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE messages ADD COLUMN edited_at INTEGER`,
+		// Этап 3: device model — device_id nullable для backward compat
+		`ALTER TABLE identity_keys ADD COLUMN device_id TEXT`,
+		`ALTER TABLE pre_keys ADD COLUMN device_id TEXT`,
 	} {
 		db.Exec(m) //nolint:errcheck
 	}
@@ -130,6 +133,27 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     p256dh   BLOB NOT NULL,
     auth     BLOB NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Устройства пользователей (основа multi-device модели)
+CREATE TABLE IF NOT EXISTS devices (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    device_name  TEXT NOT NULL,
+    created_at   INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Состояние пользователя в чате: последнее прочитанное сообщение
+CREATE TABLE IF NOT EXISTS chat_user_state (
+    conversation_id  TEXT NOT NULL,
+    user_id          TEXT NOT NULL,
+    last_read_msg_id TEXT NOT NULL DEFAULT '',
+    last_read_at     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (conversation_id, user_id),
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id)         REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- Медиафайлы: сервер хранит только ciphertext, доступ по JWT

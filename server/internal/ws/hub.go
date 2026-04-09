@@ -334,7 +334,31 @@ func (h *Hub) handleRead(c *client, msg inMsg) {
 	if msg.MessageID == "" {
 		return
 	}
-	db.MarkRead(h.db, msg.MessageID, time.Now().UnixMilli())
+	now := time.Now().UnixMilli()
+
+	// Ищем сообщение для получения контекста (conversationID, senderID)
+	m, err := db.GetMessageByID(h.db, msg.MessageID)
+	if err != nil || m == nil {
+		return
+	}
+
+	// Отмечаем конкретное сообщение прочитанным
+	db.MarkRead(h.db, msg.MessageID, now) //nolint:errcheck
+
+	// Обновляем позицию прочитанности пользователя в чате (монотонно)
+	db.UpsertChatUserState(h.db, m.ConversationID, c.userID, msg.MessageID, m.CreatedAt) //nolint:errcheck
+
+	// Уведомляем отправителя о прочтении (если не сам читает своё сообщение)
+	if m.SenderID != c.userID {
+		payload, _ := json.Marshal(map[string]any{
+			"type":      "read",
+			"chatId":    m.ConversationID,
+			"messageId": msg.MessageID,
+			"userId":    c.userID,
+			"readAt":    now,
+		})
+		h.Deliver(m.SenderID, payload)
+	}
 }
 
 func (h *Hub) errMsg(c *client, reason string) {

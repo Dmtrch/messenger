@@ -44,6 +44,7 @@ export interface AuthLoginRes {
 
 export interface PreKeyBundle {
   userId: string
+  deviceId?: string
   ikPublic: string
   spkId: number
   spkPublic: string
@@ -52,14 +53,33 @@ export interface PreKeyBundle {
   opkPublic?: string
 }
 
+export interface RegisterKeysReq {
+  deviceName: string
+  ikPublic: string
+  spkId: number
+  spkPublic: string
+  spkSignature: string
+  opkPublics: string[]
+}
+
+export interface RegisterKeysRes {
+  deviceId: string
+}
+
+export interface LastMessageSummary {
+  id: string
+  senderId: string
+  encryptedPayload: string
+  timestamp: number
+}
+
 export interface ChatSummary {
   id: string
   type: 'direct' | 'group'
   name: string
   avatarPath?: string
   members: string[]
-  lastMessageText?: string
-  lastMessageTs?: number
+  lastMessage?: LastMessageSummary
   unreadCount: number
   updatedAt: number
 }
@@ -77,7 +97,7 @@ export interface MessageRecord {
 
 export interface MessagesPage {
   messages: MessageRecord[]
-  nextCursor?: number   // timestamp для следующей страницы
+  nextCursor?: string   // messageId для следующей страницы (opaque cursor)
 }
 
 export interface MediaUploadRes {
@@ -304,6 +324,10 @@ export const api = {
   uploadPreKeys: (keys: Array<{ id: number; key: string }>) =>
     req<void>('/api/keys/prekeys', { method: 'POST', body: JSON.stringify({ keys }) }),
 
+  /** Регистрация устройства — вызывается после регистрации/входа, возвращает deviceId */
+  registerKeys: (body: RegisterKeysReq) =>
+    req<RegisterKeysRes>('/api/keys/register', { method: 'POST', body: JSON.stringify(body) }),
+
   // ── Chats ─────────────────────────────────────────────────
   getChats: () =>
     req<{ chats: ChatSummary[] }>('/api/chats'),
@@ -311,13 +335,20 @@ export const api = {
   createChat: (body: { type: 'direct' | 'group'; memberIds: string[]; name?: string }) =>
     req<{ chat: ChatSummary }>('/api/chats', { method: 'POST', body: JSON.stringify(body) }),
 
-  getMessages: (chatId: string, params?: { before?: number; limit?: number }) => {
+  getMessages: (chatId: string, params?: { before?: string; limit?: number }) => {
     const qs = new URLSearchParams()
-    if (params?.before != null) qs.set('before', String(params.before))
+    if (params?.before != null) qs.set('before', params.before)
     if (params?.limit  != null) qs.set('limit',  String(params.limit))
     const query = qs.size ? `?${qs}` : ''
     return req<MessagesPage>(`/api/chats/${encodeURIComponent(chatId)}/messages${query}`)
   },
+
+  /** Отметить сообщения в чате прочитанными. messageId — опциональный курсор. */
+  markChatRead: (chatId: string, messageId?: string) =>
+    req<void>(`/api/chats/${encodeURIComponent(chatId)}/read`, {
+      method: 'POST',
+      body: JSON.stringify(messageId ? { messageId } : {}),
+    }),
 
   // ── Media ─────────────────────────────────────────────────
   uploadMedia: (file: File, chatId?: string) => {
