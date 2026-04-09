@@ -57,7 +57,10 @@ export default defineConfig({
           {
             urlPattern: /^\/api\//,
             handler: 'NetworkFirst',
-            options: { cacheName: 'messenger-api' }
+            options: {
+              cacheName: 'messenger-api',
+              networkTimeoutSeconds: 5,  // при плохой сети быстро переходим к кэшу
+            }
           },
           {
             urlPattern: /^\/media\//,
