@@ -152,6 +152,13 @@ func TestHandleCallOffer_BusyTarget(t *testing.T) {
 	if stored {
 		t.Error("call-2 session should NOT be stored when target is busy")
 	}
+
+	// Останавливаем вручную вставленный таймер явно
+	h.callsMu.Lock()
+	if s, ok := h.calls["existing"]; ok && s.timer != nil {
+		s.timer.Stop()
+	}
+	h.callsMu.Unlock()
 }
 
 func TestHandleCallOffer_MissingFields(t *testing.T) {
@@ -210,4 +217,62 @@ func TestHandleCallOffer_NonMember(t *testing.T) {
 	if stored {
 		t.Error("call-x session should NOT be stored for non-member")
 	}
+}
+
+func TestHandleCallOffer_InitiatorAlreadyInCall(t *testing.T) {
+	h := setupTestHub(t)
+	t.Cleanup(func() { stopAllTimers(h) })
+	// chat1: alice+bob, chat2: alice+carol
+	setupConversation(t, h.db, "chat1", []string{"alice", "bob"})
+	setupConversation(t, h.db, "chat2", []string{"alice", "carol"})
+
+	aliceCh, aliceClient := addMockClient(h, "alice")
+	_, _ = addMockClient(h, "bob")
+
+	// alice уже является инициатором звонка с carol
+	h.callsMu.Lock()
+	existingTimer := time.AfterFunc(30*time.Second, func() {})
+	h.calls["alice-carol"] = &callSession{
+		callID:      "alice-carol",
+		chatID:      "chat2",
+		initiatorID: "alice",
+		targetID:    "carol",
+		state:       "ringing",
+		timer:       existingTimer,
+	}
+	h.callsMu.Unlock()
+
+	// alice пытается позвонить bob — должна получить call_busy
+	h.handleCallOffer(aliceClient, inMsg{
+		Type:     "call_offer",
+		CallID:   "call-new",
+		ChatID:   "chat1",
+		TargetID: "bob",
+		SDP:      "sdp-offer",
+	})
+
+	f := readFrame(aliceCh)
+	if f == nil {
+		t.Fatal("alice should receive call_busy when she is already in a call")
+	}
+	tp, _ := f["type"].(string)
+	if tp != "call_busy" && tp != "error" {
+		t.Errorf("expected call_busy or error, got %v", tp)
+	}
+
+	// call-new не должен быть сохранён — инициатор занят
+	h.callsMu.Lock()
+	_, storedNew := h.calls["call-new"]
+	h.callsMu.Unlock()
+	if storedNew {
+		t.Error("call-new session should NOT be stored when initiator is already in a call")
+	}
+
+	// Останавливаем вручную вставленный таймер явно
+	h.callsMu.Lock()
+	if s, ok := h.calls["alice-carol"]; ok && s.timer != nil {
+		s.timer.Stop()
+	}
+	h.callsMu.Unlock()
+	existingTimer.Stop()
 }

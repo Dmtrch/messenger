@@ -412,7 +412,8 @@ func (h *Hub) handleCallOffer(c *client, msg inMsg) {
 	busy := false
 	h.callsMu.Lock()
 	for _, s := range h.calls {
-		if s.initiatorID == msg.TargetID || s.targetID == msg.TargetID {
+		if s.initiatorID == msg.TargetID || s.targetID == msg.TargetID ||
+			s.initiatorID == c.userID || s.targetID == c.userID {
 			busy = true
 			break
 		}
