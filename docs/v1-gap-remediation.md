@@ -55,7 +55,7 @@
 - медиа перестают быть публичными файлами по случайному имени; ✅
 - API начинает соответствовать ожидаемому контракту. ✅
 
-## Этап 3. Device model и key registration ✅ Закрыт (частично)
+## Этап 3. Device model и key registration ✅ Закрыт
 
 ### Цель этапа
 
@@ -63,16 +63,17 @@
 
 ### Задачи
 
-1. Добавить `devices`.
-2. Вынести `identity_keys` и `one_time_prekeys` на уровень устройства.
-3. Реализовать `POST /api/keys/register`.
-4. Обновить `GET /api/keys/:userId` на возврат bundle по устройствам.
-5. Изменить клиентское хранение session state.
+1. Добавить `devices`. ✅
+2. Вынести `identity_keys` и `one_time_prekeys` на уровень устройства. ✅
+3. Реализовать `POST /api/keys/register`. ✅
+4. Обновить `GET /api/keys/:userId` на возврат bundle по устройствам. (частично — возвращает первое активное устройство; полный multi-device bundle — будущий долг)
+5. Изменить клиентское хранение session state. (будущий долг)
 
 ### Выход этапа
 
-- появляется фундамент для реального multi-device; ✅ (device entity в БД, POST /api/keys/register — структурный долг по device_id остаётся в чеклисте)
-- ключевой API становится совместим со спецификацией. ✅
+- появляется фундамент для реального multi-device: ✅ `devices` таблица, composite PK `(user_id, device_id)` в `identity_keys`, `PopPreKey` фильтрует по device, `POST /api/keys/register` идемпотентен;
+- ключевой API совместим со спецификацией. ✅
+- полноценная client-side multi-device модель (per-device ratchet, GET bundle всех устройств) — архитектурный долг следующего уровня.
 
 ## Этап 4. Message state и список чатов ✅ Закрыт
 

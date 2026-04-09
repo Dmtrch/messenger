@@ -24,9 +24,11 @@
 
 `Must`
 
+**Статус**: ⚠️ Фундамент заложен (этапы 3, 7). Таблица `devices` создана; `identity_keys` получила composite PK `(user_id, device_id)` через migration #7; `PopPreKey` фильтрует по `device_id`; `POST /api/keys/register` идемпотентен по IK public key. Остаётся: `GET /api/keys/:userId` возвращает только первое устройство; per-device ratchet state на клиенте не реализован; WS Hub не отслеживает соединения на уровне device_id.
+
 **Нереализованная задача**
 
-Спецификация требует регистрацию нескольких устройств одного пользователя с публикацией identity keys, signed prekeys и one-time prekeys на уровне устройства. В текущем коде ключи привязаны к `user_id`, а не к отдельному `device_id`.
+Спецификация требует регистрацию нескольких устройств одного пользователя с публикацией identity keys, signed prekeys и one-time prekeys на уровне устройства.
 
 **Методика реализации**
 
@@ -48,9 +50,11 @@
 
 `Must`
 
-**Нереализованная задача**
+**Статус**: ✅ Реализовано (этапы 3, 7). Endpoint существует под JWT, принимает `deviceName`, `ikPublic`, `spkPublic`, `spkSignature`, `opkPublics`. Создаёт `devices` запись, сохраняет `identity_keys` с device_id, сохраняет OPK с привязкой к устройству. Идемпотентен: повторный вызов с тем же `ikPublic` переиспользует существующий `device_id` вместо создания нового устройства.
 
-В спецификации есть отдельный endpoint `POST /api/keys/register` для регистрации набора публичных ключей. В текущей реализации сохранение ключей происходит только внутри `POST /api/auth/register`.
+**Нереализованная задача** *(была)*
+
+В спецификации есть отдельный endpoint `POST /api/keys/register` для регистрации набора публичных ключей. В текущей реализации сохранение ключей происходило только внутри `POST /api/auth/register`.
 
 **Методика реализации**
 
@@ -721,11 +725,11 @@ WebRTC mesh (каждый ↔ каждый) нагружает клиент кв
 
 ### Must — остаток
 
-- multi-device модель (архитектурный разрыв)
-- `POST /api/keys/register` (реализован как upsert, но не идемпотентен с device fingerprint)
+- multi-device модель (архитектурный долг: GET bundle всех устройств, per-device ratchet на клиенте, WS hub на уровне device_id; фундамент заложен в этапах 3+7)
 
 ### Must — выполнено ✅
 
+- ~~`POST /api/keys/register`~~ — этап 3 + идемпотентность в этапе 7
 - ~~offline history viewing~~ — этап 6
 - ~~Sender Keys~~ — этап 5
 - ~~skipped message keys~~ — этап 5

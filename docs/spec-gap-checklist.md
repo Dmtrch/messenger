@@ -4,8 +4,8 @@
 
 ## Must
 
-- [ ] Ввести полноценную multi-device модель
-- [ ] Реализовать `POST /api/keys/register`
+- [ ] Ввести полноценную multi-device модель (архитектурный долг: GET bundle по устройствам, per-device ratchet на клиенте, WS hub на уровне device)
+- [x] Реализовать `POST /api/keys/register`
 - [x] Реализовать Sender Keys для групп
 - [x] Добавить skipped message keys в Double Ratchet
 - [x] Реализовать encrypted media at rest
@@ -80,8 +80,8 @@
 
 ## Контрольные вехи
 
-- [ ] Закрыты все `Must`
-- [ ] Закрыты все security-пункты из спецификации
-- [ ] Закрыты все data-model и migration-пункты
+- [ ] Закрыты все `Must` (остаётся: полноценная multi-device архитектура)
+- [x] Закрыты все security-пункты из спецификации
+- [x] Закрыты все data-model и migration-пункты (identity_keys composite PK, versioned migrations)
 - [x] Закрыты все crypto-пункты (этап 5)
 - [ ] Закрыты все test-пункты

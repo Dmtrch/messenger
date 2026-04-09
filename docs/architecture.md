@@ -198,14 +198,16 @@ CREATE TABLE devices (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- Публичные ключи (для E2E)
+-- Публичные ключи (для E2E) — PK составной для multi-device
 CREATE TABLE identity_keys (
-    user_id TEXT PRIMARY KEY,  -- TODO: мигрировать на (user_id, device_id)
+    user_id   TEXT NOT NULL,
+    device_id TEXT NOT NULL DEFAULT '',
     ik_public BLOB,            -- Identity Key
     spk_public BLOB,           -- Signed PreKey
     spk_signature BLOB,
     spk_id INTEGER,
     updated_at INTEGER,
+    PRIMARY KEY (user_id, device_id),
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
@@ -349,7 +351,7 @@ messenger/
                (при невозможности P2P — через TURN-релей)
 ```
 
-### WS-события сигнализации (не реализованы)
+### WS-события сигнализации ✅ Реализованы (этап 9)
 
 ```
 call_offer      chatId, callId, sdp           — инициатор → получатель
