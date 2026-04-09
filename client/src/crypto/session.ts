@@ -24,8 +24,23 @@ import {
   consumeOneTimePreKey,
   loadRatchetSession,
   saveRatchetSession,
+  saveMySenderKey,
+  loadMySenderKey,
+  savePeerSenderKey,
+  loadPeerSenderKey,
   type IdentityKeyPair,
 } from './keystore'
+import {
+  generateSenderKey,
+  senderKeyEncrypt,
+  senderKeyDecrypt,
+  serializeSenderKeyState,
+  deserializeSenderKeyState,
+  createSKDistribution,
+  importSKDistribution,
+  type GroupWirePayload,
+  type SKDistributionMessage,
+} from './senderkey'
 import {
   x3dhInitiatorAgreement,
   x3dhResponderAgreement,
@@ -185,6 +200,105 @@ export async function encryptMessage(
 
   const payload: WirePayload = { v: 1, ...wireExtra, msg: message }
   return btoa(JSON.stringify(payload))
+}
+
+// ── Публичный API для групповых чатов ─────────────────────────────────────
+
+/**
+ * Зашифровать групповое сообщение.
+ * При первом вызове: генерирует SenderKey и распространяет SKDM всем участникам.
+ * Возвращает JSON GroupWirePayload (base64-encoded) и список SKDM для отправки.
+ */
+export async function encryptGroupMessage(
+  chatId: string,
+  myUserId: string,
+  members: string[],  // все участники включая себя
+  plaintext: string
+): Promise<{
+  encodedPayload: string
+  skdmRecipients: Array<{ userId: string; encodedSkdm: string }>
+}> {
+  await ensureSodium()
+
+  let skdmRecipients: Array<{ userId: string; encodedSkdm: string }> = []
+
+  // Загружаем или генерируем свой SenderKey
+  let mySKSerialized = await loadMySenderKey(chatId)
+  let mySK = mySKSerialized ? deserializeSenderKeyState(mySKSerialized) : null
+
+  if (!mySK) {
+    mySK = await generateSenderKey()
+    await saveMySenderKey(chatId, serializeSenderKeyState(mySK))
+
+    // Ленивое распространение SKDM всем участникам кроме себя
+    const { default: _sodium } = await import('libsodium-wrappers')
+    await _sodium.ready
+    const skdm = createSKDistribution(_sodium, myUserId, chatId, mySK)
+    const skdmJson = JSON.stringify(skdm)
+
+    skdmRecipients = await Promise.all(
+      members
+        .filter((uid) => uid !== myUserId)
+        .map(async (uid) => ({
+          userId: uid,
+          encodedSkdm: await encryptMessage(chatId, uid, skdmJson),
+        }))
+    )
+  }
+
+  const { payload, nextState } = await senderKeyEncrypt(mySK, chatId, plaintext)
+  await saveMySenderKey(chatId, serializeSenderKeyState(nextState))
+
+  return {
+    encodedPayload: btoa(JSON.stringify(payload)),
+    skdmRecipients,
+  }
+}
+
+/**
+ * Расшифровать групповое сообщение.
+ * Принимает base64-encoded GroupWirePayload.
+ */
+export async function decryptGroupMessage(
+  chatId: string,
+  senderId: string,
+  encodedPayload: string
+): Promise<string> {
+  await ensureSodium()
+
+  const payload = JSON.parse(atob(encodedPayload)) as GroupWirePayload
+  if (payload.type !== 'group') throw new Error('Not a group wire payload')
+
+  const peerSKSerialized = await loadPeerSenderKey(chatId, senderId)
+  if (!peerSKSerialized) throw new Error(`No sender key for ${senderId} in ${chatId}`)
+
+  const peerSK = deserializeSenderKeyState(peerSKSerialized)
+  const { plaintext, nextState } = await senderKeyDecrypt(peerSK, payload)
+  await savePeerSenderKey(chatId, senderId, serializeSenderKeyState(nextState))
+
+  return plaintext
+}
+
+/**
+ * Обработать входящий SKDM от другого участника группы.
+ * Сохраняет SenderKey отправителя в keystore.
+ */
+export async function handleIncomingSKDM(
+  chatId: string,
+  senderId: string,
+  encodedSkdm: string  // base64-encoded encrypted individual message containing SKDM JSON
+): Promise<void> {
+  await ensureSodium()
+
+  const { default: _sodium } = await import('libsodium-wrappers')
+  await _sodium.ready
+
+  // Расшифровываем SKDM через индивидуальную E2E сессию
+  const skdmJson = await decryptMessage(chatId, senderId, encodedSkdm)
+  const skdm = JSON.parse(skdmJson) as SKDistributionMessage
+
+  const state = importSKDistribution(_sodium, skdm)
+  await savePeerSenderKey(chatId, senderId, serializeSenderKeyState(state))
 }
 
 /**

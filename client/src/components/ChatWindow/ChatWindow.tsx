@@ -2,19 +2,20 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { useChatStore } from '@/store/chatStore'
 import { useAuthStore } from '@/store/authStore'
 import { useWsStore } from '@/store/wsStore'
-import { api } from '@/api/client'
-import { encryptMessage, decryptMessage } from '@/crypto/session'
+import { api, uploadEncryptedMedia } from '@/api/client'
+import { encryptMessage, decryptMessage, encryptGroupMessage, decryptGroupMessage } from '@/crypto/session'
 import type { Message } from '@/types'
 import s from './ChatWindow.module.css'
 
 /** Разбирает расшифрованный payload — текст или медиа-JSON */
-function parsePayload(raw: string): Pick<Message, 'text' | 'mediaId' | 'originalName' | 'type'> {
+function parsePayload(raw: string): Pick<Message, 'text' | 'mediaId' | 'mediaKey' | 'originalName' | 'type'> {
   try {
     const obj = JSON.parse(raw) as Record<string, unknown>
     if (obj && typeof obj.mediaId === 'string') {
       return {
         type: (obj.mediaType as Message['type']) ?? 'file',
         mediaId: obj.mediaId,
+        mediaKey: typeof obj.mediaKey === 'string' ? obj.mediaKey : undefined,
         originalName: typeof obj.originalName === 'string' ? obj.originalName : undefined,
         text: typeof obj.text === 'string' ? obj.text : undefined,
       }
@@ -25,8 +26,10 @@ function parsePayload(raw: string): Pick<Message, 'text' | 'mediaId' | 'original
 
 interface PendingMedia {
   mediaId: string
+  mediaKey: string      // base64, ключ шифрования — включается в E2E payload
   originalName: string
   mediaType: 'image' | 'file'
+  contentType: string
   previewUrl?: string   // объектный URL для превью изображений
 }
 
@@ -108,7 +111,13 @@ export default function ChatWindow({ chatId, onBack }: Props) {
         const decoded = await Promise.all(msgs.map(async (m) => {
           let raw = tryDecode(m.encryptedPayload)
           try {
-            raw = await decryptMessage(id, m.senderId, m.encryptedPayload)
+            // Определяем тип шифрования по payload
+            const isGroupPayload = (() => {
+              try { return JSON.parse(atob(m.encryptedPayload))?.type === 'group' } catch { return false }
+            })()
+            raw = isGroupPayload
+              ? await decryptGroupMessage(id, m.senderId, m.encryptedPayload)
+              : await decryptMessage(id, m.senderId, m.encryptedPayload)
           } catch { /* оставляем tryDecode результат */ }
           const parsed = parsePayload(raw)
           return {
@@ -212,8 +221,16 @@ export default function ChatWindow({ chatId, onBack }: Props) {
 
     setUploading(true)
     try {
-      const res = await api.uploadMedia(file, chatId)
-      setPendingMedia({ mediaId: res.mediaId, originalName: file.name, mediaType, previewUrl })
+      // Шифруем файл на клиенте перед загрузкой — сервер хранит только ciphertext
+      const res = await uploadEncryptedMedia(file, chatId)
+      setPendingMedia({
+        mediaId: res.mediaId,
+        mediaKey: res.mediaKey,
+        originalName: file.name,
+        mediaType,
+        contentType: file.type,
+        previewUrl,
+      })
     } catch {
       // Сообщаем через placeholder в поле ввода
       setText((t) => t || `[ошибка загрузки ${file.name}]`)
@@ -267,10 +284,12 @@ export default function ChatWindow({ chatId, onBack }: Props) {
     let msgType: Message['type'] = 'text'
     if (pendingMedia) {
       msgType = pendingMedia.mediaType
+      // mediaKey включается в зашифрованный payload — сервер никогда его не видит
       plainPayload = JSON.stringify({
         mediaId: pendingMedia.mediaId,
+        mediaKey: pendingMedia.mediaKey,
         originalName: pendingMedia.originalName,
-        mediaType: pendingMedia.mediaType,
+        mediaType: pendingMedia.contentType,
         text: trimmed || undefined,
       })
     } else {
@@ -285,6 +304,7 @@ export default function ChatWindow({ chatId, onBack }: Props) {
       senderKeyId: 0,
       text: trimmed || pendingMedia?.originalName,
       mediaId: pendingMedia?.mediaId,
+      mediaKey: pendingMedia?.mediaKey,
       originalName: pendingMedia?.originalName,
       timestamp: Date.now(),
       status: 'sending',
@@ -295,22 +315,42 @@ export default function ChatWindow({ chatId, onBack }: Props) {
     removePendingMedia()
 
     const members = chat?.members ?? [currentUser.id]
-    const peers = members.filter((uid) => uid !== currentUser.id)
+    const isGroup = chat?.type === 'group'
 
-    // Шифруем payload для каждого получателя + копия для себя
-    const recipientPromises = [...peers, currentUser.id].map(async (userId) => {
-      try {
-        const ciphertext = await encryptMessage(chatId, userId, plainPayload)
-        return { userId, ciphertext }
-      } catch {
-        const bytes = new TextEncoder().encode(plainPayload)
-        let binary = ''
-        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-        return { userId, ciphertext: btoa(binary) }
+    let recipients: Array<{ userId: string; ciphertext: string }>
+
+    if (isGroup) {
+      // Групповое шифрование: все участники получают одинаковый GroupWirePayload
+      const { encodedPayload, skdmRecipients } = await encryptGroupMessage(
+        chatId, currentUser.id, members, plainPayload
+      )
+      // Сначала доставляем SKDM если они есть (ленивое распространение)
+      if (skdmRecipients.length > 0) {
+        const skdmFrame: PendingFrame = {
+          type: 'skdm',
+          chatId,
+          recipients: skdmRecipients.map((r) => ({ userId: r.userId, ciphertext: r.encodedSkdm })),
+        }
+        if (wsSend) wsSend(skdmFrame)
+        else pendingQueue.current.push(skdmFrame)
       }
-    })
-
-    const recipients = await Promise.all(recipientPromises)
+      recipients = members.map((uid) => ({ userId: uid, ciphertext: encodedPayload }))
+    } else {
+      // Direct: каждый получатель получает индивидуально зашифрованный payload
+      const peers = members.filter((uid) => uid !== currentUser.id)
+      const recipientPromises = [...peers, currentUser.id].map(async (userId) => {
+        try {
+          const ciphertext = await encryptMessage(chatId, userId, plainPayload)
+          return { userId, ciphertext }
+        } catch {
+          const bytes = new TextEncoder().encode(plainPayload)
+          let binary = ''
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+          return { userId, ciphertext: btoa(binary) }
+        }
+      })
+      recipients = await Promise.all(recipientPromises)
+    }
 
     const frame: PendingFrame = {
       type: 'message',
@@ -461,10 +501,10 @@ function Bubble({ msg, isOwn, onTouchStart, onTouchEnd, onRightClick }: BubblePr
       onContextMenu={(e) => onRightClick(msg, e)}
     >
       {msg.type === 'image' && msg.mediaId && (
-        <AuthImage mediaId={msg.mediaId} className={s.bubbleImage} alt={msg.originalName ?? 'изображение'} />
+        <AuthImage mediaId={msg.mediaId} mediaKey={msg.mediaKey} className={s.bubbleImage} alt={msg.originalName ?? 'изображение'} />
       )}
       {msg.type === 'file' && msg.mediaId && (
-        <AuthFileLink mediaId={msg.mediaId} originalName={msg.originalName} className={s.bubbleFile}>
+        <AuthFileLink mediaId={msg.mediaId} mediaKey={msg.mediaKey} originalName={msg.originalName} className={s.bubbleFile}>
           <FileIcon />
           <span>{msg.originalName ?? msg.mediaId}</span>
         </AuthFileLink>
@@ -532,17 +572,27 @@ function ContextMenu({ x, y, isOwn, onCopy, onEdit, onDelete }: ContextMenuProps
 
 // --- Аутентифицированные медиа-компоненты ---
 
-/** Загружает изображение через authenticated fetch и показывает через object URL. */
-function AuthImage({ mediaId, className, alt }: { mediaId: string; className?: string; alt?: string }) {
+/** Загружает изображение через authenticated fetch (с расшифровкой если есть mediaKey). */
+function AuthImage({
+  mediaId, mediaKey, className, alt,
+}: {
+  mediaId: string
+  mediaKey?: string
+  className?: string
+  alt?: string
+}) {
   const [src, setSrc] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    api.fetchMediaBlobUrl(mediaId)
+    const fetch = mediaKey
+      ? api.fetchEncryptedMediaBlobUrl(mediaId, mediaKey, 'image/*')
+      : api.fetchMediaBlobUrl(mediaId)
+    fetch
       .then((url) => { if (!cancelled) setSrc(url) })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [mediaId])
+  }, [mediaId, mediaKey])
 
   if (!src) {
     return <div className={className} style={{ background: '#ddd', minHeight: 60, borderRadius: 4 }} />
@@ -554,11 +604,12 @@ function AuthImage({ mediaId, className, alt }: { mediaId: string; className?: s
   )
 }
 
-/** Ссылка на файл через authenticated fetch + download. */
+/** Ссылка на файл через authenticated fetch (с расшифровкой если есть mediaKey). */
 function AuthFileLink({
-  mediaId, originalName, className, children,
+  mediaId, mediaKey, originalName, className, children,
 }: {
   mediaId: string
+  mediaKey?: string
   originalName?: string
   className?: string
   children: React.ReactNode
@@ -566,13 +617,15 @@ function AuthFileLink({
   const handleClick = useCallback(async (e: React.MouseEvent) => {
     e.preventDefault()
     try {
-      const url = await api.fetchMediaBlobUrl(mediaId)
+      const url = mediaKey
+        ? await api.fetchEncryptedMediaBlobUrl(mediaId, mediaKey, 'application/octet-stream')
+        : await api.fetchMediaBlobUrl(mediaId)
       const a = document.createElement('a')
       a.href = url
       a.download = originalName ?? mediaId
       a.click()
     } catch { /* игнорируем */ }
-  }, [mediaId, originalName])
+  }, [mediaId, mediaKey, originalName])
 
   return (
     <a href="#" onClick={handleClick} className={className}>

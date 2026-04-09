@@ -62,6 +62,18 @@ export async function consumeOneTimePreKey(id: number): Promise<DHKeyPair | unde
   return key
 }
 
+/**
+ * Добавить новые OPK к существующим без перезаписи всего массива.
+ * IDs новых ключей = max(existing) + 1..N.
+ */
+export async function appendOneTimePreKeys(newKeys: Omit<DHKeyPair, 'id'>[]): Promise<DHKeyPair[]> {
+  const existing = await loadOneTimePreKeys()
+  const maxId = existing.reduce((m, k) => Math.max(m, k.id), 0)
+  const keysWithIds: DHKeyPair[] = newKeys.map((k, i) => ({ ...k, id: maxId + 1 + i }))
+  await saveOneTimePreKeys([...existing, ...keysWithIds])
+  return keysWithIds
+}
+
 // ── Double Ratchet session states ─────────────────────────
 
 export interface RatchetSessionData {
@@ -80,6 +92,28 @@ export async function loadRatchetSession(chatId: string): Promise<RatchetSession
 
 export async function deleteRatchetSession(chatId: string): Promise<void> {
   await del(`ratchet:${chatId}`, keyStore)
+}
+
+// ── Sender Keys (групповые чаты) ─────────────────────────────
+
+/** Сохранить свой SenderKey для группового чата */
+export async function saveMySenderKey(chatId: string, serialized: string): Promise<void> {
+  await set(`my_sender_key:${chatId}`, serialized, keyStore)
+}
+
+/** Загрузить свой SenderKey для группового чата */
+export async function loadMySenderKey(chatId: string): Promise<string | undefined> {
+  return get<string>(`my_sender_key:${chatId}`, keyStore)
+}
+
+/** Сохранить SenderKey другого участника группового чата */
+export async function savePeerSenderKey(chatId: string, senderId: string, serialized: string): Promise<void> {
+  await set(`peer_sender_key:${chatId}:${senderId}`, serialized, keyStore)
+}
+
+/** Загрузить SenderKey другого участника группового чата */
+export async function loadPeerSenderKey(chatId: string, senderId: string): Promise<string | undefined> {
+  return get<string>(`peer_sender_key:${chatId}:${senderId}`, keyStore)
 }
 
 // ── Push subscription ─────────────────────────────────────

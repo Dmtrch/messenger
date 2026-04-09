@@ -161,6 +161,45 @@ async function req<T>(
   return response.json() as Promise<T>
 }
 
+/** Шифрует файл на стороне клиента и загружает ciphertext на сервер.
+ *  Возвращает mediaId и base64-ключ для встраивания в зашифрованный payload. */
+export async function uploadEncryptedMedia(
+  file: File,
+  chatId?: string,
+): Promise<{ mediaId: string; mediaKey: string; originalName: string; contentType: string }> {
+  // Импортируем libsodium лениво чтобы не тянуть в все бандлы
+  const { default: _sodium } = await import('libsodium-wrappers')
+  await _sodium.ready
+
+  // Генерируем ключ и nonce
+  const mediaKey = _sodium.randombytes_buf(32)
+  const nonce = _sodium.randombytes_buf(_sodium.crypto_secretbox_NONCEBYTES)
+
+  // Шифруем содержимое файла
+  const plainBytes = new Uint8Array(await file.arrayBuffer())
+  const ct = _sodium.crypto_secretbox_easy(plainBytes, nonce, mediaKey)
+
+  // ciphertext = nonce || encrypted_bytes
+  const combined = new Uint8Array(nonce.length + ct.length)
+  combined.set(nonce)
+  combined.set(ct, nonce.length)
+
+  // Загружаем зашифрованный blob (имя файла скрываем — сервер видит только ciphertext)
+  const encFile = new File([combined], 'encrypted', { type: 'application/octet-stream' })
+  const form = new FormData()
+  form.append('file', encFile)
+  if (chatId) form.append('chat_id', chatId)
+
+  const res = await req<MediaUploadRes>('/api/media/upload', { method: 'POST', body: form })
+
+  return {
+    mediaId: res.mediaId,
+    mediaKey: _sodium.to_base64(mediaKey),
+    originalName: file.name,
+    contentType: file.type,
+  }
+}
+
 /** Загружает медиафайл с авторизацией и возвращает кешированный object URL. */
 async function fetchMediaBlobUrl(mediaId: string): Promise<string> {
   const cached = _mediaBlobCache.get(mediaId)
@@ -190,6 +229,49 @@ async function fetchMediaBlobUrl(mediaId: string): Promise<string> {
   const blob = await response.blob()
   const url = URL.createObjectURL(blob)
   _mediaBlobCache.set(mediaId, url)
+  return url
+}
+
+/** Загружает зашифрованный медиафайл, расшифровывает ключом из payload и кэширует URL. */
+async function fetchEncryptedMediaBlobUrl(mediaId: string, mediaKey: string, mimeType: string): Promise<string> {
+  // Кэш-ключ включает mediaKey чтобы не перепутать при коллизии mediaId (теоретически)
+  const cacheKey = `${mediaId}:${mediaKey.slice(0, 8)}`
+  const cached = _mediaBlobCache.get(cacheKey)
+  if (cached) return cached
+
+  const path = `/api/media/${encodeURIComponent(mediaId)}`
+  const headers: Record<string, string> = _accessToken
+    ? { Authorization: `Bearer ${_accessToken}` }
+    : {}
+
+  let response = await fetch(`${BASE}${path}`, { headers, credentials: 'include' })
+
+  if (response.status === 401) {
+    if (!_refreshInFlight) {
+      _refreshInFlight = doRefresh().finally(() => { _refreshInFlight = null })
+    }
+    const token = await _refreshInFlight
+    if (!token) throw new ApiError(401, 'Сессия истекла')
+    response = await fetch(`${BASE}${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'include',
+    })
+  }
+
+  if (!response.ok) throw new ApiError(response.status, 'media fetch failed')
+
+  const { default: _sodium } = await import('libsodium-wrappers')
+  await _sodium.ready
+
+  const combined = new Uint8Array(await response.arrayBuffer())
+  const nonce = combined.slice(0, _sodium.crypto_secretbox_NONCEBYTES)
+  const ct = combined.slice(_sodium.crypto_secretbox_NONCEBYTES)
+  const key = _sodium.from_base64(mediaKey)
+  const plain = _sodium.crypto_secretbox_open_easy(ct, nonce, key)
+
+  const blob = new Blob([plain.buffer as ArrayBuffer], { type: mimeType || 'application/octet-stream' })
+  const url = URL.createObjectURL(blob)
+  _mediaBlobCache.set(cacheKey, url)
   return url
 }
 
@@ -247,6 +329,9 @@ export const api = {
 
   /** Загружает медиафайл с авторизацией и возвращает кешированный object URL. */
   fetchMediaBlobUrl,
+
+  /** Загружает зашифрованный медиафайл, расшифровывает и возвращает object URL. */
+  fetchEncryptedMediaBlobUrl,
 
   // ── Messages ─────────────────────────────────────────────
   deleteMessage: (clientMsgId: string) =>
