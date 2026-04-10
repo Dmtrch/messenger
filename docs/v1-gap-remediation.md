@@ -66,14 +66,14 @@
 1. Добавить `devices`. ✅
 2. Вынести `identity_keys` и `one_time_prekeys` на уровень устройства. ✅
 3. Реализовать `POST /api/keys/register`. ✅
-4. Обновить `GET /api/keys/:userId` на возврат bundle по устройствам. (частично — возвращает первое активное устройство; полный multi-device bundle — будущий долг)
-5. Изменить клиентское хранение session state. (будущий долг)
+4. Обновить `GET /api/keys/:userId` на возврат bundle по устройствам. ✅ (закрыто в этапе 10)
+5. Изменить клиентское хранение session state. (закрывается в этапе 10, клиентская часть)
 
 ### Выход этапа
 
 - появляется фундамент для реального multi-device: ✅ `devices` таблица, composite PK `(user_id, device_id)` в `identity_keys`, `PopPreKey` фильтрует по device, `POST /api/keys/register` идемпотентен;
 - ключевой API совместим со спецификацией. ✅
-- полноценная client-side multi-device модель (per-device ratchet, GET bundle всех устройств) — архитектурный долг следующего уровня.
+- полноценная client-side multi-device модель — закрывается в этапе 10.
 
 ## Этап 4. Message state и список чатов ✅ Закрыт
 
@@ -153,7 +153,7 @@
 - проект можно обновлять без ручной реконструкции БД;
 - deployment становится воспроизводимым.
 
-## Этап 8. Тестовый контур
+## Этап 8. Тестовый контур ✅ Закрыт (частично)
 
 ### Цель этапа
 
@@ -161,22 +161,23 @@
 
 ### Задачи
 
-1. Backend tests:
-   - auth
-   - keys
-   - chat
-   - ws
-   - db
-2. Frontend tests:
-   - crypto
-   - api client
-   - ключевые UI-компоненты
-3. Добавить smoke-check для совместимости client/server.
+1. Backend tests: ✅
+   - auth — register, login, refresh rotation, change-password, JWT middleware
+   - keys — RegisterDevice idempotency, PopPreKey by device, bundle 404
+   - chat — non-member forbidden, delete/edit authorization
+   - ws — invalid token → close 4001, valid connect, BroadcastToConversation
+   - db — RunMigrations idempotent, migration #7 composite PK
+2. Frontend tests: ✅ (частично)
+   - crypto: `ratchet.test.ts` (11 тестов), `x3dh.test.ts` (6 тестов)
+   - api client: `client.test.ts` (9 тестов)
+   - ключевые UI-компоненты: не покрыты
+3. Smoke-check client/server совместимости: не реализован
 
 ### Выход этапа
 
-- критичные изменения перестают быть blind refactor;
-- можно безопаснее двигать security и crypto контур.
+- критичные изменения в crypto и auth перестают быть blind refactor; ✅
+- можно безопаснее двигать security и crypto контур. ✅
+- **Bugfix**: `initRatchet` теперь следует Signal spec — Bob (responder) стартует с `dhRemotePublic=null`, первое сообщение Alice триггернёт DH ratchet; исправлен баг "No send chain key" при первом ответе Bob.
 
 ## Этап 9. Аудио и видео звонки ✅ Закрыт
 
@@ -210,6 +211,40 @@
 - TURN-сервер пропускает через себя весь медиатрафик при невозможности P2P (~15–30% звонков);
 - видеозвонок 720p ≈ 1–2 Мбит/с в каждую сторону — домашний интернет с узким upload может стать ограничением при нескольких одновременных звонках через TURN.
 
+## Этап 10. Полноценная multi-device архитектура 🔄 В работе (ветка `feature/stage9-multi-device`)
+
+### Цель этапа
+
+Завершить поддержку нескольких устройств одного пользователя по Signal Sesame spec:
+каждое устройство получает свой bundle, свою ratchet-сессию и свою копию каждого сообщения.
+
+### Задачи
+
+**Серверная часть ✅ Закрыта (коммит 984a28b)**
+
+1. `GET /api/keys/:userId` возвращает `{ "devices": [...] }` — bundle для каждого активного устройства. ✅
+2. WS Hub: `client.deviceID`, `ServeWS` принимает `?deviceId=`, валидирует принадлежность пользователю. ✅
+3. `DeliverToDevice(userID, deviceID, payload)` — адресная WS-доставка на конкретное устройство. ✅
+4. `handleMessage`: `recipient.DeviceID` → `DestinationDeviceID` в БД; `senderDeviceId` в WS payload. ✅
+5. Migration #8: `messages.destination_device_id TEXT NOT NULL DEFAULT ''`. ✅
+
+**Клиентская часть — ожидает следующей сессии**
+
+6. `session.ts`: `sessionKey(peerId, deviceId)` — ключ сессии по паре устройств (Signal Sesame spec).
+7. `session.ts`: `encryptForAllDevices(recipientId, bundles[], plaintext)` → `[{deviceId, ciphertext}]`.
+8. `session.ts`: `decryptMessage(senderId, senderDeviceId, ciphertext)` — добавить `senderDeviceId`.
+9. `client.ts`: `PreKeyBundleResponse { devices: DeviceBundle[] }` — обновить типы API.
+10. `useMessengerWS.ts`: передавать `senderDeviceId` в `decryptMessage`; добавить `?deviceId=` в WS URL.
+11. `ChatWindowPage.tsx`: fan-out отправка — отдельный ciphertext для каждого устройства получателя.
+
+### Выход этапа
+
+- два браузера одного пользователя независимо получают и расшифровывают сообщения;
+- ratchet-сессии хранятся по `peerId:deviceId`, не конкурируют;
+- `Must`-пункт чеклиста закрыт.
+
+---
+
 ## Рекомендуемый порядок выполнения
 
 1. Этап 1
@@ -221,6 +256,7 @@
 7. Этап 7
 8. Этап 8
 9. Этап 9
+10. Этап 10
 
 ## Критерий завершения
 

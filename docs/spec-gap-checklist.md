@@ -4,7 +4,14 @@
 
 ## Must
 
-- [ ] Ввести полноценную multi-device модель (архитектурный долг: GET bundle по устройствам, per-device ratchet на клиенте, WS hub на уровне device)
+- [ ] Ввести полноценную multi-device модель — **сервер ✅, клиент в работе**
+  - [x] GET /api/keys/:userId возвращает `{ devices: [...] }` — bundle для каждого устройства
+  - [x] WS Hub: `client.deviceID`, `DeliverToDevice`, `senderDeviceId` в WS payload
+  - [x] `messages.destination_device_id` (migration #8) — адресное хранение
+  - [ ] `session.ts`: sessionKey → `peerId:deviceId`; `encryptForAllDevices`; `decryptMessage(senderId, deviceId, ct)`
+  - [ ] `client.ts`: тип `PreKeyBundleResponse { devices: DeviceBundle[] }`
+  - [ ] `useMessengerWS.ts`: передавать `senderDeviceId` в `decryptMessage`; `?deviceId=` в WS URL
+  - [ ] `ChatWindowPage.tsx`: fan-out шифрование — отдельный ciphertext на каждое устройство получателя
 - [x] Реализовать `POST /api/keys/register`
 - [x] Реализовать Sender Keys для групп
 - [x] Добавить skipped message keys в Double Ratchet
@@ -21,16 +28,16 @@
 
 ## Should
 
-- [ ] Добавить смену пароля с инвалидцией всех сессий
+- [x] Добавить смену пароля с инвалидцией всех сессий
 - [x] Перейти на пагинацию истории по `messageId` или opaque cursor
 - [x] Реализовать серверные `unreadCount`, `updatedAt`, `lastMessage`
 - [x] Довести lifecycle `prekey_request`
 - [x] Добавить полноценный offline sync слой поверх IndexedDB
 - [x] Ограничить `CheckOrigin` для WebSocket
-- [ ] Ввести конфигурационный файл сервера
+- [x] Ввести конфигурационный файл сервера
 - [x] Перейти на versioned migrations и целевую схему БД
-- [ ] Добавить backend tests
-- [ ] Добавить frontend tests
+- [x] Добавить backend tests
+- [x] Добавить frontend tests
 
 ## Could
 
@@ -65,23 +72,42 @@
 - [x] **PopPreKey не учитывает device_id**: `PopPreKey(userID, deviceID)` фильтрует `WHERE user_id=? AND device_id=?`; `GetBundle` передаёт `ik.DeviceID`; WS hub передаёт `""` для суммарного подсчёта
 - [x] **POST /api/keys/register не идемпотентен**: `GetIdentityKeyByIKPublic` ищет существующее устройство по IK — если найдено, переиспользуем device_id; иначе создаём новое
 
+### Этап 10 — Полноценная multi-device модель (в работе, ветка `feature/stage9-multi-device`)
+
+**Сервер — закрыто:**
+- [x] **GetBundle → массив устройств**: `GetIdentityKeysByUserID` возвращает `[]IdentityKey`; `GET /api/keys/:userId` → `{ "devices": [{deviceId, ikPublic, spkId, spkPublic, spkSignature, opkId?, opkPublic?}] }`
+- [x] **WS device-level routing**: `client.deviceID`; `ServeWS` читает `?deviceId=`, валидирует владельца через `GetDeviceByID`; `DeliverToDevice` — адресная доставка
+- [x] **recipient.DeviceID**: `handleMessage` сохраняет `DestinationDeviceID`, маршрутизирует через `DeliverToDevice` или `Deliver`
+- [x] **senderDeviceId в WS payload**: каждое `message` событие содержит `senderDeviceId` отправителя
+- [x] **migration #8**: `messages.destination_device_id TEXT NOT NULL DEFAULT ''`
+
+**Клиент — ожидает следующей сессии:**
+- [ ] `session.ts`: `sessionKey(peerId, deviceId)` — Signal Sesame spec
+- [ ] `session.ts`: `encryptForAllDevices`, `decryptMessage(senderId, deviceId, ct)`
+- [ ] `client.ts`: `PreKeyBundleResponse { devices: DeviceBundle[] }`
+- [ ] `useMessengerWS.ts`: `senderDeviceId` → decrypt; `?deviceId=` в WS URL
+- [ ] `ChatWindowPage.tsx`: fan-out — отдельный ciphertext на каждое устройство
+
 ### Этап 4 — Message state (пропуски в UI)
 
 - [x] **markChatRead вызывается при открытии чата**: `api.markChatRead(chatId)` добавлен в useEffect открытия в ChatWindow.tsx
-- [ ] **lastMessage в ChatSummary не расшифровывается**: клиент получает `encryptedPayload`, но preview в списке чатов не отображает расшифрованный текст — нужна логика decrypt при загрузке чатов
+- [x] **lastMessage в ChatSummary не расшифровывается (ChatListPage)**: `tryDecryptPreview` в `ChatListPage.tsx` — декрипт после `getChats()`, медиа → '📎 Вложение', ошибка → 'Зашифрованное сообщение'
+- [x] **lastMessage — ChatWindowPage без декрипта**: `tryDecryptPreview` перенесена в `session.ts` как экспорт; `ChatWindowPage.tsx` и `useMessengerWS.ts` теперь декриптуют перед `upsertChat`
+- [x] **lastMessage — useMessengerWS без декрипта**: исправлено вместе с ChatWindowPage
 - [x] **Пагинация: nextCursor тип `string`**: `MessagesPage.nextCursor?: string` в `client.ts` — тип корректен везде
 
-### Этап 5 — Crypto (закрыт, но требует тестирования)
+### Этап 5 — Crypto (закрыт, тесты добавлены)
 
-- [ ] **Skipped keys — нет автоматического TTL**: кэш пропущенных ключей растёт без ограничения по времени — при долгих сессиях может вырасти до MAX_SKIP=100 записей без очистки старых; рекомендуется добавить timestamp и очищать ключи старше N дней
-- [ ] **Sender Keys — ротация при смене состава группы не реализована**: при добавлении или удалении участника SenderKey не пересоздаётся — новый участник может расшифровать старые сообщения, если получит старый SKDM
-- [ ] **Encrypted media — MIME-тип хранится в открытом виде**: `content_type` в `media_objects` виден серверу; при необходимости можно маскировать под `application/octet-stream`
-- [ ] **prekey_low — нет backoff**: при каждом подключении WS может прийти `prekey_low` и спровоцировать повторную загрузку 20 ключей; нужна защита от дублирующих пополнений за короткий период
+- [x] **Skipped keys — TTL 7 дней**: `SkippedKeyEntry { key, storedAt }` в `ratchet.ts`; `purgeExpiredSkippedKeys` вызывается при decrypt и сериализации; backward-compat для старого формата
+- [x] **Sender Keys — ротация при смене состава группы**: `upsertChat` в `chatStore.ts` детектирует изменение `members`, вызывает `invalidateGroupSenderKey(chatId)` — следующая отправка создаст новый SenderKey и разошлёт SKDM
+- [x] **Encrypted media — MIME-тип скрыт**: сервер всегда хранит `application/octet-stream`; убран content sniffing; реальный тип только в E2E payload
+- [x] **prekey_low — backoff 5 минут**: `isPreKeyReplenishOnCooldown` / `savePreKeyReplenishTime` в `keystore.ts`; `replenishPreKeys` в `useMessengerWS.ts` проверяет cooldown перед загрузкой
 
 ## Контрольные вехи
 
-- [ ] Закрыты все `Must` (остаётся: полноценная multi-device архитектура)
+- [ ] Закрыты все `Must` (остаётся: клиентская часть multi-device — session.ts, client.ts, useMessengerWS.ts, ChatWindowPage.tsx)
 - [x] Закрыты все security-пункты из спецификации
-- [x] Закрыты все data-model и migration-пункты (identity_keys composite PK, versioned migrations)
+- [x] Закрыты все data-model и migration-пункты (identity_keys composite PK, versioned migrations, destination_device_id)
 - [x] Закрыты все crypto-пункты (этап 5)
-- [ ] Закрыты все test-пункты
+- [x] Закрыты все test-пункты (backend 5 пакетов, frontend 26 тестов)
+- [x] Серверная часть multi-device: GET bundle всех устройств, WS device routing, senderDeviceId
