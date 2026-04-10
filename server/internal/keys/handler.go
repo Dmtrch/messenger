@@ -17,44 +17,56 @@ type Handler struct {
 	DB *sql.DB
 }
 
-// GET /api/keys/:userId — ключевой пакет для X3DH
+// GET /api/keys/:userId — ключевые пакеты для всех устройств (X3DH multi-device).
+// Возвращает: { "devices": [ { deviceId, ikPublic, spkId, spkPublic, spkSignature, opkId?, opkPublic? }, ... ] }
 func (h *Handler) GetBundle(w http.ResponseWriter, r *http.Request) {
 	targetID := chi.URLParam(r, "userId")
 
-	ik, err := db.GetIdentityKey(h.DB, targetID)
-	if err != nil || ik == nil {
-		httpErr(w, "keys not found", 404)
-		return
-	}
-
-	opkID, opkPub, err := db.PopPreKey(h.DB, targetID, ik.DeviceID)
+	keys, err := db.GetIdentityKeysByUserID(h.DB, targetID)
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
 	}
-
-	// Уведомить через WS если OPK закончились (проверяем конкретное устройство)
-	if count, _ := db.CountFreePreKeys(h.DB, targetID, ik.DeviceID); count < 5 {
-		// Хаб недоступен отсюда — клиент сам запросит при следующем подключении
-		_ = count
+	if len(keys) == 0 {
+		httpErr(w, "keys not found", 404)
+		return
 	}
 
-	resp := map[string]any{
-		"userId":       targetID,
-		"ikPublic":     base64.StdEncoding.EncodeToString(ik.IKPublic),
-		"spkId":        ik.SPKId,
-		"spkPublic":    base64.StdEncoding.EncodeToString(ik.SPKPublic),
-		"spkSignature": base64.StdEncoding.EncodeToString(ik.SPKSignature),
+	type deviceBundle struct {
+		DeviceID     string  `json:"deviceId"`
+		IKPublic     string  `json:"ikPublic"`
+		SPKId        int     `json:"spkId"`
+		SPKPublic    string  `json:"spkPublic"`
+		SPKSignature string  `json:"spkSignature"`
+		OPKId        *int64  `json:"opkId,omitempty"`
+		OPKPublic    *string `json:"opkPublic,omitempty"`
 	}
-	// Возвращаем deviceId если он есть (поддержка multi-device)
-	if ik.DeviceID != "" {
-		resp["deviceId"] = ik.DeviceID
+
+	devices := make([]deviceBundle, 0, len(keys))
+	for _, ik := range keys {
+		opkID, opkPub, err := db.PopPreKey(h.DB, targetID, ik.DeviceID)
+		if err != nil {
+			httpErr(w, "server error", 500)
+			return
+		}
+
+		bundle := deviceBundle{
+			DeviceID:     ik.DeviceID,
+			IKPublic:     base64.StdEncoding.EncodeToString(ik.IKPublic),
+			SPKId:        ik.SPKId,
+			SPKPublic:    base64.StdEncoding.EncodeToString(ik.SPKPublic),
+			SPKSignature: base64.StdEncoding.EncodeToString(ik.SPKSignature),
+		}
+		if opkPub != nil {
+			opkIDVal := opkID
+			opkPubStr := base64.StdEncoding.EncodeToString(opkPub)
+			bundle.OPKId = &opkIDVal
+			bundle.OPKPublic = &opkPubStr
+		}
+		devices = append(devices, bundle)
 	}
-	if opkPub != nil {
-		resp["opkId"] = opkID
-		resp["opkPublic"] = base64.StdEncoding.EncodeToString(opkPub)
-	}
-	reply(w, 200, resp)
+
+	reply(w, 200, map[string]any{"devices": devices})
 }
 
 // POST /api/keys/register — регистрация устройства и загрузка ключей

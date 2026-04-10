@@ -87,6 +87,18 @@ func DeleteSession(db *sql.DB, tokenHash string) error {
 	return err
 }
 
+// DeleteUserSessionsExcept удаляет все сессии пользователя кроме текущей.
+func DeleteUserSessionsExcept(db *sql.DB, userID, keepTokenHash string) error {
+	_, err := db.Exec(`DELETE FROM sessions WHERE user_id=? AND token_hash!=?`, userID, keepTokenHash)
+	return err
+}
+
+// UpdateUserPassword обновляет bcrypt-хэш пароля пользователя.
+func UpdateUserPassword(db *sql.DB, userID, passwordHash string) error {
+	_, err := db.Exec(`UPDATE users SET password_hash=? WHERE id=?`, passwordHash, userID)
+	return err
+}
+
 // ─── Contacts ────────────────────────────────────────────────────────────────
 
 func AddContact(db *sql.DB, userID, contactID string, createdAt int64) error {
@@ -285,25 +297,26 @@ func IsConversationMember(db *sql.DB, conversationID, userID string) (bool, erro
 // ─── Messages ────────────────────────────────────────────────────────────────
 
 type Message struct {
-	ID             string
-	ClientMsgID    string
-	ConversationID string
-	SenderID       string
-	RecipientID    string
-	Ciphertext     []byte
-	SenderKeyID    int64
-	IsDeleted      bool
-	EditedAt       sql.NullInt64
-	CreatedAt      int64
-	DeliveredAt    sql.NullInt64
-	ReadAt         sql.NullInt64
+	ID                   string
+	ClientMsgID          string
+	ConversationID       string
+	SenderID             string
+	RecipientID          string
+	DestinationDeviceID  string // пустая строка = доставить всем устройствам
+	Ciphertext           []byte
+	SenderKeyID          int64
+	IsDeleted            bool
+	EditedAt             sql.NullInt64
+	CreatedAt            int64
+	DeliveredAt          sql.NullInt64
+	ReadAt               sql.NullInt64
 }
 
 func SaveMessage(db *sql.DB, m Message) error {
 	_, err := db.Exec(`
-		INSERT INTO messages (id, client_msg_id, conversation_id, sender_id, recipient_id, ciphertext, sender_key_id, created_at)
-		VALUES (?,?,?,?,?,?,?,?)`,
-		m.ID, m.ClientMsgID, m.ConversationID, m.SenderID, m.RecipientID, m.Ciphertext, m.SenderKeyID, m.CreatedAt,
+		INSERT INTO messages (id, client_msg_id, conversation_id, sender_id, recipient_id, destination_device_id, ciphertext, sender_key_id, created_at)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		m.ID, m.ClientMsgID, m.ConversationID, m.SenderID, m.RecipientID, m.DestinationDeviceID, m.Ciphertext, m.SenderKeyID, m.CreatedAt,
 	)
 	return err
 }
@@ -314,10 +327,11 @@ func GetMessageByID(db *sql.DB, id string) (*Message, error) {
 	var isDeleted int
 	err := db.QueryRow(`
 		SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
-		       ciphertext, sender_key_id, COALESCE(is_deleted,0), edited_at, created_at, delivered_at, read_at
+		       COALESCE(destination_device_id,''), ciphertext, sender_key_id, COALESCE(is_deleted,0),
+		       edited_at, created_at, delivered_at, read_at
 		FROM messages WHERE id=?`, id,
 	).Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
-		&m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt)
+		&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -336,7 +350,8 @@ func GetMessages(db *sql.DB, conversationID, recipientID, beforeMsgID string, li
 	}
 	args := []any{conversationID, recipientID}
 	q := `SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
-	             ciphertext, sender_key_id, COALESCE(is_deleted,0), edited_at, created_at, delivered_at, read_at
+	             COALESCE(destination_device_id,''), ciphertext, sender_key_id, COALESCE(is_deleted,0),
+	             edited_at, created_at, delivered_at, read_at
 	      FROM messages
 	      WHERE conversation_id=? AND (recipient_id=? OR recipient_id='') AND COALESCE(is_deleted,0)=0`
 	if beforeMsgID != "" {
@@ -356,7 +371,7 @@ func GetMessages(db *sql.DB, conversationID, recipientID, beforeMsgID string, li
 		var m Message
 		var isDeleted int
 		if err := rows.Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
-			&m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt); err != nil {
+			&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt); err != nil {
 			return nil, err
 		}
 		m.IsDeleted = isDeleted == 1
@@ -369,7 +384,8 @@ func GetMessages(db *sql.DB, conversationID, recipientID, beforeMsgID string, li
 func GetMessagesByClientMsgID(db *sql.DB, clientMsgID string) ([]Message, error) {
 	rows, err := db.Query(`
 		SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
-		       ciphertext, sender_key_id, COALESCE(is_deleted,0), edited_at, created_at, delivered_at, read_at
+		       COALESCE(destination_device_id,''), ciphertext, sender_key_id, COALESCE(is_deleted,0),
+		       edited_at, created_at, delivered_at, read_at
 		FROM messages WHERE client_msg_id=?`, clientMsgID)
 	if err != nil {
 		return nil, err
@@ -380,7 +396,7 @@ func GetMessagesByClientMsgID(db *sql.DB, clientMsgID string) ([]Message, error)
 		var m Message
 		var isDeleted int
 		if err := rows.Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
-			&m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt); err != nil {
+			&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt); err != nil {
 			return nil, err
 		}
 		m.IsDeleted = isDeleted == 1
@@ -499,6 +515,28 @@ func UpsertIdentityKey(db *sql.DB, k IdentityKey) error {
 		k.UserID, nullableString(k.DeviceID), k.IKPublic, k.SPKPublic, k.SPKSignature, k.SPKId, k.UpdatedAt,
 	)
 	return err
+}
+
+// GetIdentityKeysByUserID возвращает все identity keys для всех устройств пользователя.
+func GetIdentityKeysByUserID(db *sql.DB, userID string) ([]IdentityKey, error) {
+	rows, err := db.Query(
+		`SELECT user_id, COALESCE(device_id,''), ik_public, spk_public, spk_signature, spk_id, updated_at
+		 FROM identity_keys WHERE user_id=? ORDER BY updated_at DESC`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []IdentityKey
+	for rows.Next() {
+		var k IdentityKey
+		if err := rows.Scan(&k.UserID, &k.DeviceID, &k.IKPublic, &k.SPKPublic, &k.SPKSignature, &k.SPKId, &k.UpdatedAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
 }
 
 func GetIdentityKey(db *sql.DB, userID string) (*IdentityKey, error) {

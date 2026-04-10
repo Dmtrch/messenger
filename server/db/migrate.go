@@ -45,6 +45,9 @@ var migrations = []Migration{
 		`DROP TABLE identity_keys`,
 		`ALTER TABLE identity_keys_new RENAME TO identity_keys`,
 	}},
+	// Migration 8: адресная доставка сообщений по устройству.
+	// Пустая строка = доставить всем устройствам пользователя (обратная совместимость).
+	{ID: 8, SQL: `ALTER TABLE messages ADD COLUMN destination_device_id TEXT NOT NULL DEFAULT ''`},
 }
 
 // RunMigrations создаёт таблицу schema_migrations и применяет все
