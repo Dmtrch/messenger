@@ -1,106 +1,150 @@
 # Задачи на следующую сессию
 
-Актуально на: 2026-04-09. Ветка: `main`.
+Актуально на: 2026-04-10. Ветка: `feature/stage9-multi-device`.
 
 ---
 
-## Приоритет 1 — Must (блокирует закрытие плана)
+## Выполнено в этой сессии
 
-### 1.1 lastMessage в ChatSummary не расшифровывается
-**Файл:** `client/src/pages/ChatListPage.tsx`, `client/src/components/ChatList/ChatList.tsx`  
-**Проблема:** сервер возвращает `lastMessageText` как зашифрованный payload; список чатов отображает ciphertext вместо превью текста.  
-**Что сделать:**
-- При загрузке чатов (`getChats`) пробовать расшифровать `lastMessageText` для каждого чата через `decryptMessage` / `decryptGroupMessage` из `session.ts`
-- Если расшифровка не удалась (нет сессии) — показывать placeholder «Зашифрованное сообщение»
-- Для медиасообщений — показывать «📎 Вложение»
+### Этап 9, серверная часть (фазы 1–5) — multi-device архитектура
 
----
-
-## Приоритет 2 — Should (качество и надёжность)
-
-### 2.1 Смена пароля с инвалидацией всех сессий
-**Файлы:** `server/internal/auth/handler.go`, `server/db/queries.go`, клиент — новый экран  
-**Что сделать:**
-- Backend: `POST /api/auth/change-password` (требует текущий пароль + новый + JWT)
-  - обновить `password_hash`
-  - удалить все `sessions` пользователя кроме текущей
-  - опционально — закрыть все WS-соединения пользователя через Hub
-- Frontend: экран смены пароля в `ProfilePage`; forced re-login после смены
-
-### 2.2 prekey_low — добавить backoff на клиенте
-**Файл:** `client/src/hooks/useMessengerWS.ts` (`replenishPreKeys`)  
-**Проблема:** при каждом WS-подключении может прийти `prekey_low` → повторная загрузка 20 ключей; при нестабильной сети создаёт дублирующие запросы.  
-**Что сделать:**
-- Хранить timestamp последнего пополнения в `keystore.ts` (или `localStorage`)
-- Блокировать повторный `replenishPreKeys` в течение ~5 минут
-
-### 2.3 Skipped keys — добавить TTL
-**Файл:** `client/src/crypto/ratchet.ts`  
-**Проблема:** `skippedKeys` растёт без очистки; при долгих сессиях накапливается до MAX_SKIP=100 без автоматического удаления старых.  
-**Что сделать:**
-- Добавить `storedAt: number` (timestamp) в каждый `skippedKey`
-- При сериализации в IndexedDB и при decrypt — удалять ключи старше 7 дней
-- Обновить тип `SkippedKey` в `ratchet.ts`
+- **Migration #8** — `messages.destination_device_id TEXT NOT NULL DEFAULT ''` (пустая строка = broadcast)
+- **queries.go** — `GetIdentityKeysByUserID`, `Message.DestinationDeviceID`, обновлены все SELECT/INSERT для messages
+- **GET /api/keys/:userId** → `{ "devices": [ {deviceId, ikPublic, spkId, spkPublic, spkSignature, opkId?, opkPublic?} ] }` — один entry на активное устройство
+- **WS Hub** — `client.deviceID`, `recipient.DeviceID`, новый `DeliverToDevice`, `senderDeviceId` в WS payload `message`
+- **ServeWS** — читает `?deviceId=`, валидирует принадлежность пользователю
+- **Тесты** — migration #8, обновлены `GetBundle` тесты, исправлен некорректный assert в `hub_calls_test.go`
 
 ---
 
-## Приоритет 3 — Тесты (этап 8)
+## Приоритет 1 — Must (клиентская часть 4.1, фазы 6–9)
 
-### 3.1 Backend tests
-**Что нужно покрыть минимально:**
-- `auth`: refresh rotation, invalid JWT, expired token, duplicate username
-- `keys`: register idempotency, PopPreKey by device, bundle 404 if no keys
-- `chat`: forbidden access (non-member), delete/edit authorization
-- `db`: RunMigrations idempotent, migration #7 table recreation
-- `ws`: message delivery, typing broadcast, read receipt
+### 1.1 session.ts — рефактор sessionKey + multi-device шифрование
 
-**Инструменты:** `go test ./...`, временная SQLite in-memory (`?mode=memory`), `net/http/httptest`
+**Файл:** `client/src/crypto/session.ts`
 
-### 3.2 Frontend tests
-**Что нужно покрыть минимально:**
-- `ratchet.ts`: out-of-order decrypt, skipped keys, MAX_SKIP limit
-- `session.ts`: E2E encrypt/decrypt round-trip, group SKDM
-- `x3dh.ts`: initiator/responder handshake
-- `api/client.ts`: auto-refresh on 401, failed refresh → logout
+#### Изменения:
 
-**Инструменты:** Vitest + `@testing-library/react`, `fake-indexeddb` для IDB моков
+**sessionKey: chatId:peerId → peerId:deviceId** (следует Signal Sesame spec — сессия между парой устройств, не зависит от чата)
+```typescript
+// БЫЛО
+function sessionKey(chatId: string, peerId: string) { return `${chatId}:${peerId}`; }
+// СТАЛО
+function sessionKey(peerUserId: string, peerDeviceId: string) { return `${peerUserId}:${peerDeviceId}`; }
+```
+
+**encryptForAllDevices** — итерация по массиву bundles, возвращает `[{deviceId, ciphertext}]`:
+```typescript
+async function encryptForAllDevices(
+    recipientId: string,
+    bundles: DeviceBundle[],
+    plaintext: string
+): Promise<{ deviceId: string; ciphertext: string }[]>
+```
+
+**decryptMessage** — добавить `senderDeviceId: string` параметр:
+```typescript
+// БЫЛО: decryptMessage(chatId, senderId, ciphertext)
+// СТАЛО: decryptMessage(senderId, senderDeviceId, ciphertext)
+```
+
+**Экспортировать** обновлённый `invalidateGroupSenderKey` без изменений.
 
 ---
 
-## Приоритет 4 — Could
+### 1.2 client.ts — обновить типы PreKeyBundle
 
-### 4.1 Конфигурационный файл сервера
-**Что сделать:** поддержать `config.yaml` рядом с бинарником; env-переменные переопределяют файл; defaults берутся из файла если env не задан. Библиотека: `gopkg.in/yaml.v3` или `github.com/spf13/viper`.
+**Файл:** `client/src/api/client.ts`
 
-### 4.2 Sender Key ротация при смене состава группы
-**Файл:** `client/src/crypto/session.ts`, `client/src/crypto/senderkey.ts`  
-**Проблема:** при добавлении/удалении участника SenderKey не пересоздаётся → новый участник может расшифровать прошлые сообщения.  
-**Что сделать:**
-- При создании чата или изменении состава — удалять `my_sender_key:{chatId}` из keystore
-- При следующей отправке в группу lazy-инициализация создаст новый SenderKey и разошлёт SKDM текущим участникам
+```typescript
+// БЫЛО
+interface PreKeyBundle { ikPub, spkPub, spkSig, opkPub?, opkId? }
 
-### 4.3 Групповые звонки (LiveKit SFU)
-Требует отдельного Docker-сервиса. Отложено до запроса. См. `docs/v1-gap-remediation.md` этап 9.
+// СТАЛО
+interface DeviceBundle {
+    deviceId: string;
+    ikPublic: string;
+    spkPublic: string;
+    spkSignature: string;
+    opkPublic?: string;
+    opkId?: number;
+}
+interface PreKeyBundleResponse { devices: DeviceBundle[]; }
+
+// getKeyBundle(userId: string): Promise<PreKeyBundleResponse>
+```
+
+---
+
+### 1.3 useMessengerWS.ts — передать senderDeviceId в decryptMessage
+
+**Файл:** `client/src/hooks/useMessengerWS.ts`
+
+В обработчике события `message`:
+```typescript
+// Сервер теперь передаёт senderDeviceId в каждом сообщении
+const { senderId, senderDeviceId, ciphertext, chatId, ... } = data;
+const plaintext = await decryptMessage(senderId, senderDeviceId ?? '', ciphertext);
+```
+
+---
+
+### 1.4 ChatWindowPage.tsx — fan-out отправка на все устройства получателя
+
+**Файл:** `client/src/pages/ChatWindowPage.tsx`
+
+При отправке:
+1. `GET /api/keys/:recipientId` → `{ devices: DeviceBundle[] }`
+2. `encryptForAllDevices(recipientId, bundles, plaintext)` → `[{deviceId, ciphertext}]`
+3. WS message: `recipients` стал массивом `[{userId, deviceId, ciphertext}]`
+
+Также включить копии для **собственных устройств отправителя** (если endpoint `GET /api/keys/me` реализован или через сохранённый `deviceId`).
+
+---
+
+### 1.5 WS connect — передавать deviceId
+
+**Файл:** `client/src/hooks/useMessengerWS.ts` или `client/src/api/websocket.ts`
+
+При подключении добавить `?deviceId=<myDeviceId>` к WS URL. `deviceId` получается из ответа `POST /api/keys/register` и сохраняется в authStore или localStorage.
+
+---
+
+## Приоритет 2 — Should
+
+### 2.1 Тесты для клиентских изменений
+
+- `client/src/crypto/session.test.ts` (новый или обновить) — проверить новый `sessionKey`, `encryptForAllDevices`, `decryptMessage` с `senderDeviceId`
+- Обновить `client/src/api/client.test.ts` если затронуто изменением типов
 
 ---
 
 ## Контекст для быстрого старта
 
-```
-git log --oneline -6
-```
+Ветка: `feature/stage9-multi-device`. Серверная часть коммита: `984a28b`.
 
-Последние коммиты этой сессии:
-- `43d39f1` docs: синхронизировать документацию с текущим состоянием кода
-- `a444a5f` docs: отметить долг #5 (PopPreKey device_id) как закрытым
-- `95eb73d` docs: отметить долг #6 (RegisterDevice идемпотентность) как закрытым
-- `51126a0` fix(keys): RegisterDevice идемпотентен по IK public key
-- `9b4f35b` fix(keys): PopPreKey и CountFreePreKeys фильтруют по device_id
-- `0f59098` fix(db): composite PK (user_id, device_id) для identity_keys
+**Что работает на сервере:**
+- `GET /api/keys/:userId` возвращает `{ devices: [...] }` — по одному bundle на устройство
+- WS сообщение содержит `senderDeviceId`
+- WS принимает `?deviceId=` и валидирует владельца
+- `messages.destination_device_id` хранится в БД; `DeliverToDevice` доставляет адресно
 
-Ключевые файлы, изменённые в сессии:
-- `server/db/migrate.go` — Migration struct + Steps, migration #7
-- `server/db/schema.go` — identity_keys composite PK для свежих установок
-- `server/db/queries.go` — UpsertIdentityKey, PopPreKey, CountFreePreKeys, GetIdentityKeyByIKPublic
-- `server/internal/keys/handler.go` — RegisterDevice (идемпотентность), GetBundle (device_id)
-- `server/internal/ws/hub.go` — CountFreePreKeys с deviceID=""
+**Что осталось на клиенте:**
+- Рефактор `sessionKey` с `chatId:peerId` → `peerId:deviceId`
+- Обновить типы API (`DeviceBundle[]` вместо плоского bundle)
+- `decryptMessage(senderId, senderDeviceId, ciphertext)` — использовать `senderDeviceId`
+- Fan-out: шифровать отдельно для каждого устройства получателя
+- WS connect: передавать `?deviceId=`
+
+**Ключевые файлы этой сессии:**
+- `server/db/migrate.go` — migration #8
+- `server/db/queries.go` — GetIdentityKeysByUserID, Message.DestinationDeviceID
+- `server/internal/keys/handler.go` — GetBundle multi-device
+- `server/internal/ws/hub.go` — deviceID, DeliverToDevice, senderDeviceId
+- `docs/superpowers/plans/2026-04-10-stage9-multi-device.md` — полный план
+
+**Ключевые файлы для следующей сессии:**
+- `client/src/crypto/session.ts` — sessionKey, encryptForAllDevices, decryptMessage
+- `client/src/api/client.ts` — PreKeyBundleResponse тип
+- `client/src/hooks/useMessengerWS.ts` — senderDeviceId, ?deviceId= в URL
+- `client/src/pages/ChatWindowPage.tsx` — fan-out отправка
