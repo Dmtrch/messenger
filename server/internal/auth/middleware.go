@@ -12,6 +12,17 @@ type ctxKey string
 
 const UserIDKey ctxKey = "userID"
 
+const RoleKey ctxKey = "role"
+
+// RoleFromCtx возвращает роль пользователя из контекста запроса.
+func RoleFromCtx(r *http.Request) string {
+	role, _ := r.Context().Value(RoleKey).(string)
+	if role == "" {
+		return "user"
+	}
+	return role
+}
+
 // Middleware извлекает userID из Bearer JWT и кладёт в контекст.
 func Middleware(secret []byte) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -38,7 +49,12 @@ func Middleware(secret []byte) func(http.Handler) http.Handler {
 				return
 			}
 			userID, _ := claims["sub"].(string)
+			role, _ := claims["role"].(string)
+			if role == "" {
+				role = "user"
+			}
 			ctx := context.WithValue(r.Context(), UserIDKey, userID)
+			ctx = context.WithValue(ctx, RoleKey, role)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

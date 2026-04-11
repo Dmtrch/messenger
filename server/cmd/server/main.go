@@ -83,7 +83,11 @@ func main() {
 
 	hub := ws.NewHub(cfg.JWTSecret, database, cfg.VAPIDPrivate, cfg.VAPIDPublic, cfg.AllowedOrigin)
 
-	authHandler := &auth.Handler{DB: database, JWTSecret: []byte(cfg.JWTSecret)}
+	authHandler := &auth.Handler{
+		DB:               database,
+		JWTSecret:        []byte(cfg.JWTSecret),
+		RegistrationMode: cfg.RegistrationMode,
+	}
 	chatHandler := &chat.Handler{DB: database, Hub: hub}
 	mediaHandler := &media.Handler{MediaDir: cfg.MediaDir, DB: database}
 	media.StartOrphanCleaner(database, cfg.MediaDir)
@@ -112,6 +116,8 @@ func main() {
 		r.With(authLimiter.Middleware()).Post("/auth/login", authHandler.Login)
 		r.With(authLimiter.Middleware()).Post("/auth/refresh", authHandler.Refresh)
 		r.Post("/auth/logout", authHandler.Logout)
+		r.With(authLimiter.Middleware()).Post("/auth/request-register", authHandler.RequestRegister)
+		r.With(authLimiter.Middleware()).Post("/auth/password-reset-request", authHandler.PasswordResetRequest)
 
 		r.Get("/push/vapid-public-key", pushHandler.GetVAPIDPublicKey)
 

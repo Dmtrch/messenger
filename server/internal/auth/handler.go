@@ -17,8 +17,9 @@ import (
 )
 
 type Handler struct {
-	DB        *sql.DB
-	JWTSecret []byte
+	DB               *sql.DB
+	JWTSecret        []byte
+	RegistrationMode string // open|invite|approval
 }
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
@@ -26,6 +27,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		Username    string `json:"username"`
 		DisplayName string `json:"displayName"`
 		Password    string `json:"password"`
+		InviteCode  string `json:"inviteCode"`
 		// Signal Protocol public keys
 		IKPublic     string `json:"ikPublic"`
 		SPKId        int    `json:"spkId"`
@@ -43,6 +45,26 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	if len(req.Username) < 3 || len(req.Password) < 8 {
 		httpErr(w, "username>=3 chars, password>=8 chars", 400)
 		return
+	}
+
+	// Проверка режима регистрации
+	var reqInviteCode string
+	switch h.RegistrationMode {
+	case "invite":
+		if req.InviteCode == "" {
+			httpErr(w, "invite code required", 403)
+			return
+		}
+		code, err := db.GetInviteCode(h.DB, req.InviteCode)
+		if err != nil || code == nil || code.UsedBy != "" {
+			httpErr(w, "invalid or already used invite code", 403)
+			return
+		}
+		reqInviteCode = req.InviteCode
+	case "approval":
+		httpErr(w, "registration requires admin approval, use /api/auth/request-register", 403)
+		return
+	// "open" — без ограничений
 	}
 
 	existing, _ := db.GetUserByUsername(h.DB, req.Username)
@@ -69,6 +91,10 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.RegistrationMode == "invite" && reqInviteCode != "" {
+		_ = db.UseInviteCode(h.DB, reqInviteCode, user.ID, time.Now().UnixMilli())
+	}
+
 	// Сохранить публичные ключи Signal Protocol если переданы
 	if req.IKPublic != "" {
 		ikPub, _ := decodeB64(req.IKPublic)
@@ -84,7 +110,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		_ = saveKeys(h.DB, user.ID, ikPub, spkPub, spkSig, req.SPKId, opkRaw)
 	}
 
-	resp, err := h.issueTokens(w, r, user.ID, user.Username, user.DisplayName)
+	resp, err := h.issueTokens(w, r, user.ID, user.Username, user.DisplayName, "user")
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
@@ -112,7 +138,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.issueTokens(w, r, user.ID, user.Username, user.DisplayName)
+	resp, err := h.issueTokens(w, r, user.ID, user.Username, user.DisplayName, user.Role)
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
@@ -141,12 +167,62 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.issueTokens(w, r, user.ID, user.Username, user.DisplayName)
+	resp, err := h.issueTokens(w, r, user.ID, user.Username, user.DisplayName, user.Role)
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
 	}
 	jsonReply(w, 200, resp)
+}
+
+func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	userID := UserIDFromCtx(r)
+	if userID == "" {
+		httpErr(w, "unauthorized", 401)
+		return
+	}
+
+	var req struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, "invalid body", 400)
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		httpErr(w, "new password must be at least 8 characters", 400)
+		return
+	}
+
+	user, _ := db.GetUserByID(h.DB, userID)
+	if user == nil {
+		httpErr(w, "user not found", 404)
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+		httpErr(w, "invalid current password", 403)
+		return
+	}
+
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), 12)
+	if err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	if err := db.UpdateUserPassword(h.DB, userID, string(newHash)); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+
+	// Инвалидируем все сессии кроме текущей (текущий refresh token в cookie)
+	currentHash := ""
+	if cookie, err := r.Cookie("refresh_token"); err == nil {
+		currentHash = sha256hex(cookie.Value)
+	}
+	_ = db.DeleteUserSessionsExcept(h.DB, userID, currentHash)
+
+	w.WriteHeader(204)
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
@@ -161,10 +237,11 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // issueTokens creates access JWT (15 min) + refresh token in httpOnly cookie (7 days).
-func (h *Handler) issueTokens(w http.ResponseWriter, r *http.Request, userID, username, displayName string) (map[string]any, error) {
+func (h *Handler) issueTokens(w http.ResponseWriter, r *http.Request, userID, username, displayName, role string) (map[string]any, error) {
 	access, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":  userID,
 		"name": username,
+		"role": role,
 		"exp":  time.Now().Add(15 * time.Minute).Unix(),
 		"iat":  time.Now().Unix(),
 	}).SignedString(h.JWTSecret)
@@ -200,7 +277,96 @@ func (h *Handler) issueTokens(w http.ResponseWriter, r *http.Request, userID, us
 		"userId":      userID,
 		"username":    username,
 		"displayName": displayName,
+		"role":        role,
 	}, nil
+}
+
+// RequestRegister принимает заявку на регистрацию (режим approval).
+func (h *Handler) RequestRegister(w http.ResponseWriter, r *http.Request) {
+	if h.RegistrationMode != "approval" {
+		httpErr(w, "server does not use approval mode", 400)
+		return
+	}
+	var req struct {
+		Username     string `json:"username"`
+		DisplayName  string `json:"displayName"`
+		Password     string `json:"password"`
+		IKPublic     string `json:"ikPublic"`
+		SPKId        int    `json:"spkId"`
+		SPKPublic    string `json:"spkPublic"`
+		SPKSignature string `json:"spkSignature"`
+		OPKPublics   []struct {
+			ID  int    `json:"id"`
+			Key string `json:"key"`
+		} `json:"opkPublics"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, "invalid body", 400)
+		return
+	}
+	if len(req.Username) < 3 || len(req.Password) < 8 {
+		httpErr(w, "username>=3 chars, password>=8 chars", 400)
+		return
+	}
+
+	existing, _ := db.GetUserByUsername(h.DB, req.Username)
+	if existing != nil {
+		httpErr(w, "username taken", 409)
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
+	if err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+
+	opkJSON, _ := json.Marshal(req.OPKPublics)
+	regReq := db.RegistrationRequest{
+		ID:           uuid.New().String(),
+		Username:     req.Username,
+		DisplayName:  req.DisplayName,
+		IKPublic:     req.IKPublic,
+		SPKId:        req.SPKId,
+		SPKPublic:    req.SPKPublic,
+		SPKSignature: req.SPKSignature,
+		OPKPublics:   string(opkJSON),
+		PasswordHash: string(hash),
+		Status:       "pending",
+		CreatedAt:    time.Now().UnixMilli(),
+	}
+	if err := db.CreateRegistrationRequest(h.DB, regReq); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	jsonReply(w, 202, map[string]string{
+		"status":  "pending",
+		"message": "Registration request submitted, awaiting admin approval",
+	})
+}
+
+// PasswordResetRequest позволяет пользователю запросить сброс пароля через администратора.
+func (h *Handler) PasswordResetRequest(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, "invalid body", 400)
+		return
+	}
+
+	user, _ := db.GetUserByUsername(h.DB, req.Username)
+	if user == nil {
+		// Не раскрываем существование пользователя
+		jsonReply(w, 202, map[string]string{"status": "pending"})
+		return
+	}
+
+	if err := db.CreatePasswordResetRequest(h.DB, uuid.New().String(), user.ID, time.Now().UnixMilli()); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	jsonReply(w, 202, map[string]string{"status": "pending"})
 }
 
 func decodeB64(s string) ([]byte, error) { return base64.StdEncoding.DecodeString(s) }
