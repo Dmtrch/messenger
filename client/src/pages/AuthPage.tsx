@@ -147,10 +147,6 @@ export default function AuthPage() {
       const opks = Array.from({ length: OPK_COUNT }, (_, i) => generateDHKeyPair(i + 1))
       const spkSignature = signData(signedPreKey.publicKey, identityKey.privateKey)
 
-      await saveIdentityKey(identityKey)
-      await saveSignedPreKey(signedPreKey)
-      await saveOneTimePreKeys(opks)
-
       const res = await fetch(`${getServerUrl()}/api/auth/request-register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -167,6 +163,11 @@ export default function AuthPage() {
       })
       const data = await res.json()
       if (!res.ok) { setError((data as { error?: string }).error ?? 'Ошибка'); return }
+
+      // Сохраняем ключи только после подтверждения сервера
+      await saveIdentityKey(identityKey)
+      await saveSignedPreKey(signedPreKey)
+      await saveOneTimePreKeys(opks)
       setSuccess('Заявка отправлена. Ожидайте одобрения администратора — войдите после получения уведомления.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка')
@@ -188,7 +189,8 @@ export default function AuthPage() {
       })
       setSuccess('Запрос отправлен администратору. Получите временный пароль и войдите.')
     } catch {
-      setError('Ошибка соединения')
+      // Не раскрываем информацию о существовании логина
+      setSuccess('Запрос отправлен администратору. Получите временный пароль и войдите.')
     } finally {
       setLoading(false)
     }
