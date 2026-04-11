@@ -150,3 +150,48 @@
   padding: 0.125rem 0.375rem;
   font-size: 0.75rem;
 }
+
+/* ── ServerSetupPage ─────────────────────────────────────────────────────────── */
+
+.serverCard {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: var(--surface-2, #f8fafc);
+}
+
+.serverName {
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.serverDesc {
+  font-size: 0.875rem;
+  color: var(--text-secondary, #64748b);
+  margin-bottom: 0.5rem;
+}
+
+.serverMode {
+  font-size: 0.75rem;
+  color: var(--text-muted, #94a3b8);
+  margin-bottom: 0.75rem;
+}
+
+.link {
+  background: none;
+  border: none;
+  color: var(--primary, #3b82f6);
+  cursor: pointer;
+  font-size: 0.875rem;
+  padding: 0.25rem;
+  text-decoration: underline;
+}
+
+.success {
+  color: var(--success, #22c55e);
+  font-size: 0.875rem;
+  text-align: center;
+  padding: 0.5rem;
+}
