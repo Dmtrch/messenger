@@ -10,7 +10,12 @@ export function getServerUrl(): string {
 }
 
 export function setServerUrl(url: string): void {
-  localStorage.setItem(STORAGE_KEY, normalize(url))
+  const normalized = normalize(url)
+  const parsed = new URL(normalized) // бросает исключение при некорректном URL
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`Unsupported protocol: ${parsed.protocol}`)
+  }
+  localStorage.setItem(STORAGE_KEY, normalized)
 }
 
 export function clearServerUrl(): void {
@@ -27,6 +32,9 @@ export function hasServerUrl(): boolean {
  */
 export function initServerUrl(): void {
   if (!hasServerUrl()) {
-    setServerUrl(window.location.origin)
+    const origin = window.location.origin
+    if (origin && origin !== 'null' && /^https?:\/\//.test(origin)) {
+      setServerUrl(origin)
+    }
   }
 }
