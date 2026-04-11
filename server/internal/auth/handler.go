@@ -60,6 +60,10 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 			httpErr(w, "invalid or already used invite code", 403)
 			return
 		}
+		if code.ExpiresAt > 0 && time.Now().UnixMilli() > code.ExpiresAt {
+			httpErr(w, "invite code expired", 403)
+			return
+		}
 		reqInviteCode = req.InviteCode
 	case "approval":
 		httpErr(w, "registration requires admin approval, use /api/auth/request-register", 403)
@@ -339,7 +343,7 @@ func (h *Handler) RequestRegister(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, "server error", 500)
 		return
 	}
-	jsonReply(w, 202, map[string]string{
+	jsonReply(w, 201, map[string]string{
 		"status":  "pending",
 		"message": "Registration request submitted, awaiting admin approval",
 	})
@@ -358,7 +362,7 @@ func (h *Handler) PasswordResetRequest(w http.ResponseWriter, r *http.Request) {
 	user, _ := db.GetUserByUsername(h.DB, req.Username)
 	if user == nil {
 		// Не раскрываем существование пользователя
-		jsonReply(w, 202, map[string]string{"status": "pending"})
+		jsonReply(w, 200, map[string]string{"status": "pending"})
 		return
 	}
 
@@ -366,7 +370,7 @@ func (h *Handler) PasswordResetRequest(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, "server error", 500)
 		return
 	}
-	jsonReply(w, 202, map[string]string{"status": "pending"})
+	jsonReply(w, 200, map[string]string{"status": "pending"})
 }
 
 func decodeB64(s string) ([]byte, error) { return base64.StdEncoding.DecodeString(s) }
