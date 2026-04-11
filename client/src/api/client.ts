@@ -24,6 +24,7 @@ export interface AuthRegisterReq {
   spkPublic: string
   spkSignature: string
   opkPublics: Array<{ id: number; key: string }>
+  inviteCode?: string
 }
 
 export interface AuthRegisterRes {
