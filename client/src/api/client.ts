@@ -156,6 +156,7 @@ async function req<T>(
   path: string,
   options: RequestInit & { skipAuth?: boolean; _retry?: boolean } = {}
 ): Promise<T> {
+  const base = getBase()
   const { skipAuth = false, _retry = false, ...fetchOpts } = options
 
   const isFormData = fetchOpts.body instanceof FormData
@@ -165,7 +166,7 @@ async function req<T>(
     ...(fetchOpts.headers as Record<string, string> | undefined ?? {}),
   }
 
-  const response = await fetch(`${getBase()}${path}`, {
+  const response = await fetch(`${base}${path}`, {
     ...fetchOpts,
     headers,
     credentials: 'include',
