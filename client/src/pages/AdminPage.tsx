@@ -54,6 +54,7 @@ export default function AdminPage() {
   const [tempPasswords, setTempPasswords] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [successMsg, setSuccessMsg] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -110,11 +111,12 @@ export default function AdminPage() {
 
   const resetPassword = async (userId: string) => {
     const pwd = newPassword[userId]
-    if (!pwd || pwd.length < 8) { alert('Пароль минимум 8 символов'); return }
+    if (!pwd || pwd.length < 8) { setError('Пароль минимум 8 символов'); return }
     try {
       await apiPost(`/api/admin/users/${userId}/reset-password`, { newPassword: pwd })
       setNewPassword(p => ({ ...p, [userId]: '' }))
-      alert('Пароль изменён')
+      setError('')
+      setSuccessMsg('Пароль изменён')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ошибка сброса пароля')
     }
@@ -122,7 +124,7 @@ export default function AdminPage() {
 
   const resolveReset = async (id: string) => {
     const tmp = tempPasswords[id]
-    if (!tmp || tmp.length < 8) { alert('Временный пароль минимум 8 символов'); return }
+    if (!tmp || tmp.length < 8) { setError('Временный пароль минимум 8 символов'); return }
     try {
       await apiPost(`/api/admin/password-reset-requests/${id}/resolve`, { tempPassword: tmp })
       setTempPasswords(p => ({ ...p, [id]: '' }))
@@ -142,13 +144,14 @@ export default function AdminPage() {
       <div className={s.tabs}>
         {(['requests', 'users', 'invites', 'resets'] as Tab[]).map(t => (
           <button key={t} className={`${s.tab} ${tab === t ? s.tabActive : ''}`}
-            onClick={() => setTab(t)}>
+            onClick={() => { setTab(t); setError(''); setSuccessMsg('') }}>
             {t === 'requests' ? 'Заявки' : t === 'users' ? 'Пользователи' : t === 'invites' ? 'Инвайты' : 'Сброс паролей'}
           </button>
         ))}
       </div>
 
       {error && <p className={s.error}>{error}</p>}
+      {successMsg && <p style={{ color: 'green', fontSize: '0.875rem' }}>{successMsg}</p>}
       {loading && <p>Загрузка…</p>}
 
       {!loading && tab === 'requests' && (
@@ -193,7 +196,7 @@ export default function AdminPage() {
                 <button className={s.btnSmall} onClick={() => {
                   const link = `${window.location.origin}/auth?invite=${c.code}`
                   void navigator.clipboard.writeText(link)
-                  alert('Ссылка скопирована')
+                  setSuccessMsg('Ссылка скопирована')
                 }}>Копировать ссылку</button>
               )}
             </div>
