@@ -249,6 +249,50 @@
 - `Must`-пункт чеклиста закрыт; ✅
 - фронтенд-тесты: 33 теста (ratchet x11, x3dh x6, client x9, session x7). ✅
 
+## Этап 11. Нативные приложения для разных ОС 🔲 Запланирован
+
+### Цель этапа
+
+Реализовать полноценные нативные клиенты (не PWA-обёртки) для Desktop, Android и iOS с полной E2E-криптографией и cursor-based пагинацией.
+
+### Этап A — Foundation
+
+**Цель:** зафиксировать архитектурные решения и создать каркас репозитория.
+
+1. Создать `docs/superpowers/specs/native-client-compatibility-matrix.md`:
+   - матрица платформа × capability (auth, crypto, storage, push, media, calls)
+   - decision record: crypto lib на каждой платформе
+   - decision record: SwiftUI vs Compose Multiplatform для iOS UI
+2. Подготовить каркас каталогов:
+   ```
+   shared/protocol/, shared/domain/, shared/crypto-contracts/, shared/test-vectors/
+   apps/desktop/, apps/mobile/android/, apps/mobile/ios/
+   ```
+3. Зафиксировать ADR по:
+   - **Secure storage**: Keychain (iOS), Android Keystore, OS credential store (desktop)
+   - **Local DB**: SQLite / SQLCipher
+   - **Native crypto stack**: libsodium-sys (Tauri), libsodium Java wrapper (Android), libsodium Swift (iOS)
+   - **Desktop framework**: Tauri vs Electron
+
+### Этап B — Shared Core
+
+**Цель:** платформенно-независимый core.
+
+1. Описать интерфейсы: `AuthEngine`, `WSClient`, `CryptoEngine`, `MessageRepository`
+2. Зафиксировать cursor-based pagination как обязательный capability всех клиентов
+3. Подготовить `shared/test-vectors/` для cross-platform crypto верификации
+
+### Этапы C / D / E — Desktop → Android → iOS
+
+**Последовательность:** Desktop первым (проще стабилизировать), Android вторым, iOS последним.
+
+**Обязательное требование для всех:** cursor-based догрузка старой истории с сервера.
+
+### Выход этапа
+
+- нативные клиенты на трёх платформах с полным E2E по Signal Protocol;
+- общий crypto-контракт верифицирован cross-platform test-vectors.
+
 ---
 
 ## Рекомендуемый порядок выполнения
@@ -263,6 +307,7 @@
 8. Этап 8
 9. Этап 9
 10. Этап 10
+11. Этап 11 (A → B → C → D → E)
 
 ## Критерий завершения
 
