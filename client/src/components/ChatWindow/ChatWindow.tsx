@@ -4,7 +4,7 @@ import { useAuthStore } from '@/store/authStore'
 import { useWsStore } from '@/store/wsStore'
 import { useCallStore } from '@/store/callStore'
 import { api, uploadEncryptedMedia } from '@/api/client'
-import { encryptMessage, decryptMessage, encryptGroupMessage, decryptGroupMessage } from '@/crypto/session'
+import { encryptMessage, encryptForAllDevices, decryptMessage, encryptGroupMessage, decryptGroupMessage } from '@/crypto/session'
 import { loadMessages, appendMessages, saveMessages } from '@/store/messageDb'
 import { enqueueOutbox } from '@/store/outboxDb'
 import type { OutboxItem } from '@/store/outboxDb'
@@ -343,7 +343,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
     const members = chat?.members ?? [currentUser.id]
     const isGroup = chat?.type === 'group'
 
-    let recipients: Array<{ userId: string; ciphertext: string }>
+    let recipients: Array<{ userId: string; deviceId?: string; ciphertext: string }>
 
     if (isGroup) {
       // Групповое шифрование: все участники получают одинаковый GroupWirePayload
@@ -362,20 +362,29 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
       }
       recipients = members.map((uid) => ({ userId: uid, ciphertext: encodedPayload }))
     } else {
-      // Direct: каждый получатель получает индивидуально зашифрованный payload
-      const peers = members.filter((uid) => uid !== currentUser.id)
-      const recipientPromises = [...peers, currentUser.id].map(async (userId) => {
-        try {
-          const ciphertext = await encryptMessage(userId, plainPayload)
-          return { userId, ciphertext }
-        } catch {
-          const bytes = new TextEncoder().encode(plainPayload)
-          let binary = ''
-          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-          return { userId, ciphertext: btoa(binary) }
-        }
-      })
-      recipients = await Promise.all(recipientPromises)
+      // Direct: fan-out — отдельный ciphertext для каждого устройства каждого участника
+      const allUsers = [...members.filter((uid) => uid !== currentUser.id), currentUser.id]
+      const recipientArrays = await Promise.all(
+        allUsers.map(async (userId) => {
+          try {
+            const { devices } = await api.getKeyBundle(userId)
+            const encrypted = await encryptForAllDevices(userId, devices, plainPayload)
+            return encrypted.map((e) => ({ userId, deviceId: e.deviceId, ciphertext: e.ciphertext }))
+          } catch {
+            // Fallback: шифруем через первое доступное устройство (совместимость)
+            try {
+              const ciphertext = await encryptMessage(userId, plainPayload)
+              return [{ userId, deviceId: undefined, ciphertext }]
+            } catch {
+              const bytes = new TextEncoder().encode(plainPayload)
+              let binary = ''
+              for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+              return [{ userId, deviceId: undefined, ciphertext: btoa(binary) }]
+            }
+          }
+        })
+      )
+      recipients = recipientArrays.flat()
     }
 
     const frame: PendingFrame = {

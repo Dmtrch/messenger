@@ -68,7 +68,7 @@ export type WSFrame =
   | { type: 'ice_candidate'; callId: string; candidate: RTCIceCandidateInit }
 
 export type WSSendFrame =
-  | { type: 'message'; chatId: string; clientMsgId: string; senderKeyId: number; recipients: Array<{ userId: string; ciphertext: string }> }
+  | { type: 'message'; chatId: string; clientMsgId: string; senderKeyId: number; recipients: Array<{ userId: string; deviceId?: string; ciphertext: string }> }
   | { type: 'skdm'; chatId: string; recipients: Array<{ userId: string; ciphertext: string }> }
   | { type: 'typing'; chatId: string }
   | { type: 'read'; chatId: string; messageId: string }

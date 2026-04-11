@@ -17,26 +17,14 @@
 
 ---
 
-## Приоритет 1 — Must (осталось)
+## Приоритет 1 — Must ✅ Закрыт
 
-### 1.4 ChatWindowPage.tsx — fan-out отправка на все устройства получателя
-
-**Файл:** `client/src/pages/ChatWindowPage.tsx`
-
-При отправке нового DM:
-1. `GET /api/keys/:recipientId` → `{ devices: DeviceBundle[] }`
-2. `encryptForAllDevices(recipientId, bundles, plaintext)` → `[{deviceId, ciphertext}]`
-3. WS message: `recipients` → `[{userId, deviceId, ciphertext}]` (также добавить свои устройства)
-
-**Текущее состояние** — `ChatWindow.tsx` использует `encryptMessage(userId, plaintext)` (первое устройство), что совместимо, но не fan-out.
-
-**Что нужно изменить:**
-- Загрузить `PreKeyBundleResponse` для каждого члена чата
-- Заменить `encryptMessage(uid, payload)` на `encryptForAllDevices(uid, bundles, payload)`
-- Обновить тип WSSendFrame — добавить `deviceId?: string` в `recipients`
-- Обновить сервер (`hub.go handleMessage`) — чтобы читал `deviceId` из каждого recipient
-
-Также нужно включить **собственные устройства отправителя** (через `GET /api/keys/:myUserId`).
+Все Must задачи клиентской части multi-device выполнены:
+- session.ts: Signal Sesame sessionKey, encryptForAllDevices, decryptMessage(senderId, deviceId, ct)
+- client.ts: DeviceBundle, PreKeyBundleResponse
+- useMessengerWS.ts: senderDeviceId → decryptMessage; ?deviceId= в WS URL
+- ChatWindow.tsx: fan-out — getKeyBundle + encryptForAllDevices для каждого участника DM
+- types/index.ts: deviceId? в WSSendFrame recipients
 
 ---
 

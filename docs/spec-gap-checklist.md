@@ -11,7 +11,7 @@
   - [x] `session.ts`: sessionKey → `peerId:deviceId`; `encryptForAllDevices`; `decryptMessage(senderId, deviceId, ct)`
   - [x] `client.ts`: тип `PreKeyBundleResponse { devices: DeviceBundle[] }`
   - [x] `useMessengerWS.ts`: передавать `senderDeviceId` в `decryptMessage`; `?deviceId=` в WS URL
-  - [ ] `ChatWindowPage.tsx`: fan-out шифрование — отдельный ciphertext на каждое устройство получателя
+  - [x] `ChatWindowPage.tsx`: fan-out шифрование — отдельный ciphertext на каждое устройство получателя
 - [x] Реализовать `POST /api/keys/register`
 - [x] Реализовать Sender Keys для групп
 - [x] Добавить skipped message keys в Double Ratchet
@@ -87,8 +87,8 @@
 - [x] `client.ts`: `PreKeyBundleResponse { devices: DeviceBundle[] }`
 - [x] `useMessengerWS.ts`: `senderDeviceId` → decrypt; `?deviceId=` в WS URL
 
-**Клиент — осталось:**
-- [ ] `ChatWindowPage.tsx`: fan-out — отдельный ciphertext на каждое устройство
+**Клиент — выполнено:**
+- [x] `ChatWindowPage.tsx`: fan-out — отдельный ciphertext на каждое устройство
 
 ### Этап 4 — Message state (пропуски в UI)
 
@@ -107,7 +107,7 @@
 
 ## Контрольные вехи
 
-- [ ] Закрыты все `Must` (остаётся: `ChatWindowPage.tsx` fan-out шифрование)
+- [x] Закрыты все `Must`
 - [x] Закрыты все security-пункты из спецификации
 - [x] Закрыты все data-model и migration-пункты (identity_keys composite PK, versioned migrations, destination_device_id)
 - [x] Закрыты все crypto-пункты (этап 5)
