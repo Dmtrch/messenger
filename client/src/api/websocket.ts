@@ -11,11 +11,18 @@
 import type { WSFrame, WSSendFrame } from '@/types'
 import { setAccessToken, api } from './client'
 import { loadDeviceId } from '@/crypto/keystore'
+import { getServerUrl } from '@/config/serverConfig'
 
 function getWsBase(): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.host  // включает порт если есть
-  return `${protocol}//${host}`
+  const serverUrl = getServerUrl()
+  if (!serverUrl) {
+    // Fallback: текущий хост браузера
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${protocol}//${window.location.host}`
+  }
+  const url = new URL(serverUrl)
+  const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${url.host}`
 }
 
 type FrameHandler = (frame: WSFrame) => void
