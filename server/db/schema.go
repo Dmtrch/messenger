@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS users (
     username     TEXT UNIQUE NOT NULL,
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
+    role         TEXT NOT NULL DEFAULT 'user',
     created_at   INTEGER NOT NULL
 );
 
@@ -162,5 +163,43 @@ CREATE TABLE IF NOT EXISTS media_objects (
     created_at      INTEGER NOT NULL,
     FOREIGN KEY (uploader_id)     REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
+);
+
+-- Коды приглашения для регистрации
+CREATE TABLE IF NOT EXISTS invite_codes (
+    code        TEXT PRIMARY KEY,
+    created_by  TEXT NOT NULL REFERENCES users(id),
+    used_by     TEXT REFERENCES users(id),
+    used_at     INTEGER,
+    expires_at  INTEGER,
+    created_at  INTEGER NOT NULL
+);
+
+-- Заявки на регистрацию (требуют подтверждения админом)
+CREATE TABLE IF NOT EXISTS registration_requests (
+    id            TEXT PRIMARY KEY,
+    username      TEXT NOT NULL UNIQUE,
+    display_name  TEXT NOT NULL,
+    ik_public     TEXT NOT NULL,
+    spk_id        INTEGER NOT NULL,
+    spk_public    TEXT NOT NULL,
+    spk_signature TEXT NOT NULL,
+    opk_publics   TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    created_at    INTEGER NOT NULL,
+    reviewed_at   INTEGER,
+    reviewed_by   TEXT REFERENCES users(id)
+);
+
+-- Запросы на сброс пароля
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id),
+    status       TEXT NOT NULL DEFAULT 'pending',
+    temp_password TEXT,
+    created_at   INTEGER NOT NULL,
+    resolved_at  INTEGER,
+    resolved_by  TEXT REFERENCES users(id)
 );
 `

@@ -48,6 +48,41 @@ var migrations = []Migration{
 	// Migration 8: адресная доставка сообщений по устройству.
 	// Пустая строка = доставить всем устройствам пользователя (обратная совместимость).
 	{ID: 8, SQL: `ALTER TABLE messages ADD COLUMN destination_device_id TEXT NOT NULL DEFAULT ''`},
+	// Migration 9: роль пользователя (admin/user)
+	{ID: 9, SQL: `ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'`},
+	// Migration 10-12: новые таблицы (CREATE IF NOT EXISTS — идемпотентны)
+	{ID: 10, SQL: `CREATE TABLE IF NOT EXISTS invite_codes (
+		code        TEXT PRIMARY KEY,
+		created_by  TEXT NOT NULL REFERENCES users(id),
+		used_by     TEXT REFERENCES users(id),
+		used_at     INTEGER,
+		expires_at  INTEGER,
+		created_at  INTEGER NOT NULL
+	)`},
+	{ID: 11, SQL: `CREATE TABLE IF NOT EXISTS registration_requests (
+		id            TEXT PRIMARY KEY,
+		username      TEXT NOT NULL UNIQUE,
+		display_name  TEXT NOT NULL,
+		ik_public     TEXT NOT NULL,
+		spk_id        INTEGER NOT NULL,
+		spk_public    TEXT NOT NULL,
+		spk_signature TEXT NOT NULL,
+		opk_publics   TEXT NOT NULL,
+		password_hash TEXT NOT NULL,
+		status        TEXT NOT NULL DEFAULT 'pending',
+		created_at    INTEGER NOT NULL,
+		reviewed_at   INTEGER,
+		reviewed_by   TEXT REFERENCES users(id)
+	)`},
+	{ID: 12, SQL: `CREATE TABLE IF NOT EXISTS password_reset_requests (
+		id           TEXT PRIMARY KEY,
+		user_id      TEXT NOT NULL REFERENCES users(id),
+		status       TEXT NOT NULL DEFAULT 'pending',
+		temp_password TEXT,
+		created_at   INTEGER NOT NULL,
+		resolved_at  INTEGER,
+		resolved_by  TEXT REFERENCES users(id)
+	)`},
 }
 
 // RunMigrations создаёт таблицу schema_migrations и применяет все
