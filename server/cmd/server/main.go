@@ -83,6 +83,11 @@ func main() {
 	usersHandler := &users.Handler{DB: database}
 	keysHandler := &keys.Handler{DB: database}
 	pushHandler := &push.Handler{DB: database, VAPIDPublic: cfg.VAPIDPublic, VAPIDPrivate: cfg.VAPIDPrivate}
+	serverinfoHandler := &serverinfo.Handler{
+		Name:             cfg.ServerName,
+		Description:      cfg.ServerDescription,
+		RegistrationMode: cfg.RegistrationMode,
+	}
 
 	// Rate limiter для auth endpoints: 20 запросов в минуту с одного IP
 	authLimiter := secmw.NewRateLimiter(20, time.Minute, cfg.BehindProxy)
@@ -94,6 +99,8 @@ func main() {
 	r.Use(secmw.SecurityHeaders(isHTTPS || cfg.BehindProxy))
 
 	r.Route("/api", func(r chi.Router) {
+		r.Get("/server/info", serverinfoHandler.ServeHTTP)
+
 		r.With(authLimiter.Middleware()).Post("/auth/register", authHandler.Register)
 		r.With(authLimiter.Middleware()).Post("/auth/login", authHandler.Login)
 		r.With(authLimiter.Middleware()).Post("/auth/refresh", authHandler.Refresh)
