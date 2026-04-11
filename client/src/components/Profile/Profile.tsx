@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
+import { useChatStore } from '@/store/chatStore'
+import { useWsStore } from '@/store/wsStore'
 import { api, setAccessToken } from '@/api/client'
 import { clearServerUrl } from '@/config/serverConfig'
 import s from './Profile.module.css'
@@ -17,6 +19,8 @@ export default function Profile({ onBack }: Props) {
     try { await api.logout() } catch { /* игнорируем */ }
     setAccessToken(null)
     logout()
+    useChatStore.getState().reset()
+    useWsStore.getState().setSend(null)
     clearServerUrl()
     navigate('/setup', { replace: true })
   }
