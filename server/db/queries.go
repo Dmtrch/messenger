@@ -955,6 +955,18 @@ func ListPasswordResetRequests(db *sql.DB, status string) ([]PasswordResetReques
 	return reqs, rows.Err()
 }
 
+func GetPasswordResetRequest(db *sql.DB, id string) (*PasswordResetRequest, error) {
+	r := &PasswordResetRequest{}
+	err := db.QueryRow(
+		`SELECT p.id, p.user_id, u.username, p.status, COALESCE(p.temp_password,''), p.created_at, COALESCE(p.resolved_at,0), COALESCE(p.resolved_by,'')
+		 FROM password_reset_requests p JOIN users u ON u.id=p.user_id WHERE p.id=?`, id,
+	).Scan(&r.ID, &r.UserID, &r.Username, &r.Status, &r.TempPassword, &r.CreatedAt, &r.ResolvedAt, &r.ResolvedBy)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return r, err
+}
+
 func ResolvePasswordResetRequest(db *sql.DB, id, tempPassword, resolvedBy string, resolvedAt int64) error {
 	_, err := db.Exec(
 		`UPDATE password_reset_requests SET status='completed', temp_password=?, resolved_by=?, resolved_at=? WHERE id=?`,

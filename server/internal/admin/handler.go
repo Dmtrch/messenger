@@ -46,6 +46,13 @@ func (h *Handler) ApproveRegistrationRequest(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Проверяем что username ещё не занят
+	existing, _ := db.GetUserByUsername(h.DB, req.Username)
+	if existing != nil {
+		httpErr(w, "username already registered", 409)
+		return
+	}
+
 	user := db.User{
 		ID:           uuid.New().String(),
 		Username:     req.Username,
@@ -173,15 +180,12 @@ func (h *Handler) ResolvePasswordResetRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	reqs, _ := db.ListPasswordResetRequests(h.DB, "")
-	var targetUserID string
-	for _, req := range reqs {
-		if req.ID == id {
-			targetUserID = req.UserID
-			break
-		}
+	resetReq, err := db.GetPasswordResetRequest(h.DB, id)
+	if err != nil {
+		httpErr(w, "server error", 500)
+		return
 	}
-	if targetUserID == "" {
+	if resetReq == nil {
 		httpErr(w, "not found", 404)
 		return
 	}
@@ -191,8 +195,14 @@ func (h *Handler) ResolvePasswordResetRequest(w http.ResponseWriter, r *http.Req
 		httpErr(w, "server error", 500)
 		return
 	}
-	_ = db.UpdateUserPassword(h.DB, targetUserID, string(hash))
-	_ = db.ResolvePasswordResetRequest(h.DB, id, body.TempPassword, adminID, time.Now().UnixMilli())
+	if err := db.UpdateUserPassword(h.DB, resetReq.UserID, string(hash)); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	if err := db.ResolvePasswordResetRequest(h.DB, id, body.TempPassword, adminID, time.Now().UnixMilli()); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
 	w.WriteHeader(204)
 }
 
