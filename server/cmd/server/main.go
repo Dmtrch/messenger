@@ -5,8 +5,6 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -20,83 +18,80 @@ import (
 	"github.com/messenger/server/internal/media"
 	secmw "github.com/messenger/server/internal/middleware"
 	"github.com/messenger/server/internal/push"
+	"github.com/messenger/server/internal/serverinfo"
 	"github.com/messenger/server/internal/users"
 	"github.com/messenger/server/internal/ws"
+	"golang.org/x/crypto/bcrypt"
 )
 
 //go:embed static
 var staticFiles embed.FS
 
 func main() {
-	port := getenv("PORT", "8080")
-	dbPath := getenv("DB_PATH", "./messenger.db")
-	mediaDir := getenv("MEDIA_DIR", "./media")
-	jwtSecret := getenv("JWT_SECRET", "")
-	if jwtSecret == "" {
-		log.Fatal("JWT_SECRET is required")
+	cfg, err := loadConfig("config.yaml")
+	if err != nil {
+		log.Fatalf("load config: %v", err)
 	}
 
-	allowedOrigin := getenv("ALLOWED_ORIGIN", "")
-	tlsCert := getenv("TLS_CERT", "")
-	tlsKey := getenv("TLS_KEY", "")
-	isHTTPS := tlsCert != "" && tlsKey != ""
-	// BEHIND_PROXY=true: сервер за reverse proxy (Cloudflare Tunnel, nginx) который терминирует TLS.
-	// Позволяет выставлять HSTS без локальных TLS-сертификатов.
-	behindProxy := getenv("BEHIND_PROXY", "") == "true"
+	if cfg.JWTSecret == "" {
+		log.Fatal("JWT_SECRET is required (env или config.yaml)")
+	}
+
+	isHTTPS := cfg.TLSCert != "" && cfg.TLSKey != ""
 
 	// Предупреждение: production без TLS небезопасен
-	if !isHTTPS && !behindProxy && allowedOrigin != "" {
+	if !isHTTPS && !cfg.BehindProxy && cfg.AllowedOrigin != "" {
 		log.Printf("WARNING: ALLOWED_ORIGIN is set but TLS is not configured — traffic is unencrypted")
 	}
 
 	// VAPID ключи для Web Push
-	vapidPrivate := getenv("VAPID_PRIVATE_KEY", "")
-	vapidPublic := getenv("VAPID_PUBLIC_KEY", "")
-	if vapidPrivate == "" || vapidPublic == "" {
-		// Генерируем одноразово и выводим в лог — сохраните в переменные окружения
+	if cfg.VAPIDPrivate == "" || cfg.VAPIDPublic == "" {
+		// Генерируем одноразово и выводим в лог — сохраните в переменные окружения или config.yaml
 		priv, pub, err := webpush.GenerateVAPIDKeys()
-		if err == nil && vapidPrivate == "" {
-			vapidPrivate = priv
-			vapidPublic = pub
-			log.Printf("VAPID keys generated (add to env to persist):")
+		if err == nil && cfg.VAPIDPrivate == "" {
+			cfg.VAPIDPrivate = priv
+			cfg.VAPIDPublic = pub
+			log.Printf("VAPID keys generated (add to env or config.yaml to persist):")
 			log.Printf("  VAPID_PRIVATE_KEY=%s", priv)
 			log.Printf("  VAPID_PUBLIC_KEY=%s", pub)
 		}
 	}
 
-	stunURL    := getenv("STUN_URL", "stun:stun.l.google.com:19302")
-	turnURL    := getenv("TURN_URL", "")
-	turnSecret := getenv("TURN_SECRET", "")
-	turnTTLStr := getenv("TURN_CREDENTIAL_TTL", "86400")
-	turnTTL    := int64(86400)
-	if v, err := strconv.ParseInt(turnTTLStr, 10, 64); err == nil {
-		turnTTL = v
-	}
-
-	database, err := db.Open(dbPath)
+	database, err := db.Open(cfg.DBPath)
 	if err != nil {
 		log.Fatalf("open db: %v", err)
 	}
 	defer database.Close()
 
-	hub := ws.NewHub(jwtSecret, database, vapidPrivate, vapidPublic, allowedOrigin)
+	// Bootstrap admin: создаём при первом запуске если задан в конфиге
+	if cfg.AdminUsername != "" && cfg.AdminPassword != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(cfg.AdminPassword), 12)
+		if err != nil {
+			log.Fatalf("hash admin password: %v", err)
+		}
+		if err := db.EnsureAdminUser(database, cfg.AdminUsername, string(hash)); err != nil {
+			log.Fatalf("ensure admin user: %v", err)
+		}
+	}
 
-	authHandler := &auth.Handler{DB: database, JWTSecret: []byte(jwtSecret)}
+	hub := ws.NewHub(cfg.JWTSecret, database, cfg.VAPIDPrivate, cfg.VAPIDPublic, cfg.AllowedOrigin)
+
+	authHandler := &auth.Handler{DB: database, JWTSecret: []byte(cfg.JWTSecret)}
 	chatHandler := &chat.Handler{DB: database, Hub: hub}
-	mediaHandler := &media.Handler{MediaDir: mediaDir, DB: database}
-	media.StartOrphanCleaner(database, mediaDir)
+	mediaHandler := &media.Handler{MediaDir: cfg.MediaDir, DB: database}
+	media.StartOrphanCleaner(database, cfg.MediaDir)
 	usersHandler := &users.Handler{DB: database}
 	keysHandler := &keys.Handler{DB: database}
-	pushHandler := &push.Handler{DB: database, VAPIDPublic: vapidPublic, VAPIDPrivate: vapidPrivate}
+	pushHandler := &push.Handler{DB: database, VAPIDPublic: cfg.VAPIDPublic, VAPIDPrivate: cfg.VAPIDPrivate}
 
 	// Rate limiter для auth endpoints: 20 запросов в минуту с одного IP
-	authLimiter := secmw.NewRateLimiter(20, time.Minute, behindProxy)
+	authLimiter := secmw.NewRateLimiter(20, time.Minute, cfg.BehindProxy)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Timeout(30 * time.Second))
-	r.Use(secmw.SecurityHeaders(isHTTPS || behindProxy))
+	r.Use(secmw.SecurityHeaders(isHTTPS || cfg.BehindProxy))
 
 	r.Route("/api", func(r chi.Router) {
 		r.With(authLimiter.Middleware()).Post("/auth/register", authHandler.Register)
@@ -107,7 +102,8 @@ func main() {
 		r.Get("/push/vapid-public-key", pushHandler.GetVAPIDPublicKey)
 
 		r.Group(func(r chi.Router) {
-			r.Use(auth.Middleware([]byte(jwtSecret)))
+			r.Use(auth.Middleware([]byte(cfg.JWTSecret)))
+			r.Post("/auth/change-password", authHandler.ChangePassword)
 
 			r.Get("/users/search", usersHandler.Search)
 
@@ -127,7 +123,7 @@ func main() {
 			r.Post("/media/upload", mediaHandler.Upload)
 			r.Get("/media/{id}", mediaHandler.Serve)
 
-			r.Get("/calls/ice-servers", iceServersHandler(stunURL, turnURL, turnSecret, turnTTL))
+			r.Get("/calls/ice-servers", iceServersHandler(cfg.STUNUrl, cfg.TURNUrl, cfg.TURNSecret, cfg.TURNCredTTL))
 		})
 	})
 
@@ -157,19 +153,12 @@ func main() {
 		fileServer.ServeHTTP(w, r)
 	})
 
-	addr := ":" + port
+	addr := ":" + cfg.Port
 	log.Printf("listening on %s (tls=%v)", addr, isHTTPS)
 
 	if isHTTPS {
-		log.Fatal(http.ListenAndServeTLS(addr, tlsCert, tlsKey, r))
+		log.Fatal(http.ListenAndServeTLS(addr, cfg.TLSCert, cfg.TLSKey, r))
 	} else {
 		log.Fatal(http.ListenAndServe(addr, r))
 	}
-}
-
-func getenv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
