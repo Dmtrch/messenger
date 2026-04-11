@@ -88,6 +88,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		Username:     req.Username,
 		DisplayName:  req.DisplayName,
 		PasswordHash: string(hash),
+		Role:         "user",
 		CreatedAt:    time.Now().UnixMilli(),
 	}
 	if err := db.CreateUser(h.DB, user); err != nil {
