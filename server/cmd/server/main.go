@@ -37,6 +37,13 @@ func main() {
 		log.Fatal("JWT_SECRET is required (env или config.yaml)")
 	}
 
+	switch cfg.RegistrationMode {
+	case "open", "invite", "approval":
+		// ok
+	default:
+		log.Fatalf("invalid registration_mode %q: must be open|invite|approval", cfg.RegistrationMode)
+	}
+
 	isHTTPS := cfg.TLSCert != "" && cfg.TLSKey != ""
 
 	// Предупреждение: production без TLS небезопасен

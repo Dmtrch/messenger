@@ -34,5 +34,5 @@ registration_mode: "open"   # open | invite | approval
 
 # Начальный администратор (создаётся при первом запуске)
 # После создания учётной записи эти строки можно удалить или оставить пустыми
-admin_username: "admin"
-admin_password: "changeme"
+# admin_username: "admin"    # задайте логин администратора
+# admin_password: ""         # задайте надёжный пароль (минимум 12 символов)
