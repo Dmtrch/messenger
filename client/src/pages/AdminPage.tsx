@@ -82,34 +82,54 @@ export default function AdminPage() {
   useEffect(() => { void load() }, [load])
 
   const approveRequest = async (id: string) => {
-    await apiPost(`/api/admin/registration-requests/${id}/approve`, {})
-    void load()
+    try {
+      await apiPost(`/api/admin/registration-requests/${id}/approve`, {})
+      void load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка')
+    }
   }
 
   const rejectRequest = async (id: string) => {
-    await apiPost(`/api/admin/registration-requests/${id}/reject`, {})
-    void load()
+    try {
+      await apiPost(`/api/admin/registration-requests/${id}/reject`, {})
+      void load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка')
+    }
   }
 
   const createInvite = async () => {
-    await apiPost('/api/admin/invite-codes', {})
-    void load()
+    try {
+      await apiPost('/api/admin/invite-codes', {})
+      void load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка')
+    }
   }
 
   const resetPassword = async (userId: string) => {
     const pwd = newPassword[userId]
     if (!pwd || pwd.length < 8) { alert('Пароль минимум 8 символов'); return }
-    await apiPost(`/api/admin/users/${userId}/reset-password`, { newPassword: pwd })
-    setNewPassword(p => ({ ...p, [userId]: '' }))
-    alert('Пароль изменён')
+    try {
+      await apiPost(`/api/admin/users/${userId}/reset-password`, { newPassword: pwd })
+      setNewPassword(p => ({ ...p, [userId]: '' }))
+      alert('Пароль изменён')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка сброса пароля')
+    }
   }
 
   const resolveReset = async (id: string) => {
     const tmp = tempPasswords[id]
     if (!tmp || tmp.length < 8) { alert('Временный пароль минимум 8 символов'); return }
-    await apiPost(`/api/admin/password-reset-requests/${id}/resolve`, { tempPassword: tmp })
-    setTempPasswords(p => ({ ...p, [id]: '' }))
-    void load()
+    try {
+      await apiPost(`/api/admin/password-reset-requests/${id}/resolve`, { tempPassword: tmp })
+      setTempPasswords(p => ({ ...p, [id]: '' }))
+      void load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка')
+    }
   }
 
   return (
