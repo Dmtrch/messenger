@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/messenger/server/db"
+	"github.com/messenger/server/internal/admin"
 	"github.com/messenger/server/internal/auth"
 	"github.com/messenger/server/internal/chat"
 	"github.com/messenger/server/internal/keys"
@@ -88,6 +89,7 @@ func main() {
 		JWTSecret:        []byte(cfg.JWTSecret),
 		RegistrationMode: cfg.RegistrationMode,
 	}
+	adminHandler := &admin.Handler{DB: database}
 	chatHandler := &chat.Handler{DB: database, Hub: hub}
 	mediaHandler := &media.Handler{MediaDir: cfg.MediaDir, DB: database}
 	media.StartOrphanCleaner(database, cfg.MediaDir)
@@ -144,6 +146,19 @@ func main() {
 			r.Get("/media/{id}", mediaHandler.Serve)
 
 			r.Get("/calls/ice-servers", iceServersHandler(cfg.STUNUrl, cfg.TURNUrl, cfg.TURNSecret, cfg.TURNCredTTL))
+
+			r.Group(func(r chi.Router) {
+				r.Use(admin.RequireAdmin)
+				r.Get("/admin/registration-requests", adminHandler.ListRegistrationRequests)
+				r.Post("/admin/registration-requests/{id}/approve", adminHandler.ApproveRegistrationRequest)
+				r.Post("/admin/registration-requests/{id}/reject", adminHandler.RejectRegistrationRequest)
+				r.Post("/admin/invite-codes", adminHandler.CreateInviteCode)
+				r.Get("/admin/invite-codes", adminHandler.ListInviteCodes)
+				r.Get("/admin/users", adminHandler.ListUsers)
+				r.Post("/admin/users/{id}/reset-password", adminHandler.ResetUserPassword)
+				r.Get("/admin/password-reset-requests", adminHandler.ListPasswordResetRequests)
+				r.Post("/admin/password-reset-requests/{id}/resolve", adminHandler.ResolvePasswordResetRequest)
+			})
 		})
 	})
 
