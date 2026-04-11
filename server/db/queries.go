@@ -806,11 +806,18 @@ func GetInviteCode(db *sql.DB, code string) (*InviteCode, error) {
 }
 
 func UseInviteCode(db *sql.DB, code, usedBy string, usedAt int64) error {
-	_, err := db.Exec(
-		`UPDATE invite_codes SET used_by=?, used_at=? WHERE code=? AND used_by IS NULL`,
-		usedBy, usedAt, code,
+	res, err := db.Exec(
+		`UPDATE invite_codes SET used_by=?, used_at=? WHERE code=? AND used_by IS NULL AND (expires_at = 0 OR expires_at > ?)`,
+		usedBy, usedAt, code, usedAt,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("invite code not found or already used")
+	}
+	return nil
 }
 
 func ListInviteCodes(db *sql.DB) ([]InviteCode, error) {
@@ -869,6 +876,8 @@ func GetRegistrationRequest(db *sql.DB, id string) (*RegistrationRequest, error)
 	return r, err
 }
 
+// ListRegistrationRequests возвращает краткий список заявок (без crypto-ключей).
+// Для получения полных данных (ik_public и т.д.) используй GetRegistrationRequest(id).
 func ListRegistrationRequests(db *sql.DB, status string) ([]RegistrationRequest, error) {
 	var rows *sql.Rows
 	var err error
@@ -976,7 +985,10 @@ func ListUsers(db *sql.DB) ([]User, error) {
 // EnsureAdminUser создаёт пользователя-администратора если он не существует.
 // Вызывается при старте сервера из main.go. Безопасно вызывать многократно.
 func EnsureAdminUser(database *sql.DB, username, passwordHash string) error {
-	existing, _ := GetUserByUsername(database, username)
+	existing, err := GetUserByUsername(database, username)
+	if err != nil {
+		return fmt.Errorf("EnsureAdminUser: check existing: %w", err)
+	}
 	if existing != nil {
 		return nil // уже существует — не перезаписываем
 	}
