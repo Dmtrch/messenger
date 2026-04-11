@@ -211,7 +211,7 @@
 - TURN-сервер пропускает через себя весь медиатрафик при невозможности P2P (~15–30% звонков);
 - видеозвонок 720p ≈ 1–2 Мбит/с в каждую сторону — домашний интернет с узким upload может стать ограничением при нескольких одновременных звонках через TURN.
 
-## Этап 10. Полноценная multi-device архитектура 🔄 В работе (ветка `feature/stage9-multi-device`)
+## Этап 10. Полноценная multi-device архитектура ✅ Закрыт
 
 ### Цель этапа
 
@@ -228,20 +228,26 @@
 4. `handleMessage`: `recipient.DeviceID` → `DestinationDeviceID` в БД; `senderDeviceId` в WS payload. ✅
 5. Migration #8: `messages.destination_device_id TEXT NOT NULL DEFAULT ''`. ✅
 
-**Клиентская часть — ожидает следующей сессии**
+**Клиентская часть ✅ Закрыта**
 
-6. `session.ts`: `sessionKey(peerId, deviceId)` — ключ сессии по паре устройств (Signal Sesame spec).
-7. `session.ts`: `encryptForAllDevices(recipientId, bundles[], plaintext)` → `[{deviceId, ciphertext}]`.
-8. `session.ts`: `decryptMessage(senderId, senderDeviceId, ciphertext)` — добавить `senderDeviceId`.
-9. `client.ts`: `PreKeyBundleResponse { devices: DeviceBundle[] }` — обновить типы API.
-10. `useMessengerWS.ts`: передавать `senderDeviceId` в `decryptMessage`; добавить `?deviceId=` в WS URL.
-11. `ChatWindowPage.tsx`: fan-out отправка — отдельный ciphertext для каждого устройства получателя.
+6. `session.ts`: `sessionKey(peerId, deviceId)` — ключ сессии по паре устройств (Signal Sesame spec). ✅
+7. `session.ts`: `encryptForAllDevices(recipientId, bundles[], plaintext)` → `[{deviceId, ciphertext}]`. ✅
+8. `session.ts`: `decryptMessage(senderId, senderDeviceId, ciphertext)` — добавлен `senderDeviceId`. ✅
+9. `client.ts`: `PreKeyBundleResponse { devices: DeviceBundle[] }` — типы API обновлены. ✅
+10. `useMessengerWS.ts`: `senderDeviceId` → `decryptMessage`; `?deviceId=` в WS URL (async через `loadDeviceId()`). ✅
+11. `ChatWindowPage.tsx`: fan-out отправка — отдельный ciphertext для каждого устройства получателя. ✅
+
+**Приоритет 2 — тесты и пагинация ✅ Закрыт**
+
+12. `session.test.ts`: 7 тестов (sessionKey isolation, encryptForAllDevices, full round-trip, ratchet chain, fallback). ✅
+13. Cursor-based пагинация истории: `IntersectionObserver` на topSentinel + кнопка "Загрузить ещё". ✅
 
 ### Выход этапа
 
-- два браузера одного пользователя независимо получают и расшифровывают сообщения;
-- ratchet-сессии хранятся по `peerId:deviceId`, не конкурируют;
-- `Must`-пункт чеклиста закрыт.
+- два браузера одного пользователя независимо получают и расшифровывают сообщения; ✅
+- ratchet-сессии хранятся по `peerId:deviceId`, не конкурируют; ✅
+- `Must`-пункт чеклиста закрыт; ✅
+- фронтенд-тесты: 33 теста (ratchet x11, x3dh x6, client x9, session x7). ✅
 
 ---
 

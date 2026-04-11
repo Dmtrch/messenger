@@ -6,195 +6,101 @@
 
 ## Выполнено в этой сессии
 
-### Клиентская часть (фазы 1.1–1.5) — multi-device архитектура
+### Этап 10 — Полная multi-device архитектура (клиент + сервер)
 
-- **session.ts** — `sessionKey` → `peerId:deviceId` (Signal Sesame spec); `encryptForAllDevices`; `decryptMessage(senderId, senderDeviceId, ct)`; `handleIncomingSKDM` + `tryDecryptPreview` + `encryptMessage` обновлены
-- **client.ts** — `DeviceBundle`, `PreKeyBundleResponse { devices: DeviceBundle[] }`, `getKeyBundle` → `PreKeyBundleResponse`
-- **types/index.ts** — `senderDeviceId?: string` в WSFrame `message`
-- **useMessengerWS.ts** — `senderDeviceId` извлекается из `message` фрейма и передаётся в `decryptMessage`
-- **websocket.ts** — `?deviceId=<id>` добавляется в WS URL из `loadDeviceId()` (keystore)
-- **ChatWindow.tsx**, **ChatListPage.tsx**, **ChatWindowPage.tsx** — вызовы `encryptMessage`/`tryDecryptPreview` обновлены под новые сигнатуры
+**Сервер (фазы 1–5, коммит 984a28b):**
+- Migration #8 — `messages.destination_device_id`
+- `GET /api/keys/:userId` → `{ devices: [...] }` multi-device bundle
+- WS Hub: `client.deviceID`, `DeliverToDevice`, `senderDeviceId` в payload
+- `ServeWS`: читает `?deviceId=`, валидирует принадлежность пользователю
+
+**Клиент (фазы 1.1–1.5, коммит deae7c0 + fan-out f162e57):**
+- `session.ts` — `sessionKey` → `peerId:deviceId` (Signal Sesame); `encryptForAllDevices`; `decryptMessage(senderId, senderDeviceId, ct)`
+- `client.ts` — `DeviceBundle`, `PreKeyBundleResponse`
+- `types/index.ts` — `senderDeviceId?` в WSFrame message; `deviceId?` в WSSendFrame recipients
+- `useMessengerWS.ts` — `senderDeviceId` → `decryptMessage`; `?deviceId=` в WS URL
+- `ChatWindow.tsx` — fan-out DM: `getKeyBundle` + `encryptForAllDevices` для каждого участника
+
+**Приоритет 2 (коммит a1810db):**
+- `session.test.ts` — 7 тестов (33 всего, все проходят)
+- Cursor-based пагинация истории: `IntersectionObserver` на topSentinel + кнопка fallback
 
 ---
 
-## Приоритет 1 — Must ✅ Закрыт
+## Следующий трек — Нативные приложения для разных ОС
 
-Все Must задачи клиентской части multi-device выполнены:
-- session.ts: Signal Sesame sessionKey, encryptForAllDevices, decryptMessage(senderId, deviceId, ct)
-- client.ts: DeviceBundle, PreKeyBundleResponse
-- useMessengerWS.ts: senderDeviceId → decryptMessage; ?deviceId= в WS URL
-- ChatWindow.tsx: fan-out — getKeyBundle + encryptForAllDevices для каждого участника DM
-- types/index.ts: deviceId? в WSSendFrame recipients
+Цель: реализовать полноценные нативные клиенты (не PWA-обёртки) для Desktop, Android, iOS.
 
----
+### Стартовая точка
 
-## Приоритет 2 — Should ✅ Закрыт
+Существующие документы (созданы ранее, требуют актуализации):
+- `docs/superpowers/plans/2026-04-10-cross-platform-client-apps.md`
+- `docs/superpowers/plans/2026-04-10-native-client-execution-plan.md`
+- `docs/superpowers/specs/native-client-architecture.md`
 
-### 2.1 Тесты session.ts ✅
+### Этап A — Foundation (стартовый приоритет)
 
-- `client/src/crypto/session.test.ts` — 7 тестов: sessionKey (peerId:deviceId), encryptForAllDevices (2 устройства → 2 разных ciphertext), decryptMessage round-trip, раздельные сессии per-device, multi-message ratchet, encryptMessage fallback, fallback ошибка без устройств
+**Цель:** зафиксировать архитектурные решения и создать каркас репозитория.
 
-### 2.2 Cursor-based догрузка истории ✅
+**Задачи:**
 
-- **ChatWindow.tsx**: `decodeMessages` вынесен в отдельный useCallback; `loadHistory` сохраняет `nextCursor`; `loadOlderMessages(chatId, cursor)` загружает предыдущие сообщения; `IntersectionObserver` на `topSentinelRef` авто-триггерит при прокрутке вверх; кнопка "Загрузить ещё" как fallback; состояние `hasMoreHistory` управляет видимостью
-- **ChatWindow.module.css**: стиль `.loadMore` для кнопки
+1. Создать `docs/superpowers/specs/native-client-compatibility-matrix.md`:
+   - матрица платформа × capability (auth, crypto, storage, push, media, calls)
+   - decision record: какую crypto lib использовать на каждой платформе
+   - decision record: SwiftUI vs Compose Multiplatform для iOS UI
 
-Следствие:
+2. Подготовить каркас каталогов в репозитории:
+   ```
+   shared/
+     protocol/      # типы WS-фреймов, REST-контракты (shared definitions)
+     domain/        # модели: Chat, Message, User, Device
+     crypto-contracts/  # интерфейсы: Ratchet, X3DH, SenderKey (язык-независимо)
+     test-vectors/  # cross-platform crypto test vectors
+   apps/
+     desktop/       # Electron или Tauri (TBD)
+     mobile/
+       android/
+       ios/
+   ```
 
-- web-клиент пока не даёт полноценного подъёма к старой истории;
-- для будущих desktop/mobile native клиентов это тоже должно считаться обязательным требованием с первого релиза истории чата.
+3. Зафиксировать decision records (ADR-формат) по:
+   - **Secure storage**: keychain (iOS), Android Keystore, OS credential store (desktop)
+   - **Local DB**: SQLite (все платформы) или SQLCipher для шифрования
+   - **Native crypto stack**: libsodium-sys (Rust/Tauri), libsodium Java wrapper (Android), libsodium Swift (iOS)
+   - **Desktop framework**: Tauri (Rust + WebView, меньше размер) vs Electron (больше экосистема)
 
-Что нужно сделать:
+### Этап B — Shared Core
 
-- реализовать client-side cursor pagination для web-клиента;
-- зафиксировать это как обязательный capability для:
-  - web client
-  - desktop native
-  - Android native
-  - iOS native
-- не ограничивать историю только:
-  - первичной серверной загрузкой;
-  - локальным хвостом из offline-кэша.
+**Цель:** реализовать платформенно-независимый core.
 
-Критерий готовности:
+**Задачи:**
+- Описать интерфейсы (не реализации): `AuthEngine`, `WSClient`, `CryptoEngine`, `MessageRepository`
+- Зафиксировать cursor-based pagination как обязательный capability всех клиентов
+- Подготовить `shared/test-vectors/` для cross-platform crypto верификации
 
-- при прокрутке вверх клиент догружает предыдущие сообщения по `before=<oldestMessageId>`;
-- дедупликация работает;
-- локальный кэш не ломает порядок сообщений;
-- один и тот же принцип пагинации используется во всех клиентских каналах.
+### Этапы C/D/E — Desktop → Android → iOS
+
+**Последовательность:** Desktop первым (проще стабилизировать), Android вторым, iOS последним.
+
+**Обязательное требование для всех:** cursor-based догрузка старой истории с сервера — не только локальный кэш.
 
 ---
 
 ## Контекст для быстрого старта
 
-Ветка: `feature/stage9-multi-device`. Серверная часть коммита: `984a28b`.
+**Текущее состояние репозитория:**
+- Ветка: `feature/stage9-multi-device` (последний коммит: `a1810db`)
+- Все Must из spec-gap-checklist закрыты
+- Web-клиент полностью работает с multi-device (Signal Sesame spec)
+- Сервер: Go, SQLite, WebSocket Hub с device routing
+- Frontend: React PWA, Vite, TypeScript, libsodium, IndexedDB
 
-**Что работает на сервере:**
-- `GET /api/keys/:userId` возвращает `{ devices: [...] }` — по одному bundle на устройство
-- WS сообщение содержит `senderDeviceId`
-- WS принимает `?deviceId=` и валидирует владельца
-- `messages.destination_device_id` хранится в БД; `DeliverToDevice` доставляет адресно
-
-**Что осталось на клиенте:**
-- Рефактор `sessionKey` с `chatId:peerId` → `peerId:deviceId`
-- Обновить типы API (`DeviceBundle[]` вместо плоского bundle)
-- `decryptMessage(senderId, senderDeviceId, ciphertext)` — использовать `senderDeviceId`
-- Fan-out: шифровать отдельно для каждого устройства получателя
-- WS connect: передавать `?deviceId=`
-- Реализовать cursor-based догрузку старой истории вверх; сейчас сервер умеет, клиент — ещё нет
-
-**Ключевые файлы этой сессии:**
-- `server/db/migrate.go` — migration #8
-- `server/db/queries.go` — GetIdentityKeysByUserID, Message.DestinationDeviceID
-- `server/internal/keys/handler.go` — GetBundle multi-device
-- `server/internal/ws/hub.go` — deviceID, DeliverToDevice, senderDeviceId
-- `docs/superpowers/plans/2026-04-10-stage9-multi-device.md` — полный план
-
-**Ключевые файлы для следующей сессии:**
-- `client/src/crypto/session.ts` — sessionKey, encryptForAllDevices, decryptMessage
-- `client/src/api/client.ts` — PreKeyBundleResponse тип
-- `client/src/hooks/useMessengerWS.ts` — senderDeviceId, ?deviceId= в URL
-- `client/src/pages/ChatWindowPage.tsx` — fan-out отправка
-
----
-
-## Отдельный трек — нативные приложения для разных ОС
-
-В этой сессии подготовлен отдельный архитектурный трек под **полноценные нативные приложения**, а не PWA-обёртки.
-
-### Созданные документы
-
-- [План по кроссплатформенным нативным клиентам](/Users/dim/vscodeproject/messenger/docs/superpowers/plans/2026-04-10-cross-platform-client-apps.md)
-- [Детальный execution plan](/Users/dim/vscodeproject/messenger/docs/superpowers/plans/2026-04-10-native-client-execution-plan.md)
-- [RFC: native client architecture](/Users/dim/vscodeproject/messenger/docs/superpowers/specs/native-client-architecture.md)
-
-### Рекомендуемая последовательность реализации
-
-#### Этап A — Foundation
-
-Цель:
-
-- утвердить native-first стратегию;
-- зафиксировать архитектурные границы;
-- подготовить структуру каталогов и shared contracts.
-
-Основные результаты:
-
-- `shared/protocol/`
-- `shared/domain/`
-- `shared/crypto-contracts/`
-- `shared/test-vectors/`
-- RFC и compatibility matrix
-
-#### Этап B — Shared Core
-
-Цель:
-
-- реализовать платформенно-независимый core для desktop/mobile клиентов.
-
-Основные результаты:
-
-- auth/session engine
-- websocket abstraction
-- sync/outbox engine
-- crypto abstraction
-- repository contracts
-- единый контракт cursor-based pagination истории для всех клиентов
-
-#### Этап C — Desktop Native
-
-Цель:
-
-- первым выпустить production-ready нативный клиент для:
-  - Windows
-  - Linux
-  - macOS
-
-Причина приоритета:
-
-- desktop проще стабилизировать раньше mobile;
-- это даёт первый реальный native delivery channel.
-
-Дополнительное обязательное требование:
-
-- подъём к старой переписке должен догружать историю с сервера по cursor-pagination, а не ограничиваться локальным кэшем.
-
-#### Этап D — Android Native
-
-Цель:
-
-- выпустить полноценный Android-клиент на shared core с:
-  - secure storage
-  - FCM
-  - media permissions
-  - reconnect/background handling
-  - cursor-based загрузкой старой истории вверх
-
-#### Этап E — iOS Native
-
-Цель:
-
-- выпустить полноценный iOS-клиент после стабилизации shared core и Android mobile-path.
-
-Причина последнего приоритета:
-
-- iOS самый дорогой и рискованный этап по lifecycle, storage, APNs и release/compliance.
-
-Дополнительное обязательное требование:
-
-- тот же механизм cursor-based истории, что и у остальных клиентов, без отдельной логики “только локальный хвост”.
-
-### Практический приоритет на следующую сессию
-
-Если продолжать именно трек нативных приложений, следующий логичный шаг:
-
-1. Создать `docs/superpowers/specs/native-client-compatibility-matrix.md`
-2. Подготовить `Foundation`-каркас каталогов:
-   - `shared/`
-   - `apps/desktop/`
-   - `apps/mobile/`
-3. Зафиксировать decision records по:
-   - secure storage
-   - local DB
-   - native crypto stack
-   - iOS UI strategy (`SwiftUI` или `Compose Multiplatform`)
+**Ключевые файлы для понимания протокола:**
+- `client/src/crypto/session.ts` — полная E2E сессия (X3DH + Double Ratchet)
+- `client/src/crypto/x3dh.ts` — X3DH initiator/responder
+- `client/src/crypto/ratchet.ts` — Double Ratchet + skipped keys
+- `client/src/crypto/senderkey.ts` — Sender Keys для групп
+- `client/src/api/client.ts` — REST API контракты (TypeScript)
+- `client/src/types/index.ts` — WS фреймы (WSFrame, WSSendFrame)
+- `server/internal/ws/hub.go` — WS Hub с device routing
+- `server/db/schema.go` — схема БД
