@@ -91,7 +91,11 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
   const [pendingMedia, setPendingMedia] = useState<PendingMedia | null>(null)
   const [uploading, setUploading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const topSentinelRef = useRef<HTMLDivElement>(null)
   const historyLoaded = useRef<Set<string>>(new Set())
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [hasMoreHistory, setHasMoreHistory] = useState(false)
+  const loadingOlderRef = useRef(false)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -126,35 +130,14 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
 
     // Шаг 2: фоновая синхронизация с сервером
     try {
-      const { messages: msgs } = await api.getMessages(id, { limit: 50 })
-      if (msgs.length > 0) {
-        const decoded = await Promise.all(msgs.map(async (m) => {
-          let raw = tryDecode(m.encryptedPayload)
-          try {
-            // Определяем тип шифрования по payload
-            const isGroupPayload = (() => {
-              try { return JSON.parse(atob(m.encryptedPayload))?.type === 'group' } catch { return false }
-            })()
-            raw = isGroupPayload
-              ? await decryptGroupMessage(id, m.senderId, m.encryptedPayload)
-              : await decryptMessage(id, m.senderId, m.encryptedPayload)
-          } catch { /* оставляем tryDecode результат */ }
-          const parsed = parsePayload(raw)
-          return {
-            id: m.id,
-            chatId: id,
-            senderId: m.senderId,
-            encryptedPayload: m.encryptedPayload,
-            senderKeyId: m.senderKeyId,
-            timestamp: m.timestamp,
-            status: (m.read ? 'read' : m.delivered ? 'delivered' : 'sent') as Message['status'],
-            ...parsed,
-          }
-        }))
+      const page = await api.getMessages(id, { limit: 50 })
+      if (page.messages.length > 0) {
+        const decoded = await decodeMessages(id, page.messages)
         prependMessages(id, decoded)
-        // Обновить IDB свежими данными с сервера
         await saveMessages(id, decoded)
       }
+      setNextCursor(page.nextCursor ?? null)
+      setHasMoreHistory(!!page.nextCursor)
     } catch {
       // Нет сети или другая ошибка — остаёмся с кэшем из IDB
     } finally {
@@ -162,7 +145,78 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
     }
   }, [prependMessages])
 
+  // ── Вспомогательная функция расшифровки списка сообщений ─────────────────
+
+  const decodeMessages = useCallback(async (
+    chatId: string,
+    msgs: Awaited<ReturnType<typeof api.getMessages>>['messages']
+  ) => {
+    return Promise.all(msgs.map(async (m) => {
+      let raw = tryDecode(m.encryptedPayload)
+      try {
+        const isGroupPayload = (() => {
+          try { return JSON.parse(atob(m.encryptedPayload))?.type === 'group' } catch { return false }
+        })()
+        raw = isGroupPayload
+          ? await decryptGroupMessage(chatId, m.senderId, m.encryptedPayload)
+          : await decryptMessage(m.senderId, '', m.encryptedPayload)
+      } catch { /* оставляем tryDecode результат */ }
+      const parsed = parsePayload(raw)
+      return {
+        id: m.id,
+        chatId,
+        senderId: m.senderId,
+        encryptedPayload: m.encryptedPayload,
+        senderKeyId: m.senderKeyId,
+        timestamp: m.timestamp,
+        status: (m.read ? 'read' : m.delivered ? 'delivered' : 'sent') as Message['status'],
+        ...parsed,
+      }
+    }))
+  }, [])
+
+  // ── Догрузка старой истории при прокрутке вверх ───────────────────────────
+
+  const loadOlderMessages = useCallback(async (id: string, cursor: string) => {
+    if (loadingOlderRef.current) return
+    loadingOlderRef.current = true
+    try {
+      const page = await api.getMessages(id, { before: cursor, limit: 50 })
+      if (page.messages.length > 0) {
+        const decoded = await decodeMessages(id, page.messages)
+        prependMessages(id, decoded)
+        await saveMessages(id, decoded)
+      }
+      setNextCursor(page.nextCursor ?? null)
+      setHasMoreHistory(!!page.nextCursor)
+    } catch {
+      // Нет сети — остаёмся с текущей историей
+    } finally {
+      loadingOlderRef.current = false
+    }
+  }, [prependMessages, decodeMessages])
+
+  // IntersectionObserver на верхнем sentinel — загружает старые сообщения при прокрутке вверх
   useEffect(() => {
+    const sentinel = topSentinelRef.current
+    if (!sentinel || !hasMoreHistory || !nextCursor) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && nextCursor) {
+          void loadOlderMessages(chatId, nextCursor)
+        }
+      },
+      { threshold: 0.1 }
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [chatId, hasMoreHistory, nextCursor, loadOlderMessages])
+
+  useEffect(() => {
+    // Сбрасываем cursor при смене чата
+    setNextCursor(null)
+    setHasMoreHistory(false)
     markRead(chatId)
     loadHistory(chatId)
     bottomRef.current?.scrollIntoView({ behavior: 'instant' })
@@ -453,7 +507,15 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
       </header>
 
       <div className={s.messages} role="log" aria-live="polite">
+        <div ref={topSentinelRef} />
         {loadingHistory && <div className={s.loading}>Загрузка...</div>}
+        {hasMoreHistory && !loadingHistory && (
+          <div className={s.loadMore}>
+            <button onClick={() => nextCursor && void loadOlderMessages(chatId, nextCursor)}>
+              Загрузить ещё
+            </button>
+          </div>
+        )}
         {messages.map((msg) => (
           <Bubble
             key={msg.id}

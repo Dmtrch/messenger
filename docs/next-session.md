@@ -28,25 +28,16 @@
 
 ---
 
-## Приоритет 2 — Should
+## Приоритет 2 — Should ✅ Закрыт
 
-### 2.1 Тесты для клиентских изменений
+### 2.1 Тесты session.ts ✅
 
-- `client/src/crypto/session.test.ts` (новый или обновить) — проверить новый `sessionKey`, `encryptForAllDevices`, `decryptMessage` с `senderDeviceId`
-- Обновить `client/src/api/client.test.ts` если затронуто изменением типов
+- `client/src/crypto/session.test.ts` — 7 тестов: sessionKey (peerId:deviceId), encryptForAllDevices (2 устройства → 2 разных ciphertext), decryptMessage round-trip, раздельные сессии per-device, multi-message ratchet, encryptMessage fallback, fallback ошибка без устройств
 
-### 2.2 Пагинация истории вверх — обязательно для всех клиентов
+### 2.2 Cursor-based догрузка истории ✅
 
-Сейчас сервер **уже поддерживает** cursor-based pagination:
-
-- `GET /api/chats/{chatId}/messages?before=<messageId>&limit=<n>`
-
-Но текущий web-клиент фактически загружает только:
-
-- кэш из IndexedDB;
-- один начальный блок истории с сервера.
-
-При прокрутке вверх старые сообщения **автоматически не догружаются**.
+- **ChatWindow.tsx**: `decodeMessages` вынесен в отдельный useCallback; `loadHistory` сохраняет `nextCursor`; `loadOlderMessages(chatId, cursor)` загружает предыдущие сообщения; `IntersectionObserver` на `topSentinelRef` авто-триггерит при прокрутке вверх; кнопка "Загрузить ещё" как fallback; состояние `hasMoreHistory` управляет видимостью
+- **ChatWindow.module.css**: стиль `.loadMore` для кнопки
 
 Следствие:
 

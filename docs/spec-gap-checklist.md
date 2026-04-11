@@ -111,5 +111,5 @@
 - [x] Закрыты все security-пункты из спецификации
 - [x] Закрыты все data-model и migration-пункты (identity_keys composite PK, versioned migrations, destination_device_id)
 - [x] Закрыты все crypto-пункты (этап 5)
-- [x] Закрыты все test-пункты (backend 5 пакетов, frontend 26 тестов)
+- [x] Закрыты все test-пункты (backend 5 пакетов, frontend 33 теста — +7 session.test.ts)
 - [x] Серверная часть multi-device: GET bundle всех устройств, WS device routing, senderDeviceId
