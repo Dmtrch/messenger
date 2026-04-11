@@ -4,8 +4,15 @@ export interface User {
   displayName: string
   avatarPath?: string
   identityKeyPublic: string   // base64, Ed25519
+  role?: 'admin' | 'user'
   lastSeen?: number
   online?: boolean
+}
+
+export interface ServerInfo {
+  name: string
+  description: string
+  registrationMode: 'open' | 'invite' | 'approval'
 }
 
 export interface Chat {
