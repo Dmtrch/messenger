@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS users (
     username     TEXT UNIQUE NOT NULL,
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
-    role         TEXT NOT NULL DEFAULT 'user',
+    role         TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'admin')),
     created_at   INTEGER NOT NULL
 );
 
@@ -186,7 +186,7 @@ CREATE TABLE IF NOT EXISTS registration_requests (
     spk_signature TEXT NOT NULL,
     opk_publics   TEXT NOT NULL,
     password_hash TEXT NOT NULL,
-    status        TEXT NOT NULL DEFAULT 'pending',
+    status        TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
     created_at    INTEGER NOT NULL,
     reviewed_at   INTEGER,
     reviewed_by   TEXT REFERENCES users(id)
@@ -196,10 +196,18 @@ CREATE TABLE IF NOT EXISTS registration_requests (
 CREATE TABLE IF NOT EXISTS password_reset_requests (
     id           TEXT PRIMARY KEY,
     user_id      TEXT NOT NULL REFERENCES users(id),
-    status       TEXT NOT NULL DEFAULT 'pending',
+    status       TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'completed', 'rejected')),
+    -- temp_password хранится в открытом виде — нужен для отображения администратору
+    -- должен быть немедленно сменён пользователем после использования
     temp_password TEXT,
     created_at   INTEGER NOT NULL,
     resolved_at  INTEGER,
     resolved_by  TEXT REFERENCES users(id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_registration_requests_status
+    ON registration_requests(status);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_requests_status
+    ON password_reset_requests(status);
 `
