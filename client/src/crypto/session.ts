@@ -6,6 +6,9 @@
  * - Последующие: encrypt/decrypt через Double Ratchet
  * - Состояния хранятся в IndexedDB
  *
+ * sessionKey = peerId:deviceId (Signal Sesame spec)
+ * Сессия — между парой устройств, не зависит от чата.
+ *
  * Формат wire payload (base64-encoded JSON):
  * {
  *   v: 1,
@@ -17,7 +20,7 @@
  */
 
 import _sodium from 'libsodium-wrappers'
-import { api } from '@/api/client'
+import { api, type DeviceBundle } from '@/api/client'
 import {
   loadIdentityKey,
   loadSignedPreKey,
@@ -26,6 +29,7 @@ import {
   saveRatchetSession,
   saveMySenderKey,
   loadMySenderKey,
+  deleteMySenderKey,
   savePeerSenderKey,
   loadPeerSenderKey,
   type IdentityKeyPair,
@@ -58,6 +62,7 @@ import {
   type RatchetState,
   type EncryptedMessage,
 } from './ratchet'
+import type { PublicKeyBundle } from '@/types'
 
 let sodiumReady = false
 async function ensureSodium() {
@@ -80,12 +85,13 @@ interface WirePayload {
 
 const _stateCache = new Map<string, RatchetState>()
 
-function sessionKey(chatId: string, peerId: string) {
-  return `${chatId}:${peerId}`
+// Signal Sesame spec: сессия идентифицируется парой (userId, deviceId)
+function sessionKey(peerUserId: string, peerDeviceId: string) {
+  return `${peerUserId}:${peerDeviceId}`
 }
 
-async function loadState(chatId: string, peerId: string): Promise<RatchetState | null> {
-  const key = sessionKey(chatId, peerId)
+async function loadState(peerId: string, deviceId: string): Promise<RatchetState | null> {
+  const key = sessionKey(peerId, deviceId)
   if (_stateCache.has(key)) return _stateCache.get(key)!
   const stored = await loadRatchetSession(key)
   if (!stored) return null
@@ -94,8 +100,8 @@ async function loadState(chatId: string, peerId: string): Promise<RatchetState |
   return state
 }
 
-async function persistState(chatId: string, peerId: string, state: RatchetState) {
-  const key = sessionKey(chatId, peerId)
+async function persistState(peerId: string, deviceId: string, state: RatchetState) {
+  const key = sessionKey(peerId, deviceId)
   _stateCache.set(key, state)
   await saveRatchetSession({
     chatId: key,
@@ -106,17 +112,16 @@ async function persistState(chatId: string, peerId: string, state: RatchetState)
 
 // ── Инициализация сессии как инициатор (Alice) ────────────────────────────
 
+// Принимает DeviceBundle напрямую — caller отвечает за получение bundle с сервера
 async function initAsInitiator(
-  peerId: string,
+  bundle: DeviceBundle,
   myIdentity: IdentityKeyPair
 ): Promise<{ state: RatchetState; wire: Pick<WirePayload, 'ek' | 'opkId' | 'ikPub'> }> {
-  const bundle = await api.getKeyBundle(peerId)
-
   const ephemeral = generateDHKeyPair()
   const { sharedSecret, ephemeralKeyPublic, usedOpkId } = x3dhInitiatorAgreement(
     myIdentity,
     ephemeral,
-    bundle
+    bundle as unknown as PublicKeyBundle  // DeviceBundle структурно совместим
   )
 
   const state = await initRatchet(
@@ -170,36 +175,65 @@ async function initAsResponder(
   return state
 }
 
-// ── Публичный API ─────────────────────────────────────────────────────────
+// ── Шифрование для одного конкретного устройства (internal) ───────────────
 
-/**
- * Зашифровать сообщение для получателя.
- * Возвращает base64-encoded wire payload.
- */
-export async function encryptMessage(
-  chatId: string,
-  peerId: string,
+async function encryptForDevice(
+  recipientId: string,
+  bundle: DeviceBundle,
   plaintext: string
 ): Promise<string> {
-  await ensureSodium()
-
   const myIdentity = await loadIdentityKey()
   if (!myIdentity) throw new Error('Identity key not found')
 
-  let state = await loadState(chatId, peerId)
+  let state = await loadState(recipientId, bundle.deviceId)
   let wireExtra: Pick<WirePayload, 'ek' | 'opkId' | 'ikPub'> = {}
 
   if (!state) {
-    const { state: newState, wire } = await initAsInitiator(peerId, myIdentity)
+    const { state: newState, wire } = await initAsInitiator(bundle, myIdentity)
     state = newState
     wireExtra = wire
   }
 
   const { message, nextState } = await ratchetEncrypt(state, plaintext)
-  await persistState(chatId, peerId, nextState)
+  await persistState(recipientId, bundle.deviceId, nextState)
 
   const payload: WirePayload = { v: 1, ...wireExtra, msg: message }
   return btoa(JSON.stringify(payload))
+}
+
+// ── Публичный API ─────────────────────────────────────────────────────────
+
+/**
+ * Зашифровать сообщение для всех устройств получателя.
+ * Возвращает массив {deviceId, ciphertext} — по одному на каждое устройство.
+ */
+export async function encryptForAllDevices(
+  recipientId: string,
+  bundles: DeviceBundle[],
+  plaintext: string
+): Promise<{ deviceId: string; ciphertext: string }[]> {
+  await ensureSodium()
+  return Promise.all(
+    bundles.map(async (bundle) => ({
+      deviceId: bundle.deviceId,
+      ciphertext: await encryptForDevice(recipientId, bundle, plaintext),
+    }))
+  )
+}
+
+/**
+ * Зашифровать сообщение для первого устройства получателя.
+ * Используется для SKDM и других случаев, где нужен single-device encrypt.
+ * Возвращает base64-encoded wire payload.
+ */
+export async function encryptMessage(
+  recipientId: string,
+  plaintext: string
+): Promise<string> {
+  await ensureSodium()
+  const { devices } = await api.getKeyBundle(recipientId)
+  if (!devices.length) throw new Error(`No devices found for ${recipientId}`)
+  return encryptForDevice(recipientId, devices[0], plaintext)
 }
 
 // ── Публичный API для групповых чатов ─────────────────────────────────────
@@ -241,7 +275,7 @@ export async function encryptGroupMessage(
         .filter((uid) => uid !== myUserId)
         .map(async (uid) => ({
           userId: uid,
-          encodedSkdm: await encryptMessage(chatId, uid, skdmJson),
+          encodedSkdm: await encryptMessage(uid, skdmJson),
         }))
     )
   }
@@ -286,6 +320,7 @@ export async function decryptGroupMessage(
 export async function handleIncomingSKDM(
   chatId: string,
   senderId: string,
+  senderDeviceId: string,
   encodedSkdm: string  // base64-encoded encrypted individual message containing SKDM JSON
 ): Promise<void> {
   await ensureSodium()
@@ -294,7 +329,7 @@ export async function handleIncomingSKDM(
   await _sodium.ready
 
   // Расшифровываем SKDM через индивидуальную E2E сессию
-  const skdmJson = await decryptMessage(chatId, senderId, encodedSkdm)
+  const skdmJson = await decryptMessage(senderId, senderDeviceId, encodedSkdm)
   const skdm = JSON.parse(skdmJson) as SKDistributionMessage
 
   const state = importSKDistribution(_sodium, skdm)
@@ -305,10 +340,14 @@ export async function handleIncomingSKDM(
  * Расшифровать входящее сообщение.
  * Принимает base64-encoded wire payload.
  * Возвращает plaintext.
+ *
+ * @param senderId - userId отправителя
+ * @param senderDeviceId - deviceId отправителя (Signal Sesame: сессия per-device)
+ * @param encodedPayload - base64-encoded wire payload
  */
 export async function decryptMessage(
-  chatId: string,
   senderId: string,
+  senderDeviceId: string,
   encodedPayload: string
 ): Promise<string> {
   await ensureSodium()
@@ -331,17 +370,52 @@ export async function decryptMessage(
     return atob(encodedPayload)
   }
 
-  let state = await loadState(chatId, senderId)
+  let state = await loadState(senderId, senderDeviceId)
 
   if (!state && payload.ek && payload.ikPub) {
-    // Первое сообщение от этого отправителя — инициализируем как ответчик
+    // Первое сообщение от этого устройства — инициализируем как ответчик
     state = await initAsResponder(payload)
   }
 
   if (!state) throw new Error('No session and no X3DH header')
 
   const { plaintext, nextState } = await ratchetDecrypt(state, payload.msg)
-  await persistState(chatId, senderId, nextState)
+  await persistState(senderId, senderDeviceId, nextState)
 
   return plaintext
+}
+
+/**
+ * Инвалидировать SenderKey группового чата при смене состава участников.
+ * Удаляет ключ из IndexedDB и из памяти — следующая отправка создаст новый
+ * SenderKey и разошлёт SKDM текущим участникам.
+ */
+export async function invalidateGroupSenderKey(chatId: string): Promise<void> {
+  await deleteMySenderKey(chatId)
+}
+
+/**
+ * Расшифровывает encryptedPayload последнего сообщения и возвращает текст превью для списка чатов.
+ * При ошибке возвращает плейсхолдер, не бросает исключение.
+ */
+export async function tryDecryptPreview(
+  chatType: 'direct' | 'group',
+  chatId: string,
+  senderId: string,
+  senderDeviceId: string,
+  encryptedPayload: string
+): Promise<string> {
+  try {
+    const plaintext = chatType === 'group'
+      ? await decryptGroupMessage(chatId, senderId, encryptedPayload)
+      : await decryptMessage(senderId, senderDeviceId, encryptedPayload)
+    try {
+      const obj = JSON.parse(plaintext) as Record<string, unknown>
+      if (obj && typeof obj.mediaId === 'string') return '📎 Вложение'
+      if (typeof obj.text === 'string') return obj.text
+    } catch { /* plain text */ }
+    return plaintext
+  } catch {
+    return 'Зашифрованное сообщение'
+  }
 }

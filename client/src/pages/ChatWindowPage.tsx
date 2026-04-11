@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import ChatWindow from '@/components/ChatWindow/ChatWindow'
 import { useChatStore } from '@/store/chatStore'
 import { api } from '@/api/client'
+import { tryDecryptPreview } from '@/crypto/session'
 import type { Chat } from '@/types'
 
 interface Props {
@@ -18,8 +19,15 @@ export default function ChatWindowPage({ initiateCall }: Props) {
   // Если чат не в store — загрузить с сервера
   useEffect(() => {
     if (!chatId || chat) return
-    api.getChats().then((res) => {
-      res.chats.forEach((c) => upsertChat(c as unknown as Chat))
+    api.getChats().then(async (res) => {
+      for (const c of res.chats) {
+        const raw = c as unknown as Chat
+        const lm = raw.lastMessage
+        const resolved = lm?.encryptedPayload && lm.senderId
+          ? { ...raw, lastMessage: { ...lm, text: await tryDecryptPreview(raw.type, raw.id, lm.senderId, '', lm.encryptedPayload) } }
+          : raw
+        upsertChat(resolved)
+      }
     }).catch(() => {})
   }, [chatId, chat, upsertChat])
 

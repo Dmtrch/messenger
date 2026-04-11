@@ -50,7 +50,7 @@ export interface PublicKeyBundle {
 
 /** WebSocket фреймы — имена полей соответствуют Go-серверу */
 export type WSFrame =
-  | { type: 'message'; chatId: string; ciphertext: string; senderKeyId: number; senderId: string; timestamp: number; messageId: string; clientMsgId?: string }
+  | { type: 'message'; chatId: string; ciphertext: string; senderKeyId: number; senderId: string; senderDeviceId?: string; timestamp: number; messageId: string; clientMsgId?: string }
   | { type: 'ack'; clientMsgId: string; chatId?: string; timestamp: number }
   | { type: 'typing'; chatId: string; userId: string }
   | { type: 'presence'; userId: string; status: 'online' | 'offline' }

@@ -281,7 +281,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
       const members = chat?.members ?? [currentUser.id]
       const recipientPromises = members.map(async (userId) => {
         try {
-          const ciphertext = await encryptMessage(chatId, userId, trimmed)
+          const ciphertext = await encryptMessage(userId, trimmed)
           return { userId, ciphertext }
         } catch {
           const bytes = new TextEncoder().encode(trimmed)
@@ -366,7 +366,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
       const peers = members.filter((uid) => uid !== currentUser.id)
       const recipientPromises = [...peers, currentUser.id].map(async (userId) => {
         try {
-          const ciphertext = await encryptMessage(chatId, userId, plainPayload)
+          const ciphertext = await encryptMessage(userId, plainPayload)
           return { userId, ciphertext }
         } catch {
           const bytes = new TextEncoder().encode(plainPayload)

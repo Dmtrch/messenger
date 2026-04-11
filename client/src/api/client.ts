@@ -42,15 +42,18 @@ export interface AuthLoginRes {
   }
 }
 
-export interface PreKeyBundle {
-  userId: string
-  deviceId?: string
+export interface DeviceBundle {
+  deviceId: string
   ikPublic: string
   spkId: number
   spkPublic: string
   spkSignature: string
   opkId?: number
   opkPublic?: string
+}
+
+export interface PreKeyBundleResponse {
+  devices: DeviceBundle[]
 }
 
 export interface RegisterKeysReq {
@@ -317,9 +320,15 @@ export const api = {
   logout: () =>
     req<void>('/api/auth/logout', { method: 'POST' }),
 
+  changePassword: (currentPassword: string, newPassword: string) =>
+    req<void>('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+
   // ── Keys ─────────────────────────────────────────────────
   getKeyBundle: (userId: string) =>
-    req<PreKeyBundle>(`/api/keys/${encodeURIComponent(userId)}`),
+    req<PreKeyBundleResponse>(`/api/keys/${encodeURIComponent(userId)}`),
 
   uploadPreKeys: (keys: Array<{ id: number; key: string }>) =>
     req<void>('/api/keys/prekeys', { method: 'POST', body: JSON.stringify({ keys }) }),

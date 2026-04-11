@@ -1,112 +1,42 @@
 # Задачи на следующую сессию
 
-Актуально на: 2026-04-10. Ветка: `feature/stage9-multi-device`.
+Актуально на: 2026-04-11. Ветка: `feature/stage9-multi-device`.
 
 ---
 
 ## Выполнено в этой сессии
 
-### Этап 9, серверная часть (фазы 1–5) — multi-device архитектура
+### Клиентская часть (фазы 1.1–1.5) — multi-device архитектура
 
-- **Migration #8** — `messages.destination_device_id TEXT NOT NULL DEFAULT ''` (пустая строка = broadcast)
-- **queries.go** — `GetIdentityKeysByUserID`, `Message.DestinationDeviceID`, обновлены все SELECT/INSERT для messages
-- **GET /api/keys/:userId** → `{ "devices": [ {deviceId, ikPublic, spkId, spkPublic, spkSignature, opkId?, opkPublic?} ] }` — один entry на активное устройство
-- **WS Hub** — `client.deviceID`, `recipient.DeviceID`, новый `DeliverToDevice`, `senderDeviceId` в WS payload `message`
-- **ServeWS** — читает `?deviceId=`, валидирует принадлежность пользователю
-- **Тесты** — migration #8, обновлены `GetBundle` тесты, исправлен некорректный assert в `hub_calls_test.go`
-
----
-
-## Приоритет 1 — Must (клиентская часть 4.1, фазы 6–9)
-
-### 1.1 session.ts — рефактор sessionKey + multi-device шифрование
-
-**Файл:** `client/src/crypto/session.ts`
-
-#### Изменения:
-
-**sessionKey: chatId:peerId → peerId:deviceId** (следует Signal Sesame spec — сессия между парой устройств, не зависит от чата)
-```typescript
-// БЫЛО
-function sessionKey(chatId: string, peerId: string) { return `${chatId}:${peerId}`; }
-// СТАЛО
-function sessionKey(peerUserId: string, peerDeviceId: string) { return `${peerUserId}:${peerDeviceId}`; }
-```
-
-**encryptForAllDevices** — итерация по массиву bundles, возвращает `[{deviceId, ciphertext}]`:
-```typescript
-async function encryptForAllDevices(
-    recipientId: string,
-    bundles: DeviceBundle[],
-    plaintext: string
-): Promise<{ deviceId: string; ciphertext: string }[]>
-```
-
-**decryptMessage** — добавить `senderDeviceId: string` параметр:
-```typescript
-// БЫЛО: decryptMessage(chatId, senderId, ciphertext)
-// СТАЛО: decryptMessage(senderId, senderDeviceId, ciphertext)
-```
-
-**Экспортировать** обновлённый `invalidateGroupSenderKey` без изменений.
+- **session.ts** — `sessionKey` → `peerId:deviceId` (Signal Sesame spec); `encryptForAllDevices`; `decryptMessage(senderId, senderDeviceId, ct)`; `handleIncomingSKDM` + `tryDecryptPreview` + `encryptMessage` обновлены
+- **client.ts** — `DeviceBundle`, `PreKeyBundleResponse { devices: DeviceBundle[] }`, `getKeyBundle` → `PreKeyBundleResponse`
+- **types/index.ts** — `senderDeviceId?: string` в WSFrame `message`
+- **useMessengerWS.ts** — `senderDeviceId` извлекается из `message` фрейма и передаётся в `decryptMessage`
+- **websocket.ts** — `?deviceId=<id>` добавляется в WS URL из `loadDeviceId()` (keystore)
+- **ChatWindow.tsx**, **ChatListPage.tsx**, **ChatWindowPage.tsx** — вызовы `encryptMessage`/`tryDecryptPreview` обновлены под новые сигнатуры
 
 ---
 
-### 1.2 client.ts — обновить типы PreKeyBundle
-
-**Файл:** `client/src/api/client.ts`
-
-```typescript
-// БЫЛО
-interface PreKeyBundle { ikPub, spkPub, spkSig, opkPub?, opkId? }
-
-// СТАЛО
-interface DeviceBundle {
-    deviceId: string;
-    ikPublic: string;
-    spkPublic: string;
-    spkSignature: string;
-    opkPublic?: string;
-    opkId?: number;
-}
-interface PreKeyBundleResponse { devices: DeviceBundle[]; }
-
-// getKeyBundle(userId: string): Promise<PreKeyBundleResponse>
-```
-
----
-
-### 1.3 useMessengerWS.ts — передать senderDeviceId в decryptMessage
-
-**Файл:** `client/src/hooks/useMessengerWS.ts`
-
-В обработчике события `message`:
-```typescript
-// Сервер теперь передаёт senderDeviceId в каждом сообщении
-const { senderId, senderDeviceId, ciphertext, chatId, ... } = data;
-const plaintext = await decryptMessage(senderId, senderDeviceId ?? '', ciphertext);
-```
-
----
+## Приоритет 1 — Must (осталось)
 
 ### 1.4 ChatWindowPage.tsx — fan-out отправка на все устройства получателя
 
 **Файл:** `client/src/pages/ChatWindowPage.tsx`
 
-При отправке:
+При отправке нового DM:
 1. `GET /api/keys/:recipientId` → `{ devices: DeviceBundle[] }`
 2. `encryptForAllDevices(recipientId, bundles, plaintext)` → `[{deviceId, ciphertext}]`
-3. WS message: `recipients` стал массивом `[{userId, deviceId, ciphertext}]`
+3. WS message: `recipients` → `[{userId, deviceId, ciphertext}]` (также добавить свои устройства)
 
-Также включить копии для **собственных устройств отправителя** (если endpoint `GET /api/keys/me` реализован или через сохранённый `deviceId`).
+**Текущее состояние** — `ChatWindow.tsx` использует `encryptMessage(userId, plaintext)` (первое устройство), что совместимо, но не fan-out.
 
----
+**Что нужно изменить:**
+- Загрузить `PreKeyBundleResponse` для каждого члена чата
+- Заменить `encryptMessage(uid, payload)` на `encryptForAllDevices(uid, bundles, payload)`
+- Обновить тип WSSendFrame — добавить `deviceId?: string` в `recipients`
+- Обновить сервер (`hub.go handleMessage`) — чтобы читал `deviceId` из каждого recipient
 
-### 1.5 WS connect — передавать deviceId
-
-**Файл:** `client/src/hooks/useMessengerWS.ts` или `client/src/api/websocket.ts`
-
-При подключении добавить `?deviceId=<myDeviceId>` к WS URL. `deviceId` получается из ответа `POST /api/keys/register` и сохраняется в authStore или localStorage.
+Также нужно включить **собственные устройства отправителя** (через `GET /api/keys/:myUserId`).
 
 ---
 
@@ -116,6 +46,43 @@ const plaintext = await decryptMessage(senderId, senderDeviceId ?? '', ciphertex
 
 - `client/src/crypto/session.test.ts` (новый или обновить) — проверить новый `sessionKey`, `encryptForAllDevices`, `decryptMessage` с `senderDeviceId`
 - Обновить `client/src/api/client.test.ts` если затронуто изменением типов
+
+### 2.2 Пагинация истории вверх — обязательно для всех клиентов
+
+Сейчас сервер **уже поддерживает** cursor-based pagination:
+
+- `GET /api/chats/{chatId}/messages?before=<messageId>&limit=<n>`
+
+Но текущий web-клиент фактически загружает только:
+
+- кэш из IndexedDB;
+- один начальный блок истории с сервера.
+
+При прокрутке вверх старые сообщения **автоматически не догружаются**.
+
+Следствие:
+
+- web-клиент пока не даёт полноценного подъёма к старой истории;
+- для будущих desktop/mobile native клиентов это тоже должно считаться обязательным требованием с первого релиза истории чата.
+
+Что нужно сделать:
+
+- реализовать client-side cursor pagination для web-клиента;
+- зафиксировать это как обязательный capability для:
+  - web client
+  - desktop native
+  - Android native
+  - iOS native
+- не ограничивать историю только:
+  - первичной серверной загрузкой;
+  - локальным хвостом из offline-кэша.
+
+Критерий готовности:
+
+- при прокрутке вверх клиент догружает предыдущие сообщения по `before=<oldestMessageId>`;
+- дедупликация работает;
+- локальный кэш не ломает порядок сообщений;
+- один и тот же принцип пагинации используется во всех клиентских каналах.
 
 ---
 
@@ -135,6 +102,7 @@ const plaintext = await decryptMessage(senderId, senderDeviceId ?? '', ciphertex
 - `decryptMessage(senderId, senderDeviceId, ciphertext)` — использовать `senderDeviceId`
 - Fan-out: шифровать отдельно для каждого устройства получателя
 - WS connect: передавать `?deviceId=`
+- Реализовать cursor-based догрузку старой истории вверх; сейчас сервер умеет, клиент — ещё нет
 
 **Ключевые файлы этой сессии:**
 - `server/db/migrate.go` — migration #8
@@ -148,3 +116,106 @@ const plaintext = await decryptMessage(senderId, senderDeviceId ?? '', ciphertex
 - `client/src/api/client.ts` — PreKeyBundleResponse тип
 - `client/src/hooks/useMessengerWS.ts` — senderDeviceId, ?deviceId= в URL
 - `client/src/pages/ChatWindowPage.tsx` — fan-out отправка
+
+---
+
+## Отдельный трек — нативные приложения для разных ОС
+
+В этой сессии подготовлен отдельный архитектурный трек под **полноценные нативные приложения**, а не PWA-обёртки.
+
+### Созданные документы
+
+- [План по кроссплатформенным нативным клиентам](/Users/dim/vscodeproject/messenger/docs/superpowers/plans/2026-04-10-cross-platform-client-apps.md)
+- [Детальный execution plan](/Users/dim/vscodeproject/messenger/docs/superpowers/plans/2026-04-10-native-client-execution-plan.md)
+- [RFC: native client architecture](/Users/dim/vscodeproject/messenger/docs/superpowers/specs/native-client-architecture.md)
+
+### Рекомендуемая последовательность реализации
+
+#### Этап A — Foundation
+
+Цель:
+
+- утвердить native-first стратегию;
+- зафиксировать архитектурные границы;
+- подготовить структуру каталогов и shared contracts.
+
+Основные результаты:
+
+- `shared/protocol/`
+- `shared/domain/`
+- `shared/crypto-contracts/`
+- `shared/test-vectors/`
+- RFC и compatibility matrix
+
+#### Этап B — Shared Core
+
+Цель:
+
+- реализовать платформенно-независимый core для desktop/mobile клиентов.
+
+Основные результаты:
+
+- auth/session engine
+- websocket abstraction
+- sync/outbox engine
+- crypto abstraction
+- repository contracts
+- единый контракт cursor-based pagination истории для всех клиентов
+
+#### Этап C — Desktop Native
+
+Цель:
+
+- первым выпустить production-ready нативный клиент для:
+  - Windows
+  - Linux
+  - macOS
+
+Причина приоритета:
+
+- desktop проще стабилизировать раньше mobile;
+- это даёт первый реальный native delivery channel.
+
+Дополнительное обязательное требование:
+
+- подъём к старой переписке должен догружать историю с сервера по cursor-pagination, а не ограничиваться локальным кэшем.
+
+#### Этап D — Android Native
+
+Цель:
+
+- выпустить полноценный Android-клиент на shared core с:
+  - secure storage
+  - FCM
+  - media permissions
+  - reconnect/background handling
+  - cursor-based загрузкой старой истории вверх
+
+#### Этап E — iOS Native
+
+Цель:
+
+- выпустить полноценный iOS-клиент после стабилизации shared core и Android mobile-path.
+
+Причина последнего приоритета:
+
+- iOS самый дорогой и рискованный этап по lifecycle, storage, APNs и release/compliance.
+
+Дополнительное обязательное требование:
+
+- тот же механизм cursor-based истории, что и у остальных клиентов, без отдельной логики “только локальный хвост”.
+
+### Практический приоритет на следующую сессию
+
+Если продолжать именно трек нативных приложений, следующий логичный шаг:
+
+1. Создать `docs/superpowers/specs/native-client-compatibility-matrix.md`
+2. Подготовить `Foundation`-каркас каталогов:
+   - `shared/`
+   - `apps/desktop/`
+   - `apps/mobile/`
+3. Зафиксировать decision records по:
+   - secure storage
+   - local DB
+   - native crypto stack
+   - iOS UI strategy (`SwiftUI` или `Compose Multiplatform`)

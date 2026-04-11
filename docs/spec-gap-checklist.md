@@ -8,9 +8,9 @@
   - [x] GET /api/keys/:userId возвращает `{ devices: [...] }` — bundle для каждого устройства
   - [x] WS Hub: `client.deviceID`, `DeliverToDevice`, `senderDeviceId` в WS payload
   - [x] `messages.destination_device_id` (migration #8) — адресное хранение
-  - [ ] `session.ts`: sessionKey → `peerId:deviceId`; `encryptForAllDevices`; `decryptMessage(senderId, deviceId, ct)`
-  - [ ] `client.ts`: тип `PreKeyBundleResponse { devices: DeviceBundle[] }`
-  - [ ] `useMessengerWS.ts`: передавать `senderDeviceId` в `decryptMessage`; `?deviceId=` в WS URL
+  - [x] `session.ts`: sessionKey → `peerId:deviceId`; `encryptForAllDevices`; `decryptMessage(senderId, deviceId, ct)`
+  - [x] `client.ts`: тип `PreKeyBundleResponse { devices: DeviceBundle[] }`
+  - [x] `useMessengerWS.ts`: передавать `senderDeviceId` в `decryptMessage`; `?deviceId=` в WS URL
   - [ ] `ChatWindowPage.tsx`: fan-out шифрование — отдельный ciphertext на каждое устройство получателя
 - [x] Реализовать `POST /api/keys/register`
 - [x] Реализовать Sender Keys для групп
@@ -81,11 +81,13 @@
 - [x] **senderDeviceId в WS payload**: каждое `message` событие содержит `senderDeviceId` отправителя
 - [x] **migration #8**: `messages.destination_device_id TEXT NOT NULL DEFAULT ''`
 
-**Клиент — ожидает следующей сессии:**
-- [ ] `session.ts`: `sessionKey(peerId, deviceId)` — Signal Sesame spec
-- [ ] `session.ts`: `encryptForAllDevices`, `decryptMessage(senderId, deviceId, ct)`
-- [ ] `client.ts`: `PreKeyBundleResponse { devices: DeviceBundle[] }`
-- [ ] `useMessengerWS.ts`: `senderDeviceId` → decrypt; `?deviceId=` в WS URL
+**Клиент — выполнено:**
+- [x] `session.ts`: `sessionKey(peerId, deviceId)` — Signal Sesame spec
+- [x] `session.ts`: `encryptForAllDevices`, `decryptMessage(senderId, deviceId, ct)`
+- [x] `client.ts`: `PreKeyBundleResponse { devices: DeviceBundle[] }`
+- [x] `useMessengerWS.ts`: `senderDeviceId` → decrypt; `?deviceId=` в WS URL
+
+**Клиент — осталось:**
 - [ ] `ChatWindowPage.tsx`: fan-out — отдельный ciphertext на каждое устройство
 
 ### Этап 4 — Message state (пропуски в UI)
@@ -105,7 +107,7 @@
 
 ## Контрольные вехи
 
-- [ ] Закрыты все `Must` (остаётся: клиентская часть multi-device — session.ts, client.ts, useMessengerWS.ts, ChatWindowPage.tsx)
+- [ ] Закрыты все `Must` (остаётся: `ChatWindowPage.tsx` fan-out шифрование)
 - [x] Закрыты все security-пункты из спецификации
 - [x] Закрыты все data-model и migration-пункты (identity_keys composite PK, versioned migrations, destination_device_id)
 - [x] Закрыты все crypto-пункты (этап 5)
