@@ -27,13 +27,13 @@ export function useMessengerWS(
   useEffect(() => {
     if (!bindings.isAuthenticated || !bindings.token) return
 
-    const deps        = createBrowserWSWiring(apiClient, bindingsRef.current)
+    const deps        = createBrowserWSWiring(apiClient, bindings)
     const orchestrator = createMessengerWSOrchestrator(deps)
 
     const ws = new MessengerWS(
       bindings.token,
       (frame) => { void orchestrator.onFrame(frame) },
-      () => { orchestrator.onConnect((frame) => ws.send(frame)) },
+      () => { orchestrator.onConnect((frame) => wsRef.current!.send(frame)) },
       () => { orchestrator.onDisconnect() },
       () => { orchestrator.onAuthFail() },
     )
