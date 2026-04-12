@@ -1,9 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { useMessengerWS } from '@/hooks/useMessengerWS'
+import { useBrowserWSBindings } from '@/hooks/useBrowserWSBindings'
+import { browserApiClient } from '@/api/client'
 import { useOfflineSync } from '@/hooks/useOfflineSync'
 import { useCallHandler } from '@/hooks/useCallHandler'
-import { useCallStore } from '@/store/callStore'
+import type { CallWSFrame } from '../../shared/native-core'
 import { initServerUrl, hasServerUrl } from '@/config/serverConfig'
 import ChatListPage from '@/pages/ChatListPage'
 import ChatWindowPage from '@/pages/ChatWindowPage'
@@ -17,16 +19,20 @@ import CallOverlay from '@/components/CallOverlay/CallOverlay'
 // Инициализируем URL сервера при загрузке модуля (если не задан — берём window.location.origin)
 initServerUrl()
 
-function AppRoutes() {
+interface AppRoutesProps {
+  initiateCall: (chatId: string, targetId: string, isVideo: boolean) => void
+  handleCallFrame: ((frame: CallWSFrame) => void) | null
+}
+
+function AppRoutes({ initiateCall, handleCallFrame }: AppRoutesProps) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const role = useAuthStore((s) => s.role)
 
   // WebSocket подключается глобально при авторизации
-  useMessengerWS()
+  const bindings = useBrowserWSBindings(handleCallFrame)
+  useMessengerWS(browserApiClient, bindings)
   // Сброс outbox при восстановлении WS-соединения
   useOfflineSync()
-  // initiateCall берём из store — зарегистрировано в CallHandlerBridge через useCallHandler
-  const initiateCall = useCallStore((s) => s._initiateCall) ?? undefined
 
   // Если URL сервера не задан — показываем setup
   if (!hasServerUrl()) {
@@ -59,18 +65,20 @@ function AppRoutes() {
   )
 }
 
-/** Компонент-мост: регистрирует useCallHandler и рендерит CallOverlay вне auth-guard */
-function CallHandlerBridge() {
-  const { acceptCall, rejectCall, hangUp } = useCallHandler()
-  return <CallOverlay onAccept={acceptCall} onReject={rejectCall} onHangUp={hangUp} />
-}
-
 export default function App() {
+  const {
+    initiateCall,
+    acceptCall,
+    rejectCall,
+    hangUp,
+    handleCallFrame,
+  } = useCallHandler()
+
   return (
     <BrowserRouter>
       <OfflineIndicator />
-      <AppRoutes />
-      <CallHandlerBridge />
+      <AppRoutes initiateCall={initiateCall} handleCallFrame={handleCallFrame} />
+      <CallOverlay onAccept={acceptCall} onReject={rejectCall} onHangUp={hangUp} />
     </BrowserRouter>
   )
 }
