@@ -4,8 +4,15 @@ export interface User {
   displayName: string
   avatarPath?: string
   identityKeyPublic: string   // base64, Ed25519
+  role?: 'admin' | 'user'
   lastSeen?: number
   online?: boolean
+}
+
+export interface ServerInfo {
+  name: string
+  description: string
+  registrationMode: 'open' | 'invite' | 'approval'
 }
 
 export interface Chat {
@@ -50,7 +57,7 @@ export interface PublicKeyBundle {
 
 /** WebSocket фреймы — имена полей соответствуют Go-серверу */
 export type WSFrame =
-  | { type: 'message'; chatId: string; ciphertext: string; senderKeyId: number; senderId: string; timestamp: number; messageId: string; clientMsgId?: string }
+  | { type: 'message'; chatId: string; ciphertext: string; senderKeyId: number; senderId: string; senderDeviceId?: string; timestamp: number; messageId: string; clientMsgId?: string }
   | { type: 'ack'; clientMsgId: string; chatId?: string; timestamp: number }
   | { type: 'typing'; chatId: string; userId: string }
   | { type: 'presence'; userId: string; status: 'online' | 'offline' }
@@ -68,7 +75,7 @@ export type WSFrame =
   | { type: 'ice_candidate'; callId: string; candidate: RTCIceCandidateInit }
 
 export type WSSendFrame =
-  | { type: 'message'; chatId: string; clientMsgId: string; senderKeyId: number; recipients: Array<{ userId: string; ciphertext: string }> }
+  | { type: 'message'; chatId: string; clientMsgId: string; senderKeyId: number; recipients: Array<{ userId: string; deviceId?: string; ciphertext: string }> }
   | { type: 'skdm'; chatId: string; recipients: Array<{ userId: string; ciphertext: string }> }
   | { type: 'typing'; chatId: string }
   | { type: 'read'; chatId: string; messageId: string }

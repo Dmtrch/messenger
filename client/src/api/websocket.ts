@@ -10,11 +10,19 @@
 
 import type { WSFrame, WSSendFrame } from '@/types'
 import { setAccessToken, api } from './client'
+import { loadDeviceId } from '@/crypto/keystore'
+import { getServerUrl } from '@/config/serverConfig'
 
 function getWsBase(): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.host  // включает порт если есть
-  return `${protocol}//${host}`
+  const serverUrl = getServerUrl()
+  if (!serverUrl) {
+    // Fallback: текущий хост браузера
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${protocol}//${window.location.host}`
+  }
+  const url = new URL(serverUrl)
+  const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${url.host}`
 }
 
 type FrameHandler = (frame: WSFrame) => void
@@ -62,7 +70,19 @@ export class MessengerWS {
   }
 
   private _open(): void {
-    const url = `${getWsBase()}/ws?token=${encodeURIComponent(this.token)}`
+    // deviceId передаётся асинхронно — подключаем после загрузки
+    loadDeviceId().then((deviceId) => {
+      const params = new URLSearchParams({ token: this.token })
+      if (deviceId) params.set('deviceId', deviceId)
+      const url = `${getWsBase()}/ws?${params}`
+      this._openUrl(url)
+    }).catch(() => {
+      const url = `${getWsBase()}/ws?token=${encodeURIComponent(this.token)}`
+      this._openUrl(url)
+    })
+  }
+
+  private _openUrl(url: string): void {
     this.ws = new WebSocket(url)
 
     this.ws.onopen = () => {

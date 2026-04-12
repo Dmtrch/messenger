@@ -1,0 +1,32 @@
+{
+  "name": "@messenger/shared-native-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Platform-neutral shared runtime core for Messenger native clients.",
+  "main": "./index.ts",
+  "module": "./index.ts",
+  "types": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./auth": "./auth/session-runtime.ts",
+    "./websocket": "./websocket/connection-runtime.ts",
+    "./messages": "./messages/message-repository.ts",
+    "./sync": "./sync/sync-engine.ts",
+    "./storage": "./storage/storage-runtime.ts",
+    "./crypto": "./crypto/crypto-runtime.ts",
+    "./crypto/web": "./crypto/web-crypto-adapter.ts",
+    "./crypto/session-web": "./crypto/web/session-web.ts"
+  },
+  "files": [
+    "index.ts",
+    "auth",
+    "websocket",
+    "messages",
+    "sync",
+    "storage",
+    "crypto",
+    "README.md",
+    "module.json"
+  ]
+}

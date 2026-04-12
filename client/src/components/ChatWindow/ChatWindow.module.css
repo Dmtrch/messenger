@@ -60,6 +60,15 @@
   text-align: center; font-size: 0.8125rem;
   color: var(--text-secondary); padding: 0.5rem 0;
 }
+.loadMore {
+  text-align: center; padding: 0.5rem 0;
+}
+.loadMore button {
+  background: none; border: none; color: var(--accent);
+  font-size: 0.8125rem; cursor: pointer; padding: 0.25rem 0.75rem;
+  border-radius: 0.5rem;
+}
+.loadMore button:hover { background: var(--bg-hover, rgba(0,0,0,0.05)); }
 
 /* Кнопка скрепки и hidden input */
 .fileInput { display: none; }

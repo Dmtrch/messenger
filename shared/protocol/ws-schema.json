@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://messenger.local/shared/protocol/ws-schema.json",
+  "title": "Messenger WebSocket Frame Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "const": "/ws" },
+        "query": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "required": { "$ref": "#/$defs/stringArray" },
+            "optional": { "$ref": "#/$defs/stringArray" }
+          },
+          "required": ["required", "optional"]
+        }
+      },
+      "required": ["path", "query"]
+    },
+    "serverToClient": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message": { "$ref": "#/$defs/frameMetadata" },
+        "ack": { "$ref": "#/$defs/frameMetadata" },
+        "typing": { "$ref": "#/$defs/frameMetadata" },
+        "presence": { "$ref": "#/$defs/frameMetadata" },
+        "prekey_low": { "$ref": "#/$defs/frameMetadata" },
+        "read": { "$ref": "#/$defs/frameMetadata" },
+        "message_deleted": { "$ref": "#/$defs/frameMetadata" },
+        "message_edited": { "$ref": "#/$defs/frameMetadata" },
+        "skdm": { "$ref": "#/$defs/frameMetadata" },
+        "call_offer": { "$ref": "#/$defs/frameMetadata" },
+        "call_answer": { "$ref": "#/$defs/frameMetadata" },
+        "call_end": { "$ref": "#/$defs/frameMetadata" },
+        "call_reject": { "$ref": "#/$defs/frameMetadata" },
+        "call_busy": { "$ref": "#/$defs/frameMetadata" },
+        "ice_candidate": { "$ref": "#/$defs/frameMetadata" }
+      },
+      "required": ["message", "ack", "typing", "presence", "prekey_low", "read", "message_deleted", "message_edited", "skdm", "call_offer", "call_answer", "call_end", "call_reject", "call_busy", "ice_candidate"]
+    },
+    "clientToServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message": { "$ref": "#/$defs/frameMetadata" },
+        "skdm": { "$ref": "#/$defs/frameMetadata" },
+        "typing": { "$ref": "#/$defs/frameMetadata" },
+        "read": { "$ref": "#/$defs/frameMetadata" },
+        "call_offer": { "$ref": "#/$defs/frameMetadata" },
+        "call_answer": { "$ref": "#/$defs/frameMetadata" },
+        "call_end": { "$ref": "#/$defs/frameMetadata" },
+        "call_reject": { "$ref": "#/$defs/frameMetadata" },
+        "ice_candidate": { "$ref": "#/$defs/frameMetadata" }
+      },
+      "required": ["message", "skdm", "typing", "read", "call_offer", "call_answer", "call_end", "call_reject", "ice_candidate"]
+    }
+  },
+  "required": ["version", "description", "connection", "serverToClient", "clientToServer"],
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "frameType": {
+      "type": "string",
+      "enum": [
+        "message",
+        "ack",
+        "typing",
+        "presence",
+        "prekey_request",
+        "prekey_low",
+        "read",
+        "message_deleted",
+        "message_edited",
+        "skdm",
+        "call_offer",
+        "call_answer",
+        "call_end",
+        "call_reject",
+        "call_busy",
+        "ice_candidate"
+      ]
+    },
+    "frameMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": { "$ref": "#/$defs/stringArray" },
+        "optional": { "$ref": "#/$defs/stringArray" }
+      },
+      "required": ["required"]
+    },
+    "messageRecipient": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "userId": { "type": "string" },
+        "deviceId": { "type": "string" },
+        "ciphertext": { "type": "string" }
+      },
+      "required": ["userId", "ciphertext"]
+    },
+    "serverFrame": {
+      "oneOf": [
+        { "$ref": "#/$defs/serverMessageFrame" },
+        { "$ref": "#/$defs/serverAckFrame" },
+        { "$ref": "#/$defs/serverReadFrame" }
+      ]
+    },
+    "clientFrame": {
+      "oneOf": [
+        { "$ref": "#/$defs/clientMessageFrame" },
+        { "$ref": "#/$defs/clientReadFrame" },
+        { "$ref": "#/$defs/clientCallOfferFrame" }
+      ]
+    },
+    "serverMessageFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "message" },
+        "chatId": { "type": "string" },
+        "ciphertext": { "type": "string" },
+        "senderKeyId": { "type": "integer" },
+        "senderId": { "type": "string" },
+        "senderDeviceId": { "type": "string" },
+        "timestamp": { "type": "integer" },
+        "messageId": { "type": "string" },
+        "clientMsgId": { "type": "string" }
+      },
+      "required": ["type", "chatId", "ciphertext", "senderKeyId", "senderId", "timestamp", "messageId"]
+    },
+    "serverAckFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "ack" },
+        "clientMsgId": { "type": "string" },
+        "chatId": { "type": "string" },
+        "timestamp": { "type": "integer" }
+      },
+      "required": ["type", "clientMsgId", "timestamp"]
+    },
+    "serverReadFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "read" },
+        "chatId": { "type": "string" },
+        "messageId": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["type", "chatId", "messageId", "userId"]
+    },
+    "clientMessageFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "message" },
+        "chatId": { "type": "string" },
+        "clientMsgId": { "type": "string" },
+        "senderKeyId": { "type": "integer" },
+        "recipients": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/messageRecipient" }
+        }
+      },
+      "required": ["type", "chatId", "clientMsgId", "senderKeyId", "recipients"]
+    },
+    "clientReadFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "read" },
+        "chatId": { "type": "string" },
+        "messageId": { "type": "string" }
+      },
+      "required": ["type", "chatId", "messageId"]
+    },
+    "clientCallOfferFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "call_offer" },
+        "callId": { "type": "string" },
+        "chatId": { "type": "string" },
+        "targetId": { "type": "string" },
+        "sdp": { "type": "string" },
+        "isVideo": { "type": "boolean" }
+      },
+      "required": ["type", "callId", "chatId", "targetId", "sdp", "isVideo"]
+    }
+  },
+  "version": 1,
+  "description": "Language-neutral WebSocket frame schema for Messenger clients.",
+  "connection": {
+    "path": "/ws",
+    "query": {
+      "required": ["token"],
+      "optional": ["deviceId"]
+    }
+  },
+  "serverToClient": {
+    "message": {
+      "required": ["type", "chatId", "ciphertext", "senderKeyId", "senderId", "timestamp", "messageId"],
+      "optional": ["senderDeviceId", "clientMsgId"]
+    },
+    "ack": {
+      "required": ["type", "clientMsgId", "timestamp"],
+      "optional": ["chatId"]
+    },
+    "typing": {
+      "required": ["type", "chatId", "userId"]
+    },
+    "presence": {
+      "required": ["type", "userId", "status"]
+    },
+    "prekey_low": {
+      "required": ["type", "count"]
+    },
+    "read": {
+      "required": ["type", "chatId", "messageId", "userId"]
+    },
+    "message_deleted": {
+      "required": ["type", "chatId", "clientMsgId"]
+    },
+    "message_edited": {
+      "required": ["type", "chatId", "clientMsgId", "ciphertext", "editedAt"]
+    },
+    "skdm": {
+      "required": ["type", "chatId", "senderId", "ciphertext"]
+    },
+    "call_offer": {
+      "required": ["type", "callId", "chatId", "callerId", "sdp", "isVideo"]
+    },
+    "call_answer": {
+      "required": ["type", "callId", "sdp"]
+    },
+    "call_end": {
+      "required": ["type", "callId"],
+      "optional": ["reason"]
+    },
+    "call_reject": {
+      "required": ["type", "callId"]
+    },
+    "call_busy": {
+      "required": ["type", "callId"]
+    },
+    "ice_candidate": {
+      "required": ["type", "callId", "candidate"]
+    }
+  },
+  "clientToServer": {
+    "message": {
+      "required": ["type", "chatId", "clientMsgId", "senderKeyId", "recipients"]
+    },
+    "skdm": {
+      "required": ["type", "chatId", "recipients"]
+    },
+    "typing": {
+      "required": ["type", "chatId"]
+    },
+    "read": {
+      "required": ["type", "chatId", "messageId"]
+    },
+    "call_offer": {
+      "required": ["type", "callId", "chatId", "targetId", "sdp", "isVideo"]
+    },
+    "call_answer": {
+      "required": ["type", "callId", "sdp"]
+    },
+    "call_end": {
+      "required": ["type", "callId"]
+    },
+    "call_reject": {
+      "required": ["type", "callId"]
+    },
+    "ice_candidate": {
+      "required": ["type", "callId", "candidate"]
+    }
+  }
+}

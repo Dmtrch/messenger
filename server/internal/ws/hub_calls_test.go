@@ -320,8 +320,9 @@ func TestHandleCallAnswer_RelaysToInitiator(t *testing.T) {
 	if sess == nil || sess.state != "active" {
 		t.Errorf("expected session state=active, got %v", sess)
 	}
-	if sess.timer != nil {
-		t.Error("expected timer to be nil after answer")
+	// После ответа устанавливается таймер максимальной длительности (4 часа)
+	if sess.timer == nil {
+		t.Error("expected max-duration timer to be set after answer")
 	}
 }
 

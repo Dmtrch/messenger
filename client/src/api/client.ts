@@ -5,7 +5,13 @@
  * Refresh выполняется автоматически при 401 — один раз, затем повтор запроса.
  */
 
-const BASE = ''  // относительный путь — браузер подставляет текущий host автоматически
+import { getServerUrl } from '@/config/serverConfig'
+
+function getBase(): string {
+  const url = getServerUrl()
+  // Если пустой (ещё не настроен) — используем относительный путь (fallback для браузера)
+  return url || ''
+}
 
 // ── Типы ──────────────────────────────────────────────────
 
@@ -18,6 +24,7 @@ export interface AuthRegisterReq {
   spkPublic: string
   spkSignature: string
   opkPublics: Array<{ id: number; key: string }>
+  inviteCode?: string
 }
 
 export interface AuthRegisterRes {
@@ -42,15 +49,18 @@ export interface AuthLoginRes {
   }
 }
 
-export interface PreKeyBundle {
-  userId: string
-  deviceId?: string
+export interface DeviceBundle {
+  deviceId: string
   ikPublic: string
   spkId: number
   spkPublic: string
   spkSignature: string
   opkId?: number
   opkPublic?: string
+}
+
+export interface PreKeyBundleResponse {
+  devices: DeviceBundle[]
 }
 
 export interface RegisterKeysReq {
@@ -124,7 +134,7 @@ export function setAccessToken(token: string | null): void {
 
 async function doRefresh(): Promise<string | null> {
   try {
-    const res = await fetch(`${BASE}/api/auth/refresh`, {
+    const res = await fetch(`${getBase()}/api/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
     })
@@ -147,6 +157,7 @@ async function req<T>(
   path: string,
   options: RequestInit & { skipAuth?: boolean; _retry?: boolean } = {}
 ): Promise<T> {
+  const base = getBase()
   const { skipAuth = false, _retry = false, ...fetchOpts } = options
 
   const isFormData = fetchOpts.body instanceof FormData
@@ -156,7 +167,7 @@ async function req<T>(
     ...(fetchOpts.headers as Record<string, string> | undefined ?? {}),
   }
 
-  const response = await fetch(`${BASE}${path}`, {
+  const response = await fetch(`${base}${path}`, {
     ...fetchOpts,
     headers,
     credentials: 'include',
@@ -230,7 +241,7 @@ async function fetchMediaBlobUrl(mediaId: string): Promise<string> {
     ? { Authorization: `Bearer ${_accessToken}` }
     : {}
 
-  let response = await fetch(`${BASE}${path}`, { headers, credentials: 'include' })
+  let response = await fetch(`${getBase()}${path}`, { headers, credentials: 'include' })
 
   if (response.status === 401) {
     if (!_refreshInFlight) {
@@ -238,7 +249,7 @@ async function fetchMediaBlobUrl(mediaId: string): Promise<string> {
     }
     const token = await _refreshInFlight
     if (!token) throw new ApiError(401, 'Сессия истекла')
-    response = await fetch(`${BASE}${path}`, {
+    response = await fetch(`${getBase()}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
       credentials: 'include',
     })
@@ -264,7 +275,7 @@ async function fetchEncryptedMediaBlobUrl(mediaId: string, mediaKey: string, mim
     ? { Authorization: `Bearer ${_accessToken}` }
     : {}
 
-  let response = await fetch(`${BASE}${path}`, { headers, credentials: 'include' })
+  let response = await fetch(`${getBase()}${path}`, { headers, credentials: 'include' })
 
   if (response.status === 401) {
     if (!_refreshInFlight) {
@@ -272,7 +283,7 @@ async function fetchEncryptedMediaBlobUrl(mediaId: string, mediaKey: string, mim
     }
     const token = await _refreshInFlight
     if (!token) throw new ApiError(401, 'Сессия истекла')
-    response = await fetch(`${BASE}${path}`, {
+    response = await fetch(`${getBase()}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
       credentials: 'include',
     })
@@ -317,9 +328,15 @@ export const api = {
   logout: () =>
     req<void>('/api/auth/logout', { method: 'POST' }),
 
+  changePassword: (currentPassword: string, newPassword: string) =>
+    req<void>('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+
   // ── Keys ─────────────────────────────────────────────────
   getKeyBundle: (userId: string) =>
-    req<PreKeyBundle>(`/api/keys/${encodeURIComponent(userId)}`),
+    req<PreKeyBundleResponse>(`/api/keys/${encodeURIComponent(userId)}`),
 
   uploadPreKeys: (keys: Array<{ id: number; key: string }>) =>
     req<void>('/api/keys/prekeys', { method: 'POST', body: JSON.stringify({ keys }) }),

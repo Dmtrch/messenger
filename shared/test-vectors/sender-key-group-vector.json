@@ -1,0 +1,27 @@
+{
+  "id": "sender-key-group",
+  "purpose": "Cross-platform verification of Sender Keys group bootstrap and group message semantics.",
+  "inputs": [
+    {
+      "name": "group-members",
+      "value": [
+        "alice-device-1",
+        "bob-device-1",
+        "carol-device-1"
+      ]
+    },
+    {
+      "name": "distribution-step",
+      "value": "sender-key-distribution-message"
+    },
+    {
+      "name": "group-payload",
+      "value": "group-message-1"
+    }
+  ],
+  "expectedInvariants": [
+    "Each participant can consume the same sender key distribution semantics as the current PWA client.",
+    "The group ciphertext envelope remains compatible across web, desktop and mobile clients.",
+    "Sender key rotation can occur without changing the shared contract for message payloads."
+  ]
+}

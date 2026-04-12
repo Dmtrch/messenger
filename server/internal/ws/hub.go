@@ -17,9 +17,10 @@ import (
 
 // client is one WebSocket connection (one device).
 type client struct {
-	userID string
-	conn   *websocket.Conn
-	send   chan []byte
+	userID   string
+	deviceID string // ID устройства из таблицы devices; пустая строка для старых клиентов
+	conn     *websocket.Conn
+	send     chan []byte
 }
 
 // Hub tracks all active connections.
@@ -67,11 +68,12 @@ func (h *Hub) checkOrigin(r *http.Request) bool {
 	return r.Header.Get("Origin") == h.allowedOrigin
 }
 
-// ServeWS upgrades HTTP → WebSocket. Auth via ?token=<JWT>.
+// ServeWS upgrades HTTP → WebSocket. Auth via ?token=<JWT>&deviceId=<id>.
 // Апгрейд выполняется всегда — при невалидном токене закрываем с кодом 4001,
 // чтобы клиент мог отличить auth failure от сетевой ошибки.
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	tokenStr := r.URL.Query().Get("token")
+	deviceIDParam := r.URL.Query().Get("deviceId")
 	userID, authErr := h.verifyJWT(tokenStr)
 
 	upgrader := websocket.Upgrader{
@@ -92,7 +94,17 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c := &client{userID: userID, conn: conn, send: make(chan []byte, 256)}
+	// Валидируем deviceId если передан: должен принадлежать аутентифицированному пользователю.
+	deviceID := ""
+	if deviceIDParam != "" {
+		dev, err := db.GetDeviceByID(h.db, deviceIDParam)
+		if err == nil && dev != nil && dev.UserID == userID {
+			deviceID = dev.ID
+		}
+		// Неверный deviceId игнорируем (не разрываем соединение — обратная совместимость)
+	}
+
+	c := &client{userID: userID, deviceID: deviceID, conn: conn, send: make(chan []byte, 256)}
 	h.register(c)
 	go c.writePump(h)
 	// Проверяем запас одноразовых ключей — уведомляем если мало
@@ -132,6 +144,24 @@ func (h *Hub) Deliver(userID string, payload []byte) {
 		case c.send <- payload:
 		default:
 			go h.unregister(c)
+		}
+	}
+}
+
+// DeliverToDevice отправляет payload только конкретному устройству пользователя.
+// Если устройство не подключено — payload игнорируется (клиент заберёт при reconnect через REST).
+func (h *Hub) DeliverToDevice(userID, deviceID string, payload []byte) {
+	h.mu.RLock()
+	set := h.byUser[userID]
+	h.mu.RUnlock()
+	for c := range set {
+		if c.deviceID == deviceID {
+			select {
+			case c.send <- payload:
+			default:
+				go h.unregister(c)
+			}
+			return
 		}
 	}
 }
@@ -197,6 +227,7 @@ type inMsg struct {
 
 type recipient struct {
 	UserID     string `json:"userId"`
+	DeviceID   string `json:"deviceId"` // пустая строка = доставить всем устройствам пользователя
 	Ciphertext []byte `json:"ciphertext"`
 }
 
@@ -267,14 +298,15 @@ func (h *Hub) handleMessage(c *client, msg inMsg) {
 	for _, r := range msg.Recipients {
 		msgID := uuid.New().String()
 		if err := db.SaveMessage(h.db, db.Message{
-			ID:             msgID,
-			ClientMsgID:    msg.ClientMsgID,
-			ConversationID: msg.ChatID,
-			SenderID:       c.userID,
-			RecipientID:    r.UserID,
-			Ciphertext:     r.Ciphertext,
-			SenderKeyID:    msg.SenderKeyID,
-			CreatedAt:      now,
+			ID:                  msgID,
+			ClientMsgID:         msg.ClientMsgID,
+			ConversationID:      msg.ChatID,
+			SenderID:            c.userID,
+			RecipientID:         r.UserID,
+			DestinationDeviceID: r.DeviceID,
+			Ciphertext:          r.Ciphertext,
+			SenderKeyID:         msg.SenderKeyID,
+			CreatedAt:           now,
 		}); err != nil {
 			log.Printf("save message: %v", err)
 			continue
@@ -288,16 +320,22 @@ func (h *Hub) handleMessage(c *client, msg inMsg) {
 		}
 
 		payload, _ := json.Marshal(map[string]any{
-			"type":         "message",
-			"messageId":    deliveredMsgID,
-			"clientMsgId":  msg.ClientMsgID,
-			"chatId":       msg.ChatID,
-			"senderId":     c.userID,
-			"ciphertext":   r.Ciphertext,
-			"senderKeyId":  msg.SenderKeyID,
-			"timestamp":    now,
+			"type":           "message",
+			"messageId":      deliveredMsgID,
+			"clientMsgId":    msg.ClientMsgID,
+			"chatId":         msg.ChatID,
+			"senderId":       c.userID,
+			"senderDeviceId": c.deviceID,
+			"ciphertext":     r.Ciphertext,
+			"senderKeyId":    msg.SenderKeyID,
+			"timestamp":      now,
 		})
-		h.Deliver(r.UserID, payload)
+		// Если задан deviceId получателя — доставляем только на это устройство
+		if r.DeviceID != "" {
+			h.DeliverToDevice(r.UserID, r.DeviceID, payload)
+		} else {
+			h.Deliver(r.UserID, payload)
+		}
 
 		if h.IsOnline(r.UserID) {
 			db.MarkDelivered(h.db, msgID, now)

@@ -18,21 +18,9 @@ import (
 
 const maxUploadSize = 10 << 20 // 10 МБ
 
-// Разрешённые MIME-типы → расширение файла.
-var allowedMIME = map[string]string{
-	"image/jpeg":               ".jpg",
-	"image/png":                ".png",
-	"image/gif":                ".gif",
-	"image/webp":               ".webp",
-	"application/pdf":          ".pdf",
-	"application/zip":          ".zip",
-	"application/octet-stream": ".bin",
-	"video/mp4":                ".mp4",
-	"video/webm":               ".webm",
-	"audio/mpeg":               ".mp3",
-	"audio/ogg":                ".ogg",
-	"text/plain":               ".txt",
-}
+// Все загружаемые файлы — E2E-зашифрованный бинарный контент.
+// Реальный MIME-тип хранится только в зашифрованном payload на клиенте.
+const uploadContentType = "application/octet-stream"
 
 type Handler struct {
 	MediaDir string
@@ -63,46 +51,8 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Определяем MIME по содержимому (первые 512 байт)
-	sniff := make([]byte, 512)
-	n, _ := file.Read(sniff)
-	detected := http.DetectContentType(sniff[:n])
-	if _, ok := allowedMIME[detected]; !ok {
-		origExt := strings.ToLower(filepath.Ext(header.Filename))
-		allowed := false
-		for _, v := range allowedMIME {
-			if v == origExt {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			httpErr(w, "unsupported file type", http.StatusUnsupportedMediaType)
-			return
-		}
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		httpErr(w, "server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Расширение файла
-	ext := allowedMIME[detected]
-	if ext == "" {
-		origExt := strings.ToLower(filepath.Ext(header.Filename))
-		for _, v := range allowedMIME {
-			if v == origExt {
-				ext = origExt
-				break
-			}
-		}
-	}
-	if ext == "" {
-		ext = ".bin"
-	}
-
-	// Сохраняем файл на диск под UUID-именем
-	diskName := uuid.New().String() + ext
+	// Сохраняем файл на диск под UUID-именем (.bin — содержимое всегда зашифровано)
+	diskName := uuid.New().String() + ".bin"
 	if err := os.MkdirAll(h.MediaDir, 0700); err != nil {
 		httpErr(w, "server error", http.StatusInternalServerError)
 		return
@@ -128,7 +78,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		ConversationID: chatID,
 		Filename:       diskName,
 		OriginalName:   header.Filename,
-		ContentType:    detected,
+		ContentType:    uploadContentType,
 		Size:           size,
 		CreatedAt:      time.Now().UnixMilli(),
 	}
@@ -143,7 +93,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
 		"mediaId":      mediaID,
 		"originalName": header.Filename,
-		"contentType":  detected,
+		"contentType":  uploadContentType,
 	})
 }
 

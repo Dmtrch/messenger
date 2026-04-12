@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { saveChats } from '@/store/messageDb'
+import { invalidateGroupSenderKey } from '@/crypto/session'
 import type { Chat, Message } from '@/types'
 
 interface ChatState {
@@ -15,6 +16,7 @@ interface ChatState {
   editMessage: (chatId: string, clientMsgId: string, newText: string) => void
   setTyping: (chatId: string, userId: string, isTyping: boolean) => void
   markRead: (chatId: string) => void
+  reset: () => void
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -31,6 +33,17 @@ export const useChatStore = create<ChatState>((set) => ({
   upsertChat: (chat) =>
     set((s) => {
       const exists = s.chats.find((c) => c.id === chat.id)
+
+      // При изменении состава группового чата инвалидируем SenderKey:
+      // следующая отправка создаст новый ключ и разошлёт SKDM актуальным участникам.
+      if (exists && chat.type === 'group') {
+        const oldSorted = [...exists.members].sort().join(',')
+        const newSorted = [...chat.members].sort().join(',')
+        if (oldSorted !== newSorted) {
+          invalidateGroupSenderKey(chat.id).catch(() => {})
+        }
+      }
+
       return {
         chats: exists
           ? s.chats.map((c) => (c.id === chat.id ? chat : c))
@@ -125,4 +138,7 @@ export const useChatStore = create<ChatState>((set) => ({
         c.id === chatId ? { ...c, unreadCount: 0 } : c
       ),
     })),
+
+  // Сброс состояния при смене сервера
+  reset: () => set({ chats: [], messages: {} }),
 }))

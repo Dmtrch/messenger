@@ -6,6 +6,7 @@ import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { useChatStore } from '@/store/chatStore'
 import { api } from '@/api/client'
 import { loadChats } from '@/store/messageDb'
+import { tryDecryptPreview } from '@/crypto/session'
 import type { Chat } from '@/types'
 import s from './pages.module.css'
 
@@ -22,9 +23,17 @@ export default function ChatListPage() {
       if (cached.length > 0) setChats(cached)
     }).catch(() => {})
 
-    // Шаг 2: актуальные данные с сервера (перезапишут кэш через setChats → saveChats)
-    api.getChats().then((res) => {
-      setChats(res.chats as unknown as Chat[])
+    // Шаг 2: актуальные данные с сервера + расшифровка превью lastMessage
+    api.getChats().then(async (res) => {
+      const chats = await Promise.all(
+        (res.chats as unknown as Chat[]).map(async (chat) => {
+          const lm = chat.lastMessage
+          if (!lm?.encryptedPayload || !lm.senderId) return chat
+          const text = await tryDecryptPreview(chat.type, chat.id, lm.senderId, '', lm.encryptedPayload)
+          return { ...chat, lastMessage: { ...lm, text } }
+        })
+      )
+      setChats(chats)
     }).catch(() => {/* offline или токен истёк — используем кэш */})
   }, [setChats])
 

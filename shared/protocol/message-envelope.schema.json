@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://messenger.local/shared/protocol/message-envelope.schema.json",
+  "title": "Messenger Encrypted Message Envelope Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "directMessageWirePayload": {
+      "$ref": "#/$defs/directMessageWirePayload"
+    },
+    "doubleRatchetMessage": {
+      "$ref": "#/$defs/doubleRatchetMessage"
+    },
+    "groupMessageWirePayload": {
+      "$ref": "#/$defs/groupMessageWirePayload"
+    },
+    "mediaPayload": {
+      "$ref": "#/$defs/mediaPayload"
+    }
+  },
+  "required": ["version", "description", "directMessageWirePayload", "doubleRatchetMessage", "groupMessageWirePayload", "mediaPayload"],
+  "$defs": {
+    "envelopeVersion": {
+      "type": "integer",
+      "enum": [1]
+    },
+    "base64String": {
+      "type": "string",
+      "minLength": 1
+    },
+    "directMessageWirePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": { "$ref": "#/$defs/envelopeVersion" },
+        "ek": { "$ref": "#/$defs/base64String" },
+        "opkId": { "type": "integer" },
+        "ikPub": { "$ref": "#/$defs/base64String" },
+        "msg": { "$ref": "#/$defs/doubleRatchetMessage" }
+      },
+      "required": ["v", "msg"]
+    },
+    "doubleRatchetMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "header": {
+          "type": "object"
+        },
+        "ciphertext": { "$ref": "#/$defs/base64String" }
+      },
+      "required": ["header", "ciphertext"]
+    },
+    "groupMessageWirePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["group"]
+        },
+        "v": { "$ref": "#/$defs/envelopeVersion" },
+        "senderKeyId": { "type": "integer" },
+        "nonce": { "$ref": "#/$defs/base64String" },
+        "ciphertext": { "$ref": "#/$defs/base64String" }
+      },
+      "required": ["type", "v", "senderKeyId", "nonce", "ciphertext"]
+    },
+    "mediaPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mediaId": { "type": "string" },
+        "mediaKey": { "$ref": "#/$defs/base64String" },
+        "originalName": { "type": "string" },
+        "contentType": { "type": "string" },
+        "mediaType": {
+          "type": "string",
+          "enum": ["image", "file", "video", "audio"]
+        },
+        "text": { "type": "string" }
+      },
+      "required": ["mediaId"]
+    }
+  },
+  "version": 1,
+  "description": "Formal schema for encrypted message envelopes used by web and future native clients.",
+  "directMessageWirePayload": {
+    "v": 1,
+    "msg": {
+      "header": {},
+      "ciphertext": "base64"
+    }
+  },
+  "doubleRatchetMessage": {
+    "header": {},
+    "ciphertext": "base64"
+  },
+  "groupMessageWirePayload": {
+    "type": "group",
+    "v": 1,
+    "senderKeyId": 1,
+    "nonce": "base64",
+    "ciphertext": "base64"
+  },
+  "mediaPayload": {
+    "mediaId": "uuid"
+  }
+}

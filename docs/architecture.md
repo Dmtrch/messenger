@@ -2,7 +2,7 @@
 
 ## Обзор системы
 
-Self-hosted мессенджер с E2E-шифрованием, серверной частью на ПК пользователя и PWA-фронтендом для iOS/Android.
+Self-hosted мессенджер с E2E-шифрованием, серверной частью на ПК пользователя и текущим web-клиентом в виде PWA. Начиная с этапа 11, архитектура проекта расширяется до семейства нативных клиентов для Desktop, Android и iOS, при этом backend, REST/WS-контракты и E2E-модель остаются общими.
 
 ---
 
@@ -28,6 +28,17 @@ Self-hosted мессенджер с E2E-шифрованием, серверно
 | Offline | **Service Worker + Cache API** | Обязательно для PWA |
 | Push | **Push API + Notifications API** | Системные уведомления на iOS/Android |
 | Хранилище ключей | **IndexedDB (idb-keyval)** | Хранение приватных ключей локально в браузере |
+
+### Native clients (Foundation decisions)
+| Направление | Решение | Обоснование |
+|---|---|---|
+| Desktop | **Kotlin Multiplatform + Compose Multiplatform Desktop** | Native-first desktop family без web-wrapper |
+| Android | **Kotlin + Compose** | Общий технологический вектор со shared core |
+| iOS UI | **SwiftUI** | Лучшее соответствие native iOS lifecycle и UX |
+| Shared core | **KMP shared core** | Общие domain/protocol/core контракты |
+| Local DB | **SQLite** | Повторяет offline/outbox/pagination-семантику текущего PWA |
+| Crypto | **Текущая модель PWA + libsodium family** | Без смены X3DH / Double Ratchet / Sender Keys |
+| Formal protocol layer | **shared/protocol/*.json + shared/domain/*.md** | Machine-readable contracts и language-neutral модели |
 
 ---
 
@@ -63,6 +74,28 @@ Self-hosted мессенджер с E2E-шифрованием, серверно
 │  └────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────┘
 ```
+
+### Расширение архитектуры для native track
+
+С текущего состояния проект имеет один реальный клиентский runtime: `client/` как React PWA. Для нативных клиентов принят отдельный архитектурный трек:
+
+- `Desktop`: отдельный desktop-native runtime, не оболочка над PWA;
+- `Android`: отдельный mobile-native runtime;
+- `iOS`: отдельный native UI слой на `SwiftUI`;
+- shared остаются только protocol/domain/core контракты и E2E-модель.
+
+Иными словами, `client/` остаётся web-каналом, но не становится базой для новых приложений.
+
+### Текущее состояние Shared Core
+
+В репозитории уже зафиксирован стартовый Shared Core на уровне контрактов:
+
+- `shared/protocol/` — formal schemas для REST, WebSocket и message envelope;
+- `shared/domain/` — language-neutral модели, события, repositories, auth/session, websocket lifecycle, sync/outbox;
+- `shared/crypto-contracts/` — общий crypto contract;
+- `shared/test-vectors/` — seed-набор cross-platform crypto vectors и контрактный тест.
+
+Это ещё не runtime-реализация, но уже канонический слой проектирования для всех будущих нативных клиентов.
 
 ---
 
@@ -148,6 +181,22 @@ GET  /api/media/:id            — скачивание медиафайла (JW
 PATCH /api/media/:id           — привязка медиафайла к чату (chat_id)
 POST /api/push/subscribe       — регистрация Push-подписки
 GET  /api/users/search         — поиск пользователей по username
+
+-- Этап 12: server info, registration flows, admin --
+GET  /api/server/info          — публичный, без JWT: name/description/registrationMode
+POST /api/auth/request-register — заявка на регистрацию (режим approval)
+POST /api/auth/password-reset-request — запрос сброса пароля (без user enumeration)
+
+-- Admin (требует JWT + role=admin) --
+GET  /api/admin/registration-requests        — список заявок на регистрацию
+POST /api/admin/registration-requests/:id/approve  — одобрить заявку
+POST /api/admin/registration-requests/:id/reject   — отклонить заявку
+POST /api/admin/invite-codes                 — создать инвайт-код
+GET  /api/admin/invite-codes                 — список инвайт-кодов
+GET  /api/admin/users                        — список пользователей
+POST /api/admin/users/:id/reset-password     — установить временный пароль
+GET  /api/admin/password-reset-requests      — список запросов сброса пароля
+POST /api/admin/password-reset-requests/:id/resolve  — закрыть запрос
 ```
 
 ### WebSocket протокол
@@ -185,7 +234,8 @@ CREATE TABLE users (
     display_name TEXT,
     password_hash TEXT,
     avatar_path TEXT,
-    created_at INTEGER
+    created_at INTEGER,
+    role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'admin'))
 );
 
 -- Устройства (один пользователь — несколько устройств)
@@ -286,6 +336,33 @@ CREATE TABLE push_subscriptions (
     p256dh BLOB,
     auth BLOB
 );
+
+-- Инвайт-коды (этап 12)
+CREATE TABLE invite_codes (
+    id TEXT PRIMARY KEY,       -- UUID / short prefix
+    created_by TEXT NOT NULL,  -- admin user_id
+    used_by TEXT,              -- NULL пока не использован
+    expires_at INTEGER DEFAULT 0  -- 0 = без ограничения
+);
+
+-- Запросы на регистрацию (режим approval)
+CREATE TABLE registration_requests (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+    created_at INTEGER
+);
+
+-- Запросы на сброс пароля
+CREATE TABLE password_reset_requests (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    temp_password TEXT,        -- устанавливается админом
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','resolved')),
+    created_at INTEGER
+);
 ```
 
 ---
@@ -301,9 +378,13 @@ messenger/
 │   ├── spec-gap-checklist.md
 │   └── v1-gap-remediation.md
 ├── server/                    ← Go backend
-│   ├── cmd/server/main.go     ← точка входа, роутинг, middleware
+│   ├── cmd/server/
+│   │   ├── main.go            ← точка входа, роутинг, middleware
+│   │   └── config.go          ← Config struct + YAML + env overrides
 │   ├── internal/
-│   │   ├── auth/              ← JWT, bcrypt, refresh rotation
+│   │   ├── auth/              ← JWT, bcrypt, refresh rotation, role in claims
+│   │   ├── admin/             ← RequireAdmin middleware, admin handlers
+│   │   ├── serverinfo/        ← GET /api/server/info (публичный)
 │   │   ├── chat/              ← чаты, история, delete/edit
 │   │   ├── keys/              ← X3DH key bundles, prekey management
 │   │   ├── media/             ← upload/download (JWT required)
@@ -311,7 +392,8 @@ messenger/
 │   │   ├── users/             ← поиск пользователей
 │   │   └── ws/                ← WebSocket Hub (gorilla)
 │   └── db/
-│       ├── schema.go          ← схема + ALTER TABLE миграции
+│       ├── schema.go          ← схема + миграции (#1–13)
+│       ├── migrate.go         ← versioned migration runner
 │       └── queries.go         ← типизированные SQL-запросы
 ├── client/                    ← React PWA
 │   ├── public/
@@ -326,12 +408,17 @@ messenger/
 │   │   │   ├── session.ts     ← E2E session manager (direct + group)
 │   │   │   ├── senderkey.ts   ← Sender Keys для групп
 │   │   │   └── keystore.ts    ← IndexedDB (keys, ratchet, sender keys)
-│   │   ├── store/             ← Zustand stores
+│   │   ├── config/
+│   │   │   └── serverConfig.ts  ← getServerUrl / setServerUrl / initServerUrl
+│   │   ├── store/             ← Zustand stores (authStore: role, chatStore: reset)
 │   │   ├── hooks/
 │   │   │   ├── useMessengerWS.ts ← WS orchestration
 │   │   │   └── usePushNotifications.ts
 │   │   ├── components/
 │   │   └── pages/
+│   │       ├── ServerSetupPage.tsx  ← выбор и валидация URL сервера
+│   │       ├── AdminPage.tsx        ← панель администратора
+│   │       └── AuthPage.tsx         ← логин / регистрация / инвайт / запрос / forgot
 │   ├── vite.config.ts
 │   └── package.json
 └── README.md
@@ -421,6 +508,10 @@ cloudflared tunnel --url http://localhost:8080
 10. **TLS обязателен** — при отсутствии сертификатов сервер выдаёт предупреждение
 11. **WS origin allowlist** — `CheckOrigin` ограничен `ALLOWED_ORIGINS` из env
 12. **bcrypt cost = 12** — зафиксирован в константе
+13. **Role-based access** — `role` в JWT claims; `RequireAdmin` middleware возвращает 403 для non-admin
+14. **Registration modes** — `open | invite | approval`; invite code validates expiry + single-use атомарно
+15. **No user enumeration** — `POST /api/auth/password-reset-request` всегда возвращает 200 независимо от наличия пользователя
+16. **Multi-server client isolation** — `clearServerUrl()` + `chatStore.reset()` при смене сервера предотвращает утечку данных между серверами
 
 ---
 

@@ -3,6 +3,9 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 // ─── User ────────────────────────────────────────────────────────────────────
@@ -12,13 +15,14 @@ type User struct {
 	Username     string
 	DisplayName  string
 	PasswordHash string
+	Role         string
 	CreatedAt    int64
 }
 
 func CreateUser(db *sql.DB, u User) error {
 	_, err := db.Exec(
-		`INSERT INTO users (id, username, display_name, password_hash, created_at) VALUES (?,?,?,?,?)`,
-		u.ID, u.Username, u.DisplayName, u.PasswordHash, u.CreatedAt,
+		`INSERT INTO users (id, username, display_name, password_hash, role, created_at) VALUES (?,?,?,?,?,?)`,
+		u.ID, u.Username, u.DisplayName, u.PasswordHash, u.Role, u.CreatedAt,
 	)
 	return err
 }
@@ -26,8 +30,8 @@ func CreateUser(db *sql.DB, u User) error {
 func GetUserByUsername(db *sql.DB, username string) (*User, error) {
 	u := &User{}
 	err := db.QueryRow(
-		`SELECT id, username, display_name, password_hash, created_at FROM users WHERE username=?`, username,
-	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.CreatedAt)
+		`SELECT id, username, display_name, password_hash, role, created_at FROM users WHERE username=?`, username,
+	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Role, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -37,8 +41,8 @@ func GetUserByUsername(db *sql.DB, username string) (*User, error) {
 func GetUserByID(db *sql.DB, id string) (*User, error) {
 	u := &User{}
 	err := db.QueryRow(
-		`SELECT id, username, display_name, password_hash, created_at FROM users WHERE id=?`, id,
-	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.CreatedAt)
+		`SELECT id, username, display_name, password_hash, role, created_at FROM users WHERE id=?`, id,
+	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Role, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -84,6 +88,18 @@ func GetSession(db *sql.DB, tokenHash string) (userID string, expiresAt int64, e
 
 func DeleteSession(db *sql.DB, tokenHash string) error {
 	_, err := db.Exec(`DELETE FROM sessions WHERE token_hash=?`, tokenHash)
+	return err
+}
+
+// DeleteUserSessionsExcept удаляет все сессии пользователя кроме текущей.
+func DeleteUserSessionsExcept(db *sql.DB, userID, keepTokenHash string) error {
+	_, err := db.Exec(`DELETE FROM sessions WHERE user_id=? AND token_hash!=?`, userID, keepTokenHash)
+	return err
+}
+
+// UpdateUserPassword обновляет bcrypt-хэш пароля пользователя.
+func UpdateUserPassword(db *sql.DB, userID, passwordHash string) error {
+	_, err := db.Exec(`UPDATE users SET password_hash=? WHERE id=?`, passwordHash, userID)
 	return err
 }
 
@@ -285,25 +301,26 @@ func IsConversationMember(db *sql.DB, conversationID, userID string) (bool, erro
 // ─── Messages ────────────────────────────────────────────────────────────────
 
 type Message struct {
-	ID             string
-	ClientMsgID    string
-	ConversationID string
-	SenderID       string
-	RecipientID    string
-	Ciphertext     []byte
-	SenderKeyID    int64
-	IsDeleted      bool
-	EditedAt       sql.NullInt64
-	CreatedAt      int64
-	DeliveredAt    sql.NullInt64
-	ReadAt         sql.NullInt64
+	ID                   string
+	ClientMsgID          string
+	ConversationID       string
+	SenderID             string
+	RecipientID          string
+	DestinationDeviceID  string // пустая строка = доставить всем устройствам
+	Ciphertext           []byte
+	SenderKeyID          int64
+	IsDeleted            bool
+	EditedAt             sql.NullInt64
+	CreatedAt            int64
+	DeliveredAt          sql.NullInt64
+	ReadAt               sql.NullInt64
 }
 
 func SaveMessage(db *sql.DB, m Message) error {
 	_, err := db.Exec(`
-		INSERT INTO messages (id, client_msg_id, conversation_id, sender_id, recipient_id, ciphertext, sender_key_id, created_at)
-		VALUES (?,?,?,?,?,?,?,?)`,
-		m.ID, m.ClientMsgID, m.ConversationID, m.SenderID, m.RecipientID, m.Ciphertext, m.SenderKeyID, m.CreatedAt,
+		INSERT INTO messages (id, client_msg_id, conversation_id, sender_id, recipient_id, destination_device_id, ciphertext, sender_key_id, created_at)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		m.ID, m.ClientMsgID, m.ConversationID, m.SenderID, m.RecipientID, m.DestinationDeviceID, m.Ciphertext, m.SenderKeyID, m.CreatedAt,
 	)
 	return err
 }
@@ -314,10 +331,11 @@ func GetMessageByID(db *sql.DB, id string) (*Message, error) {
 	var isDeleted int
 	err := db.QueryRow(`
 		SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
-		       ciphertext, sender_key_id, COALESCE(is_deleted,0), edited_at, created_at, delivered_at, read_at
+		       COALESCE(destination_device_id,''), ciphertext, sender_key_id, COALESCE(is_deleted,0),
+		       edited_at, created_at, delivered_at, read_at
 		FROM messages WHERE id=?`, id,
 	).Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
-		&m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt)
+		&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -336,7 +354,8 @@ func GetMessages(db *sql.DB, conversationID, recipientID, beforeMsgID string, li
 	}
 	args := []any{conversationID, recipientID}
 	q := `SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
-	             ciphertext, sender_key_id, COALESCE(is_deleted,0), edited_at, created_at, delivered_at, read_at
+	             COALESCE(destination_device_id,''), ciphertext, sender_key_id, COALESCE(is_deleted,0),
+	             edited_at, created_at, delivered_at, read_at
 	      FROM messages
 	      WHERE conversation_id=? AND (recipient_id=? OR recipient_id='') AND COALESCE(is_deleted,0)=0`
 	if beforeMsgID != "" {
@@ -356,7 +375,7 @@ func GetMessages(db *sql.DB, conversationID, recipientID, beforeMsgID string, li
 		var m Message
 		var isDeleted int
 		if err := rows.Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
-			&m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt); err != nil {
+			&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt); err != nil {
 			return nil, err
 		}
 		m.IsDeleted = isDeleted == 1
@@ -369,7 +388,8 @@ func GetMessages(db *sql.DB, conversationID, recipientID, beforeMsgID string, li
 func GetMessagesByClientMsgID(db *sql.DB, clientMsgID string) ([]Message, error) {
 	rows, err := db.Query(`
 		SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
-		       ciphertext, sender_key_id, COALESCE(is_deleted,0), edited_at, created_at, delivered_at, read_at
+		       COALESCE(destination_device_id,''), ciphertext, sender_key_id, COALESCE(is_deleted,0),
+		       edited_at, created_at, delivered_at, read_at
 		FROM messages WHERE client_msg_id=?`, clientMsgID)
 	if err != nil {
 		return nil, err
@@ -380,7 +400,7 @@ func GetMessagesByClientMsgID(db *sql.DB, clientMsgID string) ([]Message, error)
 		var m Message
 		var isDeleted int
 		if err := rows.Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
-			&m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt); err != nil {
+			&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt); err != nil {
 			return nil, err
 		}
 		m.IsDeleted = isDeleted == 1
@@ -499,6 +519,28 @@ func UpsertIdentityKey(db *sql.DB, k IdentityKey) error {
 		k.UserID, nullableString(k.DeviceID), k.IKPublic, k.SPKPublic, k.SPKSignature, k.SPKId, k.UpdatedAt,
 	)
 	return err
+}
+
+// GetIdentityKeysByUserID возвращает все identity keys для всех устройств пользователя.
+func GetIdentityKeysByUserID(db *sql.DB, userID string) ([]IdentityKey, error) {
+	rows, err := db.Query(
+		`SELECT user_id, COALESCE(device_id,''), ik_public, spk_public, spk_signature, spk_id, updated_at
+		 FROM identity_keys WHERE user_id=? ORDER BY updated_at DESC`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []IdentityKey
+	for rows.Next() {
+		var k IdentityKey
+		if err := rows.Scan(&k.UserID, &k.DeviceID, &k.IKPublic, &k.SPKPublic, &k.SPKSignature, &k.SPKId, &k.UpdatedAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
 }
 
 func GetIdentityKey(db *sql.DB, userID string) (*IdentityKey, error) {
@@ -731,4 +773,244 @@ func DeleteOrphanedMedia(db *sql.DB, olderThanUnixMs int64) ([]string, error) {
 	}
 
 	return filenames, nil
+}
+
+// ─── InviteCodes ─────────────────────────────────────────────────────────────
+
+type InviteCode struct {
+	Code      string
+	CreatedBy string
+	UsedBy    string
+	UsedAt    int64
+	ExpiresAt int64
+	CreatedAt int64
+}
+
+func CreateInviteCode(db *sql.DB, code InviteCode) error {
+	_, err := db.Exec(
+		`INSERT INTO invite_codes (code, created_by, expires_at, created_at) VALUES (?,?,?,?)`,
+		code.Code, code.CreatedBy, code.ExpiresAt, code.CreatedAt,
+	)
+	return err
+}
+
+func GetInviteCode(db *sql.DB, code string) (*InviteCode, error) {
+	c := &InviteCode{}
+	err := db.QueryRow(
+		`SELECT code, created_by, COALESCE(used_by,''), COALESCE(used_at,0), COALESCE(expires_at,0), created_at FROM invite_codes WHERE code=?`, code,
+	).Scan(&c.Code, &c.CreatedBy, &c.UsedBy, &c.UsedAt, &c.ExpiresAt, &c.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return c, err
+}
+
+func UseInviteCode(db *sql.DB, code, usedBy string, usedAt int64) error {
+	res, err := db.Exec(
+		`UPDATE invite_codes SET used_by=?, used_at=? WHERE code=? AND used_by IS NULL AND (expires_at = 0 OR expires_at > ?)`,
+		usedBy, usedAt, code, usedAt,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("invite code not found or already used")
+	}
+	return nil
+}
+
+func ListInviteCodes(db *sql.DB) ([]InviteCode, error) {
+	rows, err := db.Query(
+		`SELECT code, created_by, COALESCE(used_by,''), COALESCE(used_at,0), COALESCE(expires_at,0), created_at FROM invite_codes ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var codes []InviteCode
+	for rows.Next() {
+		var c InviteCode
+		if err := rows.Scan(&c.Code, &c.CreatedBy, &c.UsedBy, &c.UsedAt, &c.ExpiresAt, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		codes = append(codes, c)
+	}
+	return codes, rows.Err()
+}
+
+// ─── RegistrationRequests ────────────────────────────────────────────────────
+
+type RegistrationRequest struct {
+	ID           string
+	Username     string
+	DisplayName  string
+	IKPublic     string
+	SPKId        int
+	SPKPublic    string
+	SPKSignature string
+	OPKPublics   string // JSON array
+	PasswordHash string
+	Status       string
+	CreatedAt    int64
+	ReviewedAt   int64
+	ReviewedBy   string
+}
+
+func CreateRegistrationRequest(db *sql.DB, r RegistrationRequest) error {
+	_, err := db.Exec(
+		`INSERT INTO registration_requests (id, username, display_name, ik_public, spk_id, spk_public, spk_signature, opk_publics, password_hash, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		r.ID, r.Username, r.DisplayName, r.IKPublic, r.SPKId, r.SPKPublic, r.SPKSignature, r.OPKPublics, r.PasswordHash, r.Status, r.CreatedAt,
+	)
+	return err
+}
+
+func GetRegistrationRequest(db *sql.DB, id string) (*RegistrationRequest, error) {
+	r := &RegistrationRequest{}
+	err := db.QueryRow(
+		`SELECT id, username, display_name, ik_public, spk_id, spk_public, spk_signature, opk_publics, password_hash, status, created_at, COALESCE(reviewed_at,0), COALESCE(reviewed_by,'') FROM registration_requests WHERE id=?`, id,
+	).Scan(&r.ID, &r.Username, &r.DisplayName, &r.IKPublic, &r.SPKId, &r.SPKPublic, &r.SPKSignature, &r.OPKPublics, &r.PasswordHash, &r.Status, &r.CreatedAt, &r.ReviewedAt, &r.ReviewedBy)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return r, err
+}
+
+// ListRegistrationRequests возвращает краткий список заявок (без crypto-ключей).
+// Для получения полных данных (ik_public и т.д.) используй GetRegistrationRequest(id).
+func ListRegistrationRequests(db *sql.DB, status string) ([]RegistrationRequest, error) {
+	var rows *sql.Rows
+	var err error
+	if status == "" {
+		rows, err = db.Query(`SELECT id, username, display_name, status, created_at FROM registration_requests ORDER BY created_at DESC`)
+	} else {
+		rows, err = db.Query(`SELECT id, username, display_name, status, created_at FROM registration_requests WHERE status=? ORDER BY created_at DESC`, status)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var reqs []RegistrationRequest
+	for rows.Next() {
+		var r RegistrationRequest
+		if err := rows.Scan(&r.ID, &r.Username, &r.DisplayName, &r.Status, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		reqs = append(reqs, r)
+	}
+	return reqs, rows.Err()
+}
+
+func UpdateRegistrationRequestStatus(db *sql.DB, id, status, reviewedBy string, reviewedAt int64) error {
+	_, err := db.Exec(
+		`UPDATE registration_requests SET status=?, reviewed_by=?, reviewed_at=? WHERE id=?`,
+		status, reviewedBy, reviewedAt, id,
+	)
+	return err
+}
+
+// ─── PasswordResetRequests ───────────────────────────────────────────────────
+
+type PasswordResetRequest struct {
+	ID           string
+	UserID       string
+	Username     string // JOIN из users
+	Status       string
+	TempPassword string
+	CreatedAt    int64
+	ResolvedAt   int64
+	ResolvedBy   string
+}
+
+func CreatePasswordResetRequest(db *sql.DB, id, userID string, createdAt int64) error {
+	_, err := db.Exec(
+		`INSERT INTO password_reset_requests (id, user_id, status, created_at) VALUES (?,?,'pending',?)`,
+		id, userID, createdAt,
+	)
+	return err
+}
+
+func ListPasswordResetRequests(db *sql.DB, status string) ([]PasswordResetRequest, error) {
+	query := `SELECT p.id, p.user_id, u.username, p.status, COALESCE(p.temp_password,''), p.created_at, COALESCE(p.resolved_at,0), COALESCE(p.resolved_by,'')
+              FROM password_reset_requests p JOIN users u ON u.id=p.user_id`
+	var args []any
+	if status != "" {
+		query += ` WHERE p.status=?`
+		args = append(args, status)
+	}
+	query += ` ORDER BY p.created_at DESC`
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var reqs []PasswordResetRequest
+	for rows.Next() {
+		var r PasswordResetRequest
+		if err := rows.Scan(&r.ID, &r.UserID, &r.Username, &r.Status, &r.TempPassword, &r.CreatedAt, &r.ResolvedAt, &r.ResolvedBy); err != nil {
+			return nil, err
+		}
+		reqs = append(reqs, r)
+	}
+	return reqs, rows.Err()
+}
+
+func GetPasswordResetRequest(db *sql.DB, id string) (*PasswordResetRequest, error) {
+	r := &PasswordResetRequest{}
+	err := db.QueryRow(
+		`SELECT p.id, p.user_id, u.username, p.status, COALESCE(p.temp_password,''), p.created_at, COALESCE(p.resolved_at,0), COALESCE(p.resolved_by,'')
+		 FROM password_reset_requests p JOIN users u ON u.id=p.user_id WHERE p.id=?`, id,
+	).Scan(&r.ID, &r.UserID, &r.Username, &r.Status, &r.TempPassword, &r.CreatedAt, &r.ResolvedAt, &r.ResolvedBy)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return r, err
+}
+
+func ResolvePasswordResetRequest(db *sql.DB, id, tempPassword, resolvedBy string, resolvedAt int64) error {
+	_, err := db.Exec(
+		`UPDATE password_reset_requests SET status='completed', temp_password=?, resolved_by=?, resolved_at=? WHERE id=?`,
+		tempPassword, resolvedBy, resolvedAt, id,
+	)
+	return err
+}
+
+// ─── Admin user list ─────────────────────────────────────────────────────────
+
+func ListUsers(db *sql.DB) ([]User, error) {
+	rows, err := db.Query(`SELECT id, username, display_name, role, created_at FROM users ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+// EnsureAdminUser создаёт пользователя-администратора если он не существует.
+// Вызывается при старте сервера из main.go. Безопасно вызывать многократно.
+func EnsureAdminUser(database *sql.DB, username, passwordHash string) error {
+	existing, err := GetUserByUsername(database, username)
+	if err != nil {
+		return fmt.Errorf("EnsureAdminUser: check existing: %w", err)
+	}
+	if existing != nil {
+		return nil // уже существует — не перезаписываем
+	}
+	u := User{
+		ID:           uuid.New().String(),
+		Username:     username,
+		DisplayName:  username,
+		PasswordHash: passwordHash,
+		Role:         "admin",
+		CreatedAt:    time.Now().UnixMilli(),
+	}
+	return CreateUser(database, u)
 }

@@ -1,0 +1,32 @@
+{
+  "id": "x3dh-handshake",
+  "purpose": "Cross-platform verification of device-scoped X3DH session bootstrap semantics.",
+  "inputs": [
+    {
+      "name": "initiator-device",
+      "value": {
+        "userId": "alice",
+        "deviceId": "alice-device-1"
+      }
+    },
+    {
+      "name": "responder-device",
+      "value": {
+        "userId": "bob",
+        "deviceId": "bob-device-1"
+      }
+    },
+    {
+      "name": "bundle-shape",
+      "value": {
+        "requires": ["ikPublic", "spkId", "spkPublic", "spkSignature"],
+        "optional": ["opkId", "opkPublic"]
+      }
+    }
+  ],
+  "expectedInvariants": [
+    "Initiator and responder derive the same shared secret for the same bundle and ephemeral inputs.",
+    "The handshake result is scoped to a concrete peer deviceId, not only to a userId.",
+    "The resulting session bootstrap can be consumed by the current PWA wire-format without envelope changes."
+  ]
+}

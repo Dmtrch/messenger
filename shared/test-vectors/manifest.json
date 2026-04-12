@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "description": "Canonical crypto verification catalog for web and native Messenger clients.",
+  "vectors": [
+    {
+      "id": "x3dh-handshake",
+      "file": "x3dh-handshake-vector.json",
+      "suite": "x3dh",
+      "status": "seed"
+    },
+    {
+      "id": "double-ratchet-sequence",
+      "file": "double-ratchet-sequence-vector.json",
+      "suite": "double-ratchet",
+      "status": "seed"
+    },
+    {
+      "id": "sender-key-group",
+      "file": "sender-key-group-vector.json",
+      "suite": "sender-key",
+      "status": "seed"
+    }
+  ]
+}

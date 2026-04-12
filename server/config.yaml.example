@@ -1,0 +1,38 @@
+# Messenger server configuration
+# Env variables override any value set here.
+# Copy to config.yaml and edit as needed.
+
+port: "8080"
+db_path: "./messenger.db"
+media_dir: "./media"
+
+# Required
+jwt_secret: ""
+
+# TLS (optional — use one of: direct TLS, behind_proxy, or leave empty for plain HTTP)
+tls_cert: ""
+tls_key: ""
+behind_proxy: false     # set true when behind Cloudflare Tunnel / nginx
+
+# CORS (leave empty to allow all origins)
+allowed_origin: ""
+
+# WebRTC ICE servers
+stun_url: "stun:stun.l.google.com:19302"
+turn_url: ""            # e.g. "turn:turn.example.com:3478"
+turn_secret: ""         # shared secret for TURN credentials
+turn_credential_ttl: 86400
+
+# Web Push VAPID keys (auto-generated on first start if empty)
+vapid_private_key: ""
+vapid_public_key: ""
+
+# Метаданные сервера (отображаются клиентам при подключении)
+server_name: "My Messenger"
+server_description: "Корпоративный мессенджер"
+registration_mode: "open"   # open | invite | approval
+
+# Начальный администратор (создаётся при первом запуске)
+# После создания учётной записи эти строки можно удалить или оставить пустыми
+# admin_username: "admin"    # задайте логин администратора
+# admin_password: ""         # задайте надёжный пароль (минимум 12 символов)

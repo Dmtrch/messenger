@@ -5,17 +5,23 @@ import { useChatStore } from '@/store/chatStore'
 import { useAuthStore } from '@/store/authStore'
 import { useWsStore } from '@/store/wsStore'
 import { useCallStore } from '@/store/callStore'
-import { decryptMessage, decryptGroupMessage, handleIncomingSKDM } from '@/crypto/session'
-import { appendOneTimePreKeys } from '@/crypto/keystore'
+import { decryptMessage, decryptGroupMessage, handleIncomingSKDM, tryDecryptPreview } from '@/crypto/session'
+import { appendOneTimePreKeys, savePreKeyReplenishTime, isPreKeyReplenishOnCooldown } from '@/crypto/keystore'
 import { generateDHKeyPair, toBase64 } from '@/crypto/x3dh'
 import { appendMessages } from '@/store/messageDb'
 import type { Chat, Message, WSFrame } from '@/types'
 
-/** Генерирует 20 новых OPK, сохраняет в keystore и загружает на сервер */
+/** Минимальный интервал между пополнениями OPK (5 минут) */
+const PREKEY_REPLENISH_COOLDOWN_MS = 5 * 60 * 1000
+
+/** Генерирует 20 новых OPK, сохраняет в keystore и загружает на сервер.
+ *  Имеет backoff: повторный вызов в течение PREKEY_REPLENISH_COOLDOWN_MS игнорируется. */
 async function replenishPreKeys(): Promise<void> {
+  if (await isPreKeyReplenishOnCooldown(PREKEY_REPLENISH_COOLDOWN_MS)) return
   const rawKeys = Array.from({ length: 20 }, () => generateDHKeyPair())
   const saved = await appendOneTimePreKeys(rawKeys)
   await api.uploadPreKeys(saved.map((k) => ({ id: k.id, key: toBase64(k.publicKey) })))
+  await savePreKeyReplenishTime()
 }
 
 /** Разбирает расшифрованный payload — текст или медиа-JSON */
@@ -54,12 +60,19 @@ export function useMessengerWS() {
       (frame: WSFrame) => {
         switch (frame.type) {
           case 'message': {
-            const { messageId, chatId, senderId, ciphertext, senderKeyId, timestamp, clientMsgId } = frame
+            const { messageId, chatId, senderId, senderDeviceId, ciphertext, senderKeyId, timestamp, clientMsgId } = frame
             // Если чат неизвестен — подгружаем список чатов с сервера
             const knownChat = useChatStore.getState().chats.find((c) => c.id === chatId)
             if (!knownChat) {
-              api.getChats().then((res) => {
-                res.chats.forEach((c) => upsertChat(c as unknown as Chat))
+              api.getChats().then(async (res) => {
+                for (const c of res.chats) {
+                  const raw = c as unknown as Chat
+                  const lm = raw.lastMessage
+                  const resolved = lm?.encryptedPayload && lm.senderId
+                    ? { ...raw, lastMessage: { ...lm, text: await tryDecryptPreview(raw.type, raw.id, lm.senderId, '', lm.encryptedPayload) } }
+                    : raw
+                  upsertChat(resolved)
+                }
               }).catch(() => {})
             }
             // Дедупликация: сообщение уже в сторе (оптимистичное добавление отправителем)
@@ -74,7 +87,7 @@ export function useMessengerWS() {
             })()
             const decryptOp = isGroupPayload
               ? decryptGroupMessage(chatId, senderId, ciphertext)
-              : decryptMessage(chatId, senderId, ciphertext)
+              : decryptMessage(senderId, senderDeviceId ?? '', ciphertext)
             decryptOp
               .then((raw) => {
                 const parsed = parsePayload(raw)
@@ -108,8 +121,8 @@ export function useMessengerWS() {
             const msgs = useChatStore.getState().messages[chatId] ?? []
             const target = msgs.find((m) => m.id === clientMsgId || m.clientMsgId === clientMsgId)
             if (!target) break
-            // Расшифровываем обновлённый шифртекст
-            decryptMessage(chatId, target.senderId, ciphertext)
+            // Расшифровываем обновлённый шифртекст (senderDeviceId неизвестен для edited — передаём '')
+            decryptMessage(target.senderId, '', ciphertext)
               .then((text) => editMessage(chatId, clientMsgId, text))
               .catch(() => editMessage(chatId, clientMsgId, '[зашифровано]'))
             void editedAt // используется только на сервере
@@ -132,7 +145,8 @@ export function useMessengerWS() {
           case 'skdm': {
             // Входящий Sender Key Distribution Message — сохраняем ключ отправителя
             const { chatId, senderId, ciphertext } = frame
-            handleIncomingSKDM(chatId, senderId, ciphertext).catch((e) =>
+            // senderDeviceId для SKDM неизвестен из фрейма — передаём '' (первое устройство)
+            handleIncomingSKDM(chatId, senderId, '', ciphertext).catch((e) =>
               console.error('SKDM processing failed', e)
             )
             break
