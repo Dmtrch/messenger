@@ -1,6 +1,6 @@
 # Stage 7: Migration Framework & Deployment — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Статус: ✅ Реализовано** — все задачи выполнены, смержено в main (2026-04-12).
 
 **Goal:** Replace ad-hoc `ALTER TABLE` calls with a versioned migration runner, and add a full deployment guide with Cloudflare Tunnel support.
 
@@ -28,7 +28,7 @@
 **Files:**
 - Create: `server/db/migrate.go`
 
-- [ ] **Step 1: Create `server/db/migrate.go`**
+- [x] **Step 1: Create `server/db/migrate.go`**
 
 ```go
 package db
@@ -128,7 +128,7 @@ func RunMigrations(db *sql.DB) error {
 }
 ```
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 ```sh
 cd server && go build ./db/...
@@ -136,7 +136,7 @@ cd server && go build ./db/...
 
 Expected: no output (clean build).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```sh
 git add server/db/migrate.go
@@ -150,7 +150,7 @@ git commit -m "feat(db): versioned migration runner"
 **Files:**
 - Create: `server/db/migrate_test.go`
 
-- [ ] **Step 1: Create `server/db/migrate_test.go`**
+- [x] **Step 1: Create `server/db/migrate_test.go`**
 
 ```go
 package db
@@ -265,7 +265,7 @@ func mustExec(t *testing.T, db *sql.DB, q string) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail (runner not wired yet)**
+- [x] **Step 2: Run tests to verify they fail (runner not wired yet)**
 
 ```sh
 cd server && go test ./db/... -v -run TestRunMigrations
@@ -273,7 +273,7 @@ cd server && go test ./db/... -v -run TestRunMigrations
 
 Expected: `PASS` for all three tests (runner exists, schema also exists in same package).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```sh
 git add server/db/migrate_test.go
@@ -287,7 +287,7 @@ git commit -m "test(db): migration runner tests"
 **Files:**
 - Modify: `server/db/schema.go`
 
-- [ ] **Step 1: Remove ad-hoc migration loop and add RunMigrations call**
+- [x] **Step 1: Remove ad-hoc migration loop and add RunMigrations call**
 
 In `server/db/schema.go`, replace this block:
 
@@ -314,7 +314,7 @@ With:
 	}
 ```
 
-- [ ] **Step 2: Build to verify**
+- [x] **Step 2: Build to verify**
 
 ```sh
 cd server && go build ./...
@@ -322,7 +322,7 @@ cd server && go build ./...
 
 Expected: no output.
 
-- [ ] **Step 3: Run all tests**
+- [x] **Step 3: Run all tests**
 
 ```sh
 cd server && go test ./db/... -v
@@ -330,7 +330,7 @@ cd server && go test ./db/... -v
 
 Expected: all tests PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add server/db/schema.go
@@ -344,7 +344,7 @@ git commit -m "refactor(db): replace ad-hoc ALTER TABLE with versioned migration
 **Files:**
 - Modify: `docker-compose.yml`
 
-- [ ] **Step 1: Replace `docker-compose.yml` content**
+- [x] **Step 1: Replace `docker-compose.yml` content**
 
 ```yaml
 version: '3.8'
@@ -402,7 +402,7 @@ volumes:
   messenger_data:
 ```
 
-- [ ] **Step 2: Verify compose syntax**
+- [x] **Step 2: Verify compose syntax**
 
 ```sh
 docker compose config --quiet
@@ -410,7 +410,7 @@ docker compose config --quiet
 
 Expected: no errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```sh
 git add docker-compose.yml
@@ -424,7 +424,7 @@ git commit -m "feat(docker): add cloudflared service (profile) and full env vars
 **Files:**
 - Create: `.env.example`
 
-- [ ] **Step 1: Create `.env.example`**
+- [x] **Step 1: Create `.env.example`**
 
 ```sh
 cat > .env.example << 'EOF'
@@ -469,7 +469,7 @@ TURN_CREDENTIAL_TTL=86400
 EOF
 ```
 
-- [ ] **Step 2: Verify .env.example is not gitignored**
+- [x] **Step 2: Verify .env.example is not gitignored**
 
 ```sh
 git check-ignore -v .env.example
@@ -477,7 +477,7 @@ git check-ignore -v .env.example
 
 Expected: no output (файл не игнорируется).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```sh
 git add .env.example
@@ -491,7 +491,7 @@ git commit -m "docs: add .env.example with all server variables documented"
 **Files:**
 - Create: `docs/deployment.md`
 
-- [ ] **Step 1: Create `docs/deployment.md`**
+- [x] **Step 1: Create `docs/deployment.md`**
 
 ```markdown
 # Deployment Guide
@@ -658,7 +658,7 @@ docker exec messenger sqlite3 /data/messenger.db \
 | `duplicate column name` in logs | Safe to ignore — migration runner handles this automatically |
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```sh
 git add docs/deployment.md
@@ -672,7 +672,7 @@ git commit -m "docs: add deployment guide (Cloudflare Tunnel, TLS, backup, updat
 **Files:**
 - Modify: `docs/spec-gap-checklist.md`
 
-- [ ] **Step 1: Mark Stage 7 items as complete**
+- [x] **Step 1: Mark Stage 7 items as complete**
 
 In `docs/spec-gap-checklist.md`, update:
 
@@ -686,7 +686,7 @@ And in `docs/v1-gap-remediation.md`, mark Stage 7 as closed:
 ## Этап 7. Migration framework и эксплуатация ✅ Закрыт
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```sh
 git add docs/spec-gap-checklist.md docs/v1-gap-remediation.md

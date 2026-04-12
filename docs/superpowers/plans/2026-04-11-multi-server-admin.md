@@ -1,6 +1,6 @@
 # Multi-Server Support & Admin Panel — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Статус: ✅ Реализовано** — все задачи выполнены, ветка смержена в `main` (2026-04-12).
 
 **Goal:** Добавить настраиваемый URL сервера в клиент (браузер + standalone), систему инвайтов и одобрения регистрации, панель администратора для управления пользователями и сброса паролей.
 
@@ -48,7 +48,7 @@
 - Modify: `server/db/schema.go`
 - Modify: `server/db/migrate.go`
 
-- [ ] **Step 1: Добавить новые таблицы в schema.go**
+- [x] **Step 1: Добавить новые таблицы в schema.go**
 
 В `server/db/schema.go` добавить в конец константы `schema` (перед закрывающим backtick):
 
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS users (
 // ... остальное без изменений
 ```
 
-- [ ] **Step 2: Добавить миграции в migrate.go**
+- [x] **Step 2: Добавить миграции в migrate.go**
 
 В `server/db/migrate.go` добавить в конец слайса `migrations`:
 
@@ -149,14 +149,14 @@ CREATE TABLE IF NOT EXISTS users (
 )`},
 ```
 
-- [ ] **Step 3: Проверить что сервер собирается**
+- [x] **Step 3: Проверить что сервер собирается**
 
 ```bash
 cd server && go build ./...
 ```
 Ожидается: успешная сборка, нет ошибок.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add server/db/schema.go server/db/migrate.go
@@ -170,7 +170,7 @@ git commit -m "feat(db): add role column and admin tables (migrations 9-12)"
 **Files:**
 - Modify: `server/db/queries.go`
 
-- [ ] **Step 1: Добавить Role к структуре User и обновить SELECT**
+- [x] **Step 1: Добавить Role к структуре User и обновить SELECT**
 
 В `server/db/queries.go` обновить структуру `User`:
 
@@ -223,7 +223,7 @@ func GetUserByID(db *sql.DB, id string) (*User, error) {
 }
 ```
 
-- [ ] **Step 2: Добавить запросы для InviteCode**
+- [x] **Step 2: Добавить запросы для InviteCode**
 
 В конец `server/db/queries.go` добавить:
 
@@ -286,7 +286,7 @@ func ListInviteCodes(db *sql.DB) ([]InviteCode, error) {
 }
 ```
 
-- [ ] **Step 3: Добавить запросы для RegistrationRequest**
+- [x] **Step 3: Добавить запросы для RegistrationRequest**
 
 ```go
 // ─── RegistrationRequests ────────────────────────────────────────────────────
@@ -358,7 +358,7 @@ func UpdateRegistrationRequestStatus(db *sql.DB, id, status, reviewedBy string, 
 }
 ```
 
-- [ ] **Step 4: Добавить запросы для PasswordResetRequest и ListUsers**
+- [x] **Step 4: Добавить запросы для PasswordResetRequest и ListUsers**
 
 ```go
 // ─── PasswordResetRequests ───────────────────────────────────────────────────
@@ -477,14 +477,14 @@ import (
 )
 ```
 
-- [ ] **Step 5: Проверить сборку**
+- [x] **Step 5: Проверить сборку**
 
 ```bash
 cd server && go build ./...
 ```
 Ожидается: успешная сборка.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server/db/queries.go
@@ -499,7 +499,7 @@ git commit -m "feat(db): add User.Role, InviteCode, RegistrationRequest, Passwor
 - Modify: `server/cmd/server/config.go`
 - Modify: `server/cmd/server/main.go`
 
-- [ ] **Step 1: Добавить новые поля в Config**
+- [x] **Step 1: Добавить новые поля в Config**
 
 В `server/cmd/server/config.go` добавить в структуру `Config`:
 
@@ -550,7 +550,7 @@ if v := os.Getenv("ADMIN_PASSWORD"); v != "" {
 }
 ```
 
-- [ ] **Step 2: Bootstrap admin в main.go**
+- [x] **Step 2: Bootstrap admin в main.go**
 
 В `server/cmd/server/main.go` после строки `database, err := db.Open(cfg.DBPath)` добавить:
 
@@ -569,7 +569,7 @@ if cfg.AdminUsername != "" && cfg.AdminPassword != "" {
 
 Добавить импорт `"golang.org/x/crypto/bcrypt"` в блок импортов `main.go`.
 
-- [ ] **Step 3: Обновить config.yaml.example**
+- [x] **Step 3: Обновить config.yaml.example**
 
 В `server/config.yaml.example` добавить:
 
@@ -585,13 +585,13 @@ admin_username: "admin"
 admin_password: "changeme"
 ```
 
-- [ ] **Step 4: Сборка и проверка**
+- [x] **Step 4: Сборка и проверка**
 
 ```bash
 cd server && go build ./...
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add server/cmd/server/config.go server/cmd/server/main.go server/config.yaml.example
@@ -606,7 +606,7 @@ git commit -m "feat(config): server metadata, registration mode, bootstrap admin
 - Create: `server/internal/serverinfo/handler.go`
 - Modify: `server/cmd/server/main.go`
 
-- [ ] **Step 1: Создать handler**
+- [x] **Step 1: Создать handler**
 
 Создать файл `server/internal/serverinfo/handler.go`:
 
@@ -634,7 +634,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 2: Зарегистрировать роут в main.go**
+- [x] **Step 2: Зарегистрировать роут в main.go**
 
 В `server/cmd/server/main.go` добавить импорт:
 
@@ -658,13 +658,13 @@ serverInfoHandler := &serverinfo.Handler{
 r.Get("/server/info", serverInfoHandler.ServeHTTP)
 ```
 
-- [ ] **Step 3: Проверить сборку**
+- [x] **Step 3: Проверить сборку**
 
 ```bash
 cd server && go build ./...
 ```
 
-- [ ] **Step 4: Запустить сервер и проверить эндпоинт**
+- [x] **Step 4: Запустить сервер и проверить эндпоинт**
 
 ```bash
 cd server && JWT_SECRET=test ADMIN_USERNAME=admin ADMIN_PASSWORD=test123 go run ./cmd/server &
@@ -675,7 +675,7 @@ kill %1
 
 Ожидается: JSON с `name`, `description`, `registrationMode`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add server/internal/serverinfo/ server/cmd/server/main.go
@@ -690,7 +690,7 @@ git commit -m "feat(server): GET /api/server/info endpoint"
 - Modify: `server/internal/auth/middleware.go`
 - Modify: `server/internal/auth/handler.go`
 
-- [ ] **Step 1: Добавить RoleKey и RoleFromCtx в middleware.go**
+- [x] **Step 1: Добавить RoleKey и RoleFromCtx в middleware.go**
 
 В `server/internal/auth/middleware.go` добавить после `UserIDKey`:
 
@@ -721,7 +721,7 @@ next.ServeHTTP(w, r.WithContext(ctx))
 
 (Удалить старую строку `ctx := context.WithValue(r.Context(), UserIDKey, userID)`)
 
-- [ ] **Step 2: Добавить role в issueTokens**
+- [x] **Step 2: Добавить role в issueTokens**
 
 В `server/internal/auth/handler.go` изменить сигнатуру `issueTokens`:
 
@@ -753,7 +753,7 @@ return map[string]any{
 }, nil
 ```
 
-- [ ] **Step 3: Обновить вызовы issueTokens**
+- [x] **Step 3: Обновить вызовы issueTokens**
 
 В методе `Register` изменить вызов:
 
@@ -773,7 +773,7 @@ resp, err := h.issueTokens(w, r, user.ID, user.Username, user.DisplayName, user.
 resp, err := h.issueTokens(w, r, user.ID, user.Username, user.DisplayName, user.Role)
 ```
 
-- [ ] **Step 4: Добавить поле RegistrationMode в Handler и InviteCode валидацию в Register**
+- [x] **Step 4: Добавить поле RegistrationMode в Handler и InviteCode валидацию в Register**
 
 Добавить `RegistrationMode` и `JWTSecret` в `Handler`:
 
@@ -844,7 +844,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
     }
 ```
 
-- [ ] **Step 5: Добавить хендлер RequestRegister**
+- [x] **Step 5: Добавить хендлер RequestRegister**
 
 ```go
 // RequestRegister принимает заявку на регистрацию (режим approval).
@@ -909,7 +909,7 @@ func (h *Handler) RequestRegister(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 6: Добавить хендлер PasswordResetRequest**
+- [x] **Step 6: Добавить хендлер PasswordResetRequest**
 
 ```go
 // PasswordResetRequest позволяет пользователю запросить сброс пароля через администратора.
@@ -937,7 +937,7 @@ func (h *Handler) PasswordResetRequest(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 7: Обновить инициализацию Handler в main.go**
+- [x] **Step 7: Обновить инициализацию Handler в main.go**
 
 В `server/cmd/server/main.go` изменить:
 
@@ -949,13 +949,13 @@ authHandler := &auth.Handler{
 }
 ```
 
-- [ ] **Step 8: Проверить сборку**
+- [x] **Step 8: Проверить сборку**
 
 ```bash
 cd server && go build ./...
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add server/internal/auth/middleware.go server/internal/auth/handler.go server/cmd/server/main.go
@@ -970,7 +970,7 @@ git commit -m "feat(auth): role in JWT, invite validation, request-register, pas
 - Create: `server/internal/admin/middleware.go`
 - Create: `server/internal/admin/handler.go`
 
-- [ ] **Step 1: Создать middleware requireAdmin**
+- [x] **Step 1: Создать middleware requireAdmin**
 
 Создать `server/internal/admin/middleware.go`:
 
@@ -999,7 +999,7 @@ func RequireAdmin(next http.Handler) http.Handler {
 }
 ```
 
-- [ ] **Step 2: Создать admin handler**
+- [x] **Step 2: Создать admin handler**
 
 Создать `server/internal/admin/handler.go`:
 
@@ -1219,7 +1219,7 @@ func jsonReply(w http.ResponseWriter, code int, v any) {
 }
 ```
 
-- [ ] **Step 3: Зарегистрировать admin роуты в main.go**
+- [x] **Step 3: Зарегистрировать admin роуты в main.go**
 
 В `server/cmd/server/main.go` добавить импорты:
 
@@ -1257,13 +1257,13 @@ r.With(authLimiter.Middleware()).Post("/auth/request-register", authHandler.Requ
 r.With(authLimiter.Middleware()).Post("/auth/password-reset-request", authHandler.PasswordResetRequest)
 ```
 
-- [ ] **Step 4: Проверить сборку**
+- [x] **Step 4: Проверить сборку**
 
 ```bash
 cd server && go build ./...
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add server/internal/admin/ server/cmd/server/main.go
@@ -1279,7 +1279,7 @@ git commit -m "feat(admin): admin middleware + all /api/admin/* handlers"
 - Create: `client/src/config/serverConfig.ts`
 - Modify: `client/src/store/authStore.ts`
 
-- [ ] **Step 1: Добавить role в User и тип ServerInfo**
+- [x] **Step 1: Добавить role в User и тип ServerInfo**
 
 В `client/src/types/index.ts` изменить интерфейс `User`:
 
@@ -1306,7 +1306,7 @@ export interface ServerInfo {
 }
 ```
 
-- [ ] **Step 2: Создать serverConfig.ts**
+- [x] **Step 2: Создать serverConfig.ts**
 
 Создать `client/src/config/serverConfig.ts`:
 
@@ -1345,7 +1345,7 @@ export function initServerUrl(): void {
 }
 ```
 
-- [ ] **Step 3: Обновить authStore.ts**
+- [x] **Step 3: Обновить authStore.ts**
 
 В `client/src/store/authStore.ts` изменить:
 
@@ -1393,14 +1393,14 @@ export const useAuthStore = create<AuthState>()(
 )
 ```
 
-- [ ] **Step 4: Type-check**
+- [x] **Step 4: Type-check**
 
 ```bash
 cd client && npm run type-check 2>&1 | head -30
 ```
 Ожидается: 0 ошибок или только несвязанные.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add client/src/types/index.ts client/src/config/serverConfig.ts client/src/store/authStore.ts
@@ -1415,7 +1415,7 @@ git commit -m "feat(client): ServerInfo type, serverConfig module, role in authS
 - Modify: `client/src/api/client.ts`
 - Modify: `client/src/api/websocket.ts`
 
-- [ ] **Step 1: Обновить client.ts**
+- [x] **Step 1: Обновить client.ts**
 
 В `client/src/api/client.ts` заменить строку:
 
@@ -1457,7 +1457,7 @@ let response = await fetch(`${getBase()}${path}`, { headers, credentials: 'inclu
 response = await fetch(`${getBase()}${path}`, {
 ```
 
-- [ ] **Step 2: Обновить websocket.ts**
+- [x] **Step 2: Обновить websocket.ts**
 
 В `client/src/api/websocket.ts` заменить функцию `getWsBase`:
 
@@ -1477,13 +1477,13 @@ function getWsBase(): string {
 }
 ```
 
-- [ ] **Step 3: Type-check**
+- [x] **Step 3: Type-check**
 
 ```bash
 cd client && npm run type-check 2>&1 | head -30
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add client/src/api/client.ts client/src/api/websocket.ts
@@ -1498,7 +1498,7 @@ git commit -m "feat(client): use serverConfig URL for API and WebSocket base"
 - Modify: `client/src/App.tsx`
 - Create: `client/src/pages/ServerSetupPage.tsx`
 
-- [ ] **Step 1: Создать ServerSetupPage.tsx**
+- [x] **Step 1: Создать ServerSetupPage.tsx**
 
 Создать `client/src/pages/ServerSetupPage.tsx`:
 
@@ -1580,7 +1580,7 @@ export default function ServerSetupPage() {
 }
 ```
 
-- [ ] **Step 2: Добавить CSS классы в pages.module.css**
+- [x] **Step 2: Добавить CSS классы в pages.module.css**
 
 В `client/src/pages/pages.module.css` добавить:
 
@@ -1612,7 +1612,7 @@ export default function ServerSetupPage() {
 }
 ```
 
-- [ ] **Step 3: Обновить App.tsx**
+- [x] **Step 3: Обновить App.tsx**
 
 В `client/src/App.tsx` добавить импорты:
 
@@ -1678,13 +1678,13 @@ initServerUrl() // вызывается один раз при загрузке 
 
 И убрать `useEffect` с `initServerUrl` из `AppRoutes`.
 
-- [ ] **Step 4: Type-check**
+- [x] **Step 4: Type-check**
 
 ```bash
 cd client && npm run type-check 2>&1 | head -30
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add client/src/pages/ServerSetupPage.tsx client/src/App.tsx client/src/pages/pages.module.css
@@ -1698,7 +1698,7 @@ git commit -m "feat(client): /setup route and ServerSetupPage"
 **Files:**
 - Modify: `client/src/pages/AuthPage.tsx`
 
-- [ ] **Step 1: Добавить чтение параметров URL и режима сервера**
+- [x] **Step 1: Добавить чтение параметров URL и режима сервера**
 
 В начале функции `AuthPage` добавить считывание `invite` из query params и получение режима сервера из authStore (или отдельного стора). Для простоты — запрашиваем `/api/server/info` при монтировании:
 
@@ -1728,7 +1728,7 @@ export default function AuthPage() {
   }, [])
 ```
 
-- [ ] **Step 2: Добавить хендлер для режима approval**
+- [x] **Step 2: Добавить хендлер для режима approval**
 
 Добавить функцию `handleRequestRegister`:
 
@@ -1782,7 +1782,7 @@ const handleRequestRegister = async (e: React.FormEvent) => {
 }
 ```
 
-- [ ] **Step 3: Добавить хендлер forgot password**
+- [x] **Step 3: Добавить хендлер forgot password**
 
 ```tsx
 const handleForgotPassword = async (e: React.FormEvent) => {
@@ -1805,7 +1805,7 @@ const handleForgotPassword = async (e: React.FormEvent) => {
 }
 ```
 
-- [ ] **Step 4: Обновить форму регистрации для invite режима**
+- [x] **Step 4: Обновить форму регистрации для invite режима**
 
 В форме регистрации добавить поле инвайт-кода когда `serverInfo?.registrationMode === 'invite'`:
 
@@ -1840,7 +1840,7 @@ const { userId, accessToken } = await api.register({
 
 Также добавить тип `inviteCode?: string` в `AuthRegisterReq` в `client/src/api/client.ts`.
 
-- [ ] **Step 5: Обновить JSX рендер**
+- [x] **Step 5: Обновить JSX рендер**
 
 Изменить секцию регистрации в JSX — вместо прямой формы выбирать поведение по режиму:
 
@@ -1919,7 +1919,7 @@ const { userId, accessToken } = await api.register({
 }
 ```
 
-- [ ] **Step 6: Обновить тип AuthRegisterReq в client.ts**
+- [x] **Step 6: Обновить тип AuthRegisterReq в client.ts**
 
 ```ts
 export interface AuthRegisterReq {
@@ -1935,14 +1935,14 @@ export interface AuthRegisterReq {
 }
 ```
 
-- [ ] **Step 7: Type-check + lint**
+- [x] **Step 7: Type-check + lint**
 
 ```bash
 cd client && npm run type-check 2>&1 | head -30
 npm run lint 2>&1 | head -30
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add client/src/pages/AuthPage.tsx client/src/api/client.ts client/src/pages/pages.module.css
@@ -1956,7 +1956,7 @@ git commit -m "feat(client): invite code, approval request, forgot password in A
 **Files:**
 - Create: `client/src/pages/AdminPage.tsx`
 
-- [ ] **Step 1: Создать AdminPage.tsx**
+- [x] **Step 1: Создать AdminPage.tsx**
 
 Создать `client/src/pages/AdminPage.tsx`:
 
@@ -2169,7 +2169,7 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
 
 **Примечание:** `apiGet`/`apiPost` используют прямой `fetch` вместо `api.ts` чтобы не создавать зависимость. В будущем можно вынести в `client.ts`.
 
-- [ ] **Step 2: Добавить CSS для AdminPage в pages.module.css**
+- [x] **Step 2: Добавить CSS для AdminPage в pages.module.css**
 
 ```css
 .adminPage {
@@ -2272,13 +2272,13 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
 }
 ```
 
-- [ ] **Step 3: Type-check**
+- [x] **Step 3: Type-check**
 
 ```bash
 cd client && npm run type-check 2>&1 | head -30
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add client/src/pages/AdminPage.tsx client/src/pages/pages.module.css
@@ -2292,7 +2292,7 @@ git commit -m "feat(client): AdminPage with 4 tabs (requests, users, invites, re
 **Files:**
 - Modify: `client/src/components/Profile/Profile.tsx`
 
-- [ ] **Step 1: Прочитать текущий Profile.tsx**
+- [x] **Step 1: Прочитать текущий Profile.tsx**
 
 Убедиться в структуре компонента:
 
@@ -2300,7 +2300,7 @@ git commit -m "feat(client): AdminPage with 4 tabs (requests, users, invites, re
 head -80 client/src/components/Profile/Profile.tsx
 ```
 
-- [ ] **Step 2: Добавить импорты и кнопки**
+- [x] **Step 2: Добавить импорты и кнопки**
 
 В `client/src/components/Profile/Profile.tsx` добавить импорты:
 
@@ -2341,7 +2341,7 @@ const handleChangeServer = async () => {
 </button>
 ```
 
-- [ ] **Step 3: Добавить CSS в Profile.module.css**
+- [x] **Step 3: Добавить CSS в Profile.module.css**
 
 В `client/src/components/Profile/Profile.module.css` добавить:
 
@@ -2375,13 +2375,13 @@ const handleChangeServer = async () => {
 }
 ```
 
-- [ ] **Step 4: Type-check + lint**
+- [x] **Step 4: Type-check + lint**
 
 ```bash
 cd client && npm run type-check 2>&1 | head -30 && npm run lint 2>&1 | head -30
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add client/src/components/Profile/Profile.tsx client/src/components/Profile/Profile.module.css
@@ -2394,7 +2394,7 @@ git commit -m "feat(client): change server button and admin panel link in Profil
 
 **Files:** нет изменений — только проверка
 
-- [ ] **Step 1: Запустить сервер**
+- [x] **Step 1: Запустить сервер**
 
 ```bash
 cd server && cat > /tmp/test.yaml << 'EOF'
@@ -2409,7 +2409,7 @@ SERVER_PID=$!
 sleep 1
 ```
 
-- [ ] **Step 2: Проверить /api/server/info**
+- [x] **Step 2: Проверить /api/server/info**
 
 ```bash
 curl -s http://localhost:8080/api/server/info | python3 -m json.tool
@@ -2424,7 +2424,7 @@ curl -s http://localhost:8080/api/server/info | python3 -m json.tool
 }
 ```
 
-- [ ] **Step 3: Проверить bootstrap admin login**
+- [x] **Step 3: Проверить bootstrap admin login**
 
 ```bash
 curl -s -X POST http://localhost:8080/api/auth/login \
@@ -2434,7 +2434,7 @@ curl -s -X POST http://localhost:8080/api/auth/login \
 
 Ожидается: JSON с `accessToken` и `role: "admin"`.
 
-- [ ] **Step 4: Проверить /api/admin/users с токеном**
+- [x] **Step 4: Проверить /api/admin/users с токеном**
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
@@ -2445,7 +2445,7 @@ curl -s http://localhost:8080/api/admin/users -H "Authorization: Bearer $TOKEN" 
 
 Ожидается: JSON с массивом `users`, включающим admin.
 
-- [ ] **Step 5: Запустить клиент**
+- [x] **Step 5: Запустить клиент**
 
 ```bash
 kill $SERVER_PID 2>/dev/null
@@ -2454,7 +2454,7 @@ cd client && npm run dev &
 
 Открыть http://localhost:5173 — должен показаться экран `/setup` (если localStorage пуст).
 
-- [ ] **Step 6: Финальная проверка сборок**
+- [x] **Step 6: Финальная проверка сборок**
 
 ```bash
 cd server && go build ./...
@@ -2463,7 +2463,7 @@ cd ../client && npm run type-check && npm run build
 
 Ожидается: обе сборки без ошибок.
 
-- [ ] **Step 7: Остановить dev сервер и commit**
+- [x] **Step 7: Остановить dev сервер и commit**
 
 ```bash
 kill %% 2>/dev/null

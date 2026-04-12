@@ -1,6 +1,6 @@
 # Chats & Messaging Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Статус: ✅ Реализовано** — все задачи выполнены, смержено в main (2026-04-12).
 
 **Goal:** Сделать приложение полностью рабочим — пользователи могут войти, найти друг друга, создать чат и обмениваться сообщениями в реальном времени.
 
@@ -42,7 +42,7 @@
 **Files:**
 - Create: `server/internal/auth/middleware.go`
 
-- [ ] **Step 1: Создать файл middleware**
+- [x] **Step 1: Создать файл middleware**
 
 ```go
 // server/internal/auth/middleware.go
@@ -98,7 +98,7 @@ func UserIDFromCtx(r *http.Request) string {
 }
 ```
 
-- [ ] **Step 2: Убедиться что компилируется**
+- [x] **Step 2: Убедиться что компилируется**
 
 ```bash
 cd /Users/dim/vscodeproject/messenger/server
@@ -113,7 +113,7 @@ go build ./...
 **Files:**
 - Create: `server/internal/users/handler.go`
 
-- [ ] **Step 1: Создать пакет users**
+- [x] **Step 1: Создать пакет users**
 
 ```go
 // server/internal/users/handler.go
@@ -260,7 +260,7 @@ func reply(w http.ResponseWriter, code int, v any) {
 }
 ```
 
-- [ ] **Step 2: Проверить компиляцию**
+- [x] **Step 2: Проверить компиляцию**
 
 ```bash
 cd /Users/dim/vscodeproject/messenger/server && go build ./...
@@ -274,7 +274,7 @@ cd /Users/dim/vscodeproject/messenger/server && go build ./...
 **Files:**
 - Create: `server/internal/chat/handler.go`
 
-- [ ] **Step 1: Создать handler чатов**
+- [x] **Step 1: Создать handler чатов**
 
 ```go
 // server/internal/chat/handler.go
@@ -501,7 +501,7 @@ func reply(w http.ResponseWriter, code int, v any) {
 }
 ```
 
-- [ ] **Step 2: Добавить encodeBase64 и import**
+- [x] **Step 2: Добавить encodeBase64 и import**
 
 В начале файла `server/internal/chat/handler.go` добавить импорт `"encoding/base64"` и функцию:
 
@@ -527,7 +527,7 @@ func encodeBase64(b []byte) string {
 
 (Убрать строки `import_b64` из ListMessages — они placeholder)
 
-- [ ] **Step 3: Проверить компиляцию**
+- [x] **Step 3: Проверить компиляцию**
 
 ```bash
 cd /Users/dim/vscodeproject/messenger/server && go build ./...
@@ -540,7 +540,7 @@ cd /Users/dim/vscodeproject/messenger/server && go build ./...
 **Files:**
 - Modify: `server/cmd/server/main.go`
 
-- [ ] **Step 1: Обновить main.go**
+- [x] **Step 1: Обновить main.go**
 
 Добавить импорты и роуты. Заменить блок `r.Route("/api", ...)` на:
 
@@ -577,13 +577,13 @@ r.Route("/api", func(r chi.Router) {
 })
 ```
 
-- [ ] **Step 2: Проверить компиляцию**
+- [x] **Step 2: Проверить компиляцию**
 
 ```bash
 cd /Users/dim/vscodeproject/messenger/server && go build ./...
 ```
 
-- [ ] **Step 3: Проверить роуты вручную**
+- [x] **Step 3: Проверить роуты вручную**
 
 ```bash
 # Зарегистрировать тестового пользователя
@@ -611,7 +611,7 @@ curl -s "http://localhost:8080/api/chats" \
 
 ## Task 5: Пересборка Docker-контейнера (Backend завершён)
 
-- [ ] **Step 1: Пересобрать и перезапустить**
+- [x] **Step 1: Пересобрать и перезапустить**
 
 ```bash
 cd /Users/dim/vscodeproject/messenger
@@ -627,7 +627,7 @@ docker compose up --build -d
 **Files:**
 - Modify: `client/src/pages/AuthPage.tsx`
 
-- [ ] **Step 1: Добавить состояние режима и форму входа**
+- [x] **Step 1: Добавить состояние режима и форму входа**
 
 Заменить содержимое `AuthPage.tsx` на:
 
@@ -752,7 +752,7 @@ export default function AuthPage() {
 }
 ```
 
-- [ ] **Step 2: Добавить стили tabs в pages.module.css**
+- [x] **Step 2: Добавить стили tabs в pages.module.css**
 
 Добавить в конец файла `client/src/pages/pages.module.css`:
 
@@ -793,7 +793,7 @@ export default function AuthPage() {
 **Files:**
 - Modify: `client/src/api/client.ts`
 
-- [ ] **Step 1: Исправить AuthLoginReq — убрать challenge/signature, добавить password**
+- [x] **Step 1: Исправить AuthLoginReq — убрать challenge/signature, добавить password**
 
 Заменить интерфейс `AuthLoginReq`:
 
@@ -818,7 +818,7 @@ export interface AuthLoginRes {
 }
 ```
 
-- [ ] **Step 2: Добавить searchUsers в api объект**
+- [x] **Step 2: Добавить searchUsers в api объект**
 
 В секцию `// ── Public API` добавить после `logout`:
 
@@ -836,13 +836,13 @@ searchUsers: (q: string) =>
 **Files:**
 - Modify: `client/src/store/authStore.ts`
 
-- [ ] **Step 1: Прочитать текущий authStore**
+- [x] **Step 1: Прочитать текущий authStore**
 
 ```bash
 cat /Users/dim/vscodeproject/messenger/client/src/store/authStore.ts
 ```
 
-- [ ] **Step 2: Загружать чаты после login**
+- [x] **Step 2: Загружать чаты после login**
 
 В `authStore.ts` в экшене `login` после сохранения пользователя добавить вызов загрузки чатов. Для этого нужен прямой вызов API (не через хук). Добавить в конец файла после экспорта store:
 
@@ -873,7 +873,7 @@ import { api } from '@/api/client'
 import { useChatStore } from '@/store/chatStore'
 ```
 
-- [ ] **Step 3: Вызвать loadChats в App.tsx при монтировании**
+- [x] **Step 3: Вызвать loadChats в App.tsx при монтировании**
 
 В `client/src/App.tsx` в компоненте `AppRoutes` добавить:
 
@@ -899,7 +899,7 @@ import { useEffect } from 'react'
 - Create: `client/src/components/NewChatDialog/NewChatDialog.tsx`
 - Create: `client/src/components/NewChatDialog/NewChatDialog.module.css`
 
-- [ ] **Step 1: Создать компонент диалога**
+- [x] **Step 1: Создать компонент диалога**
 
 ```tsx
 // client/src/components/NewChatDialog/NewChatDialog.tsx
@@ -1008,7 +1008,7 @@ export default function NewChatDialog({ onClose, onChatCreated }: Props) {
 }
 ```
 
-- [ ] **Step 2: Создать стили**
+- [x] **Step 2: Создать стили**
 
 ```css
 /* client/src/components/NewChatDialog/NewChatDialog.module.css */
@@ -1148,7 +1148,7 @@ export default function NewChatDialog({ onClose, onChatCreated }: Props) {
 **Files:**
 - Modify: `client/src/pages/ChatListPage.tsx`
 
-- [ ] **Step 1: Добавить диалог и кнопку**
+- [x] **Step 1: Добавить диалог и кнопку**
 
 ```tsx
 import { useState } from 'react'
@@ -1204,13 +1204,13 @@ export default function ChatListPage() {
 **Files:**
 - Modify: `client/src/components/ChatWindow/ChatWindow.tsx`
 
-- [ ] **Step 1: Прочитать текущий ChatWindow.tsx**
+- [x] **Step 1: Прочитать текущий ChatWindow.tsx**
 
 ```bash
 cat /Users/dim/vscodeproject/messenger/client/src/components/ChatWindow/ChatWindow.tsx
 ```
 
-- [ ] **Step 2: Переписать компонент**
+- [x] **Step 2: Переписать компонент**
 
 ```tsx
 // client/src/components/ChatWindow/ChatWindow.tsx
@@ -1336,7 +1336,7 @@ function MessageBubble({ msg, isMine }: { msg: Message; isMine: boolean }) {
 }
 ```
 
-- [ ] **Step 3: Добавить sendMessage в MessengerWS**
+- [x] **Step 3: Добавить sendMessage в MessengerWS**
 
 В `client/src/api/websocket.ts` найти класс `MessengerWS` и убедиться что есть метод `sendMessage`. Если нет — добавить:
 
@@ -1346,7 +1346,7 @@ sendMessage(chatId: string, recipients: Array<{ userId: string; encryptedPayload
 }
 ```
 
-- [ ] **Step 4: Обновить ChatWindow.module.css**
+- [x] **Step 4: Обновить ChatWindow.module.css**
 
 Добавить стили (или заменить если они не подходят):
 
@@ -1466,21 +1466,21 @@ sendMessage(chatId: string, recipients: Array<{ userId: string; encryptedPayload
 
 ## Task 12: Финальная пересборка и проверка
 
-- [ ] **Step 1: Пересобрать Docker-образ**
+- [x] **Step 1: Пересобрать Docker-образ**
 
 ```bash
 cd /Users/dim/vscodeproject/messenger
 docker compose up --build -d
 ```
 
-- [ ] **Step 2: Проверить что сервер запустился**
+- [x] **Step 2: Проверить что сервер запустился**
 
 ```bash
 docker logs messenger --tail=5
 ```
 Ожидаем: `listening on :8080`
 
-- [ ] **Step 3: Сценарий проверки**
+- [x] **Step 3: Сценарий проверки**
 
 1. Открыть `http://192.168.1.80:8080` в браузере
 2. Зарегистрировать двух пользователей (alice / password123 / Алиса) и (bob / password123 / Боб) в двух вкладках

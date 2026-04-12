@@ -1,6 +1,6 @@
 # Stage 6: Offline/PWA Layer Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Статус: ✅ Реализовано** — все задачи выполнены, смержено в main (2026-04-12).
 
 **Goal:** Добавить полноценный offline-слой: IndexedDB-персистентность истории сообщений и чатов, очередь исходящих сообщений с автоматической повторной отправкой, и UI-индикацию offline-состояния.
 
@@ -34,7 +34,7 @@
 **Files:**
 - Create: `client/src/store/messageDb.ts`
 
-- [ ] **Step 1.1: Создать messageDb.ts**
+- [x] **Step 1.1: Создать messageDb.ts**
 
 ```typescript
 /**
@@ -100,7 +100,7 @@ export async function loadChats(): Promise<Chat[]> {
 }
 ```
 
-- [ ] **Step 1.2: Проверить type-check**
+- [x] **Step 1.2: Проверить type-check**
 
 ```bash
 cd client && npm run type-check
@@ -108,7 +108,7 @@ cd client && npm run type-check
 
 Ожидание: 0 ошибок (пустой модуль, только импорты из существующих пакетов).
 
-- [ ] **Step 1.3: Коммит**
+- [x] **Step 1.3: Коммит**
 
 ```bash
 cd client && git add src/store/messageDb.ts
@@ -122,7 +122,7 @@ git commit -m "feat(offline): добавить messageDb — IndexedDB для и
 **Files:**
 - Create: `client/src/store/outboxDb.ts`
 
-- [ ] **Step 2.1: Создать outboxDb.ts**
+- [x] **Step 2.1: Создать outboxDb.ts**
 
 ```typescript
 /**
@@ -174,13 +174,13 @@ export async function clearOutbox(): Promise<void> {
 }
 ```
 
-- [ ] **Step 2.2: Проверить type-check**
+- [x] **Step 2.2: Проверить type-check**
 
 ```bash
 cd client && npm run type-check
 ```
 
-- [ ] **Step 2.3: Коммит**
+- [x] **Step 2.3: Коммит**
 
 ```bash
 git add src/store/outboxDb.ts
@@ -194,7 +194,7 @@ git commit -m "feat(offline): добавить outboxDb — персистент
 **Files:**
 - Create: `client/src/hooks/useNetworkStatus.ts`
 
-- [ ] **Step 3.1: Создать хук**
+- [x] **Step 3.1: Создать хук**
 
 ```typescript
 /**
@@ -224,7 +224,7 @@ export function useNetworkStatus(): { isOnline: boolean } {
 }
 ```
 
-- [ ] **Step 3.2: Коммит**
+- [x] **Step 3.2: Коммит**
 
 ```bash
 git add src/hooks/useNetworkStatus.ts
@@ -239,7 +239,7 @@ git commit -m "feat(offline): добавить useNetworkStatus хук"
 - Create: `client/src/components/OfflineIndicator/OfflineIndicator.tsx`
 - Create: `client/src/components/OfflineIndicator/OfflineIndicator.module.css`
 
-- [ ] **Step 4.1: Создать CSS-модуль**
+- [x] **Step 4.1: Создать CSS-модуль**
 
 ```css
 /* OfflineIndicator.module.css */
@@ -274,7 +274,7 @@ git commit -m "feat(offline): добавить useNetworkStatus хук"
 }
 ```
 
-- [ ] **Step 4.2: Создать компонент**
+- [x] **Step 4.2: Создать компонент**
 
 ```tsx
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -296,13 +296,13 @@ export default function OfflineIndicator() {
 }
 ```
 
-- [ ] **Step 4.3: Проверить type-check**
+- [x] **Step 4.3: Проверить type-check**
 
 ```bash
 cd client && npm run type-check
 ```
 
-- [ ] **Step 4.4: Коммит**
+- [x] **Step 4.4: Коммит**
 
 ```bash
 git add src/components/OfflineIndicator/
@@ -316,11 +316,11 @@ git commit -m "feat(offline): добавить OfflineIndicator компонен
 **Files:**
 - Modify: `client/src/hooks/useMessengerWS.ts`
 
-- [ ] **Step 5.1: Прочитать текущий useMessengerWS.ts**
+- [x] **Step 5.1: Прочитать текущий useMessengerWS.ts**
 
 Файл расположен в `client/src/hooks/useMessengerWS.ts`. Ключевое место — блок `case 'message':` (строки 54–93), где вызывается `addMessage(...)`. После `addMessage` нужно добавить вызов `appendMessages`.
 
-- [ ] **Step 5.2: Добавить импорт и вызов appendMessages**
+- [x] **Step 5.2: Добавить импорт и вызов appendMessages**
 
 В начало файла добавить импорт:
 ```typescript
@@ -358,13 +358,13 @@ import { appendMessages } from '@/store/messageDb'
 
 Также обновить импорт типа `Message` — он уже импортируется. Нужно только убедиться что `Message` есть в импорте `from '@/types'`.
 
-- [ ] **Step 5.3: Проверить type-check и lint**
+- [x] **Step 5.3: Проверить type-check и lint**
 
 ```bash
 cd client && npm run type-check && npm run lint
 ```
 
-- [ ] **Step 5.4: Коммит**
+- [x] **Step 5.4: Коммит**
 
 ```bash
 git add src/hooks/useMessengerWS.ts
@@ -385,14 +385,14 @@ git commit -m "feat(offline): сохранять входящие сообщен
 3. При ошибке сети не падать (тихо оставаться с кэшем)
 4. При успешной синхронизации обновлять IDB
 
-- [ ] **Step 6.1: Добавить импорты в ChatWindow.tsx**
+- [x] **Step 6.1: Добавить импорты в ChatWindow.tsx**
 
 Добавить в начало файла (после существующих импортов):
 ```typescript
 import { loadMessages, appendMessages, saveMessages } from '@/store/messageDb'
 ```
 
-- [ ] **Step 6.2: Заменить loadHistory**
+- [x] **Step 6.2: Заменить loadHistory**
 
 Найти функцию `loadHistory` (строки 104–141) и заменить её полностью:
 
@@ -449,7 +449,7 @@ import { loadMessages, appendMessages, saveMessages } from '@/store/messageDb'
 
 Важно: добавить `prependMessages` в dependency array (было `[]`).
 
-- [ ] **Step 6.3: Сохранять отправленные сообщения в IDB**
+- [x] **Step 6.3: Сохранять отправленные сообщения в IDB**
 
 В `ChatWindow.tsx` найти место где добавляется optimistic message при отправке. Это в функции `handleSend` (примерно строки 200–270, смотреть по вызову `addMessage` и `wsSend`).
 
@@ -460,13 +460,13 @@ appendMessages(chatId, [optimisticMsg]).catch(() => {})
 
 Убедиться что `appendMessages` уже импортирован (добавили на шаге 6.1).
 
-- [ ] **Step 6.4: Проверить type-check и lint**
+- [x] **Step 6.4: Проверить type-check и lint**
 
 ```bash
 cd client && npm run type-check && npm run lint
 ```
 
-- [ ] **Step 6.5: Коммит**
+- [x] **Step 6.5: Коммит**
 
 ```bash
 git add src/components/ChatWindow/ChatWindow.tsx
@@ -481,7 +481,7 @@ git commit -m "feat(offline): загружать историю из IDB, фон
 - Modify: `client/src/pages/ChatListPage.tsx`
 - Modify: `client/src/store/chatStore.ts`
 
-- [ ] **Step 7.1: Добавить saveChats в chatStore**
+- [x] **Step 7.1: Добавить saveChats в chatStore**
 
 В `chatStore.ts` добавить импорт и автоматическое сохранение чатов при `setChats`:
 
@@ -499,7 +499,7 @@ import { saveChats } from '@/store/messageDb'
   },
 ```
 
-- [ ] **Step 7.2: Загружать чаты из IDB в ChatListPage**
+- [x] **Step 7.2: Загружать чаты из IDB в ChatListPage**
 
 В `ChatListPage.tsx` добавить импорт:
 ```typescript
@@ -530,13 +530,13 @@ import { loadChats } from '@/store/messageDb'
   }, [setChats])
 ```
 
-- [ ] **Step 7.3: Проверить type-check и lint**
+- [x] **Step 7.3: Проверить type-check и lint**
 
 ```bash
 cd client && npm run type-check && npm run lint
 ```
 
-- [ ] **Step 7.4: Коммит**
+- [x] **Step 7.4: Коммит**
 
 ```bash
 git add src/pages/ChatListPage.tsx src/store/chatStore.ts
@@ -550,7 +550,7 @@ git commit -m "feat(offline): загружать список чатов из ID
 **Files:**
 - Create: `client/src/hooks/useOfflineSync.ts`
 
-- [ ] **Step 8.1: Создать хук**
+- [x] **Step 8.1: Создать хук**
 
 ```typescript
 /**
@@ -593,13 +593,13 @@ export function useOfflineSync(): void {
 }
 ```
 
-- [ ] **Step 8.2: Проверить type-check**
+- [x] **Step 8.2: Проверить type-check**
 
 ```bash
 cd client && npm run type-check
 ```
 
-- [ ] **Step 8.3: Коммит**
+- [x] **Step 8.3: Коммит**
 
 ```bash
 git add src/hooks/useOfflineSync.ts
@@ -615,14 +615,14 @@ git commit -m "feat(offline): добавить useOfflineSync — сброс out
 
 Текущий код (`pendingQueue.current`) хранит очередь только в памяти. При перезагрузке страницы очередь теряется. Нужно добавить сохранение в `outboxDb` и убрать зависимость от in-memory `pendingQueue` для offline-случая.
 
-- [ ] **Step 9.1: Добавить импорт outboxDb в ChatWindow.tsx**
+- [x] **Step 9.1: Добавить импорт outboxDb в ChatWindow.tsx**
 
 Добавить импорт в начало файла:
 ```typescript
 import { enqueueOutbox } from '@/store/outboxDb'
 ```
 
-- [ ] **Step 9.2: Модифицировать логику отправки в handleSend**
+- [x] **Step 9.2: Модифицировать логику отправки в handleSend**
 
 В `ChatWindow.tsx` найти место где вызывается `wsSend(frame)` или сообщение добавляется в `pendingQueue`. Это примерно строки 240–280 (функция `handleSend`).
 
@@ -656,7 +656,7 @@ import type { OutboxItem } from '@/store/outboxDb'
 
 **Замечание о `pendingQueue`:** после этого изменения `pendingQueue.current` можно оставить для немедленной повторной отправки при переходе offline→online в пределах одной сессии (без перезагрузки). `outboxDb` покрывает случай перезагрузки. Оба механизма работают независимо, дедупликация через `clientMsgId` на сервере.
 
-- [ ] **Step 9.3: Найти фактический код handleSend для применения изменений**
+- [x] **Step 9.3: Найти фактический код handleSend для применения изменений**
 
 Прочитать ChatWindow.tsx строки 198–320 чтобы найти точное место вызова wsSend:
 
@@ -666,13 +666,13 @@ grep -n "wsSend\|pendingQueue" client/src/components/ChatWindow/ChatWindow.tsx
 
 Применить изменения по фактическому содержимому файла.
 
-- [ ] **Step 9.4: Проверить type-check и lint**
+- [x] **Step 9.4: Проверить type-check и lint**
 
 ```bash
 cd client && npm run type-check && npm run lint
 ```
 
-- [ ] **Step 9.5: Коммит**
+- [x] **Step 9.5: Коммит**
 
 ```bash
 git add src/components/ChatWindow/ChatWindow.tsx
@@ -687,7 +687,7 @@ git commit -m "feat(offline): сохранять неотправленные с
 - Modify: `client/src/App.tsx`
 - Modify: `client/vite.config.ts`
 
-- [ ] **Step 10.1: Подключить useOfflineSync и OfflineIndicator в App.tsx**
+- [x] **Step 10.1: Подключить useOfflineSync и OfflineIndicator в App.tsx**
 
 Найти `App.tsx` и добавить импорты:
 ```typescript
@@ -717,7 +717,7 @@ export default function App() {
 }
 ```
 
-- [ ] **Step 10.2: Обновить Workbox стратегию в vite.config.ts**
+- [x] **Step 10.2: Обновить Workbox стратегию в vite.config.ts**
 
 В `vite.config.ts` найти блок `workbox.runtimeCaching` и обновить NetworkFirst для API:
 
@@ -742,13 +742,13 @@ export default function App() {
       },
 ```
 
-- [ ] **Step 10.3: Проверить type-check и lint**
+- [x] **Step 10.3: Проверить type-check и lint**
 
 ```bash
 cd client && npm run type-check && npm run lint
 ```
 
-- [ ] **Step 10.4: Сделать production build и убедиться что нет ошибок**
+- [x] **Step 10.4: Сделать production build и убедиться что нет ошибок**
 
 ```bash
 cd client && npm run build
@@ -756,7 +756,7 @@ cd client && npm run build
 
 Ожидание: build успешен, `dist/` содержит `sw.js` с workbox.
 
-- [ ] **Step 10.5: Финальный коммит**
+- [x] **Step 10.5: Финальный коммит**
 
 ```bash
 git add src/App.tsx vite.config.ts
@@ -767,21 +767,21 @@ git commit -m "feat(offline): подключить OfflineIndicator и useOfflin
 
 ## Завершающий шаг: обновить чеклисты
 
-- [ ] **Step 11.1: Обновить spec-gap-checklist.md**
+- [x] **Step 11.1: Обновить spec-gap-checklist.md**
 
 В `docs/spec-gap-checklist.md` отметить:
 - `[x] Реализовать offline history viewing`
 - `[x] Добавить полноценный offline sync слой поверх IndexedDB`
 - `[x] Добавить UI-индикацию offline состояния`
 
-- [ ] **Step 11.2: Обновить v1-gap-remediation.md**
+- [x] **Step 11.2: Обновить v1-gap-remediation.md**
 
 В `docs/v1-gap-remediation.md` пометить Этап 6 как закрытый:
 ```
 ## Этап 6. Offline/PWA слой ✅ Закрыт
 ```
 
-- [ ] **Step 11.3: Финальный docs-коммит**
+- [x] **Step 11.3: Финальный docs-коммит**
 
 ```bash
 git add docs/spec-gap-checklist.md docs/v1-gap-remediation.md

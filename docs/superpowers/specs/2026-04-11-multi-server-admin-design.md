@@ -1,8 +1,8 @@
 # Multi-Server Support & Admin Panel — Design Spec
 
 **Date:** 2026-04-11  
-**Status:** Approved  
-**Branch:** feature/stage9-multi-device (target: new feature branch)
+**Status:** ✅ Implemented  
+**Branch:** main (merged from feature/stage9-multi-device)
 
 ---
 

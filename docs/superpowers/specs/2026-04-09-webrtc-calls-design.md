@@ -1,7 +1,7 @@
 # WebRTC Calls — Design Spec (Stage 9)
 
 **Date:** 2026-04-09  
-**Status:** Approved  
+**Status:** ✅ Implemented  
 **Scope:** 1-on-1 audio/video calls with WebRTC signaling over WebSocket
 
 ---
