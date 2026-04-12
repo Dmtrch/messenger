@@ -1,5 +1,6 @@
 // client/src/hooks/useBrowserWSBindings.ts
 
+import { useMemo } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import { useChatStore } from '@/store/chatStore'
 import { useWsStore } from '@/store/wsStore'
@@ -33,44 +34,48 @@ export function useBrowserWSBindings(
     deleteMessage,
     editMessage,
     markRead,
-  } = useChatStore()
+  } = useChatStore.getState()
 
   const setSend = useWsStore((s) => s.setSend)
 
-  return {
-    token,
-    isAuthenticated,
-    currentUserId: currentUser?.id,
-    logout,
+  return useMemo(
+    () => ({
+      token,
+      isAuthenticated,
+      currentUserId: currentUser?.id,
+      logout,
 
-    getCallFrameHandler: () => handleCallFrame ?? null,
+      getCallFrameHandler: () => handleCallFrame ?? null,
 
-    addMessage,
-    appendMessages,
-    updateMessageStatus,
-    setTyping,
-    upsertChat,
-    deleteMessage,
-    editMessage,
-    markRead,
+      addMessage,
+      appendMessages,
+      updateMessageStatus,
+      setTyping,
+      upsertChat,
+      deleteMessage,
+      editMessage,
+      markRead,
 
-    // Используем getState() — не подписка, всегда актуальное состояние
-    getKnownChat: (chatId) =>
-      useChatStore.getState().chats.find((c) => c.id === chatId) ?? null,
-    getMessagesForChat: (chatId) =>
-      useChatStore.getState().messages[chatId] ?? [],
+      // Используем getState() — не подписка, всегда актуальное состояние
+      getKnownChat: (chatId: string) =>
+        useChatStore.getState().chats.find((c) => c.id === chatId) ?? null,
+      getMessagesForChat: (chatId: string) =>
+        useChatStore.getState().messages[chatId] ?? [],
 
-    setSend,
+      setSend,
 
-    // Crypto — стабильные ссылки, не зависят от render-цикла
-    decryptMessage,
-    decryptGroupMessage,
-    handleIncomingSKDM,
-    tryDecryptPreview,
-    appendOneTimePreKeys,
-    savePreKeyReplenishTime,
-    isPreKeyReplenishOnCooldown,
-    generateDHKeyPair,
-    toBase64,
-  }
+      // Crypto — стабильные ссылки, не зависят от render-цикла
+      decryptMessage,
+      decryptGroupMessage,
+      handleIncomingSKDM,
+      tryDecryptPreview,
+      appendOneTimePreKeys,
+      savePreKeyReplenishTime,
+      isPreKeyReplenishOnCooldown,
+      generateDHKeyPair,
+      toBase64,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token, isAuthenticated, currentUser?.id, logout, setSend, handleCallFrame],
+  )
 }
