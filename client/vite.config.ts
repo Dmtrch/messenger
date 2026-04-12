@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig, Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -52,6 +53,7 @@ export default defineConfig({
         ]
       },
       workbox: {
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // 4 МБ (libsodium увеличивает бандл)
         importScripts: ['/push-handler.js'],
         runtimeCaching: [
           {
@@ -82,5 +84,13 @@ export default defineConfig({
       '/ws': { target: 'ws://localhost:8080', ws: true, changeOrigin: true },
       '/media': { target: 'http://localhost:8080', changeOrigin: true },
     },
-  }
+  },
+  test: {
+    globals: true,
+    environment: 'node',
+    // sumo-версия нужна для crypto_auth_hmacsha256, используемой в ratchet.ts
+    alias: {
+      'libsodium-wrappers': 'libsodium-wrappers-sumo',
+    },
+  },
 })

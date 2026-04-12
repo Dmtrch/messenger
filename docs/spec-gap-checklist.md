@@ -45,6 +45,21 @@
 - [x] Описать и автоматизировать update path без потери данных
 - [ ] Встроить обязательную синхронизацию документации в процесс разработки
 
+## Этап 11 — Native clients Foundation
+
+- [x] Зафиксировать native-first архитектурную стратегию в RFC
+- [x] Зафиксировать compatibility matrix для `Desktop` / `Android` / `iOS`
+- [x] Зафиксировать ADR по secure storage
+- [x] Зафиксировать ADR по local DB
+- [x] Зафиксировать ADR по crypto stack
+- [x] Зафиксировать ADR по desktop framework
+- [x] Зафиксировать ADR по iOS UI
+- [x] Подготовить каркас каталогов `shared/` и `apps/`
+- [x] Описать platform-neutral интерфейсы `AuthEngine`, `WSClient`, `CryptoEngine`, `MessageRepository`
+- [x] Подготовить `shared/test-vectors/` для cross-platform crypto compatibility
+- [x] Зафиксировать formal schemas для REST, WebSocket и message envelope
+- [x] Описать domain models, repositories, auth/session, websocket lifecycle, sync/outbox semantics
+
 ## Звонки (этап 9)
 
 - [x] Реализовать WebRTC-сигнализацию (call_offer / call_answer / ice_candidate / call_end / call_reject)
@@ -105,6 +120,29 @@
 - [x] **Encrypted media — MIME-тип скрыт**: сервер всегда хранит `application/octet-stream`; убран content sniffing; реальный тип только в E2E payload
 - [x] **prekey_low — backoff 5 минут**: `isPreKeyReplenishOnCooldown` / `savePreKeyReplenishTime` в `keystore.ts`; `replenishPreKeys` в `useMessengerWS.ts` проверяет cooldown перед загрузкой
 
+## Этап 12 — Multi-Server Support & Admin Panel
+
+- [x] Новые поля конфигурации: `server_name`, `server_description`, `registration_mode`, `admin_username`, `admin_password`
+- [x] `GET /api/server/info` — публичный эндпоинт, без JWT
+- [x] Роль пользователя (`role`) в users, JWT claims, ответе login
+- [x] Bootstrap-admin через `EnsureAdminUser` при первом старте
+- [x] Invite codes — таблица, проверка (not found / used / expired), `UseInviteCode`
+- [x] Registration requests — таблица, `POST /api/auth/request-register`, admin approve/reject
+- [x] Password reset requests — таблица, `POST /api/auth/password-reset-request` без user enumeration, admin set temp password
+- [x] `RequireAdmin` middleware (пакет `admin`)
+- [x] Admin handlers (9): ListRegistrationRequests, ApproveRegistrationRequest, RejectRegistrationRequest, CreateInviteCode, ListInviteCodes, ListUsers, ResetUserPassword, ListPasswordResetRequests, ResolvePasswordResetRequest
+- [x] Migrations #9–13
+- [x] `serverConfig.ts`: `getServerUrl / setServerUrl / clearServerUrl / hasServerUrl / initServerUrl` + URL validation
+- [x] `client.ts`: динамический BASE через `getServerUrl()`
+- [x] `websocket.ts`: WS URL через `getServerUrl()`
+- [x] `authStore.ts`: поле `role`
+- [x] `chatStore.ts`: `reset()` action
+- [x] `ServerSetupPage.tsx`: ввод и валидация URL сервера
+- [x] `AdminPage.tsx`: 4 вкладки управления
+- [x] `AuthPage.tsx`: invite code, request-register, forgot-password flows
+- [x] `Profile.tsx`: "Сменить сервер" + "Панель администратора"
+- [x] `App.tsx`: /setup route, /admin только для admin role
+
 ## Контрольные вехи
 
 - [x] Закрыты все `Must`
@@ -113,3 +151,5 @@
 - [x] Закрыты все crypto-пункты (этап 5)
 - [x] Закрыты все test-пункты (backend 5 пакетов, frontend 33 теста — +7 session.test.ts)
 - [x] Серверная часть multi-device: GET bundle всех устройств, WS device routing, senderDeviceId
+- [x] Этап 11 Foundation: архитектурные решения и ADR зафиксированы
+- [x] Этап 11 Shared Core: contract layer и formal protocol schemas зафиксированы

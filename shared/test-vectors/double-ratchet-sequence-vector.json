@@ -1,0 +1,34 @@
+{
+  "id": "double-ratchet-sequence",
+  "purpose": "Cross-platform verification of Double Ratchet send, receive and out-of-order semantics.",
+  "inputs": [
+    {
+      "name": "session-participants",
+      "value": {
+        "sender": "alice-device-1",
+        "receiver": "bob-device-1"
+      }
+    },
+    {
+      "name": "message-sequence",
+      "value": [
+        "message-1",
+        "message-2",
+        "message-3"
+      ]
+    },
+    {
+      "name": "delivery-order",
+      "value": [
+        "message-1",
+        "message-3",
+        "message-2"
+      ]
+    }
+  ],
+  "expectedInvariants": [
+    "The receiver decrypts all messages even when delivery order differs from send order.",
+    "Skipped message keys are persisted in a form compatible with the current PWA semantics.",
+    "A native client and the current PWA client must agree on session state transitions for the same sequence."
+  ]
+}

@@ -1,0 +1,389 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://messenger.local/shared/protocol/rest-schema.json",
+  "title": "Messenger REST Contract Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "endpoints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "register": {
+              "$ref": "#/$defs/registerEndpoint"
+            },
+            "login": {
+              "$ref": "#/$defs/loginEndpoint"
+            },
+            "refresh": {
+              "$ref": "#/$defs/basicEndpoint"
+            },
+            "logout": {
+              "$ref": "#/$defs/basicEndpoint"
+            }
+          },
+          "required": ["register", "login", "refresh", "logout"]
+        },
+        "chats": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "list": {
+              "$ref": "#/$defs/chatsListEndpoint"
+            },
+            "messages": {
+              "$ref": "#/$defs/chatMessagesEndpoint"
+            },
+            "markRead": {
+              "$ref": "#/$defs/basicEndpoint"
+            }
+          },
+          "required": ["list", "messages", "markRead"]
+        },
+        "keys": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "bundle": {
+              "$ref": "#/$defs/basicEndpoint"
+            },
+            "register": {
+              "$ref": "#/$defs/deviceRegisterEndpoint"
+            },
+            "prekeys": {
+              "$ref": "#/$defs/prekeysEndpoint"
+            }
+          },
+          "required": ["bundle", "register", "prekeys"]
+        },
+        "media": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "upload": {
+              "$ref": "#/$defs/mediaUploadEndpoint"
+            },
+            "download": {
+              "$ref": "#/$defs/authenticatedEndpoint"
+            },
+            "bind": {
+              "$ref": "#/$defs/basicEndpoint"
+            }
+          },
+          "required": ["upload", "download", "bind"]
+        }
+      },
+      "required": ["auth", "chats", "keys", "media"]
+    }
+  },
+  "required": ["version", "description", "endpoints"],
+  "$defs": {
+    "httpMethod": {
+      "type": "string",
+      "enum": ["GET", "POST", "PATCH", "DELETE"]
+    },
+    "fieldList": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "requestShape": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "encoding": {
+          "type": "string",
+          "enum": ["application/json", "multipart/form-data"]
+        },
+        "required": {
+          "$ref": "#/$defs/fieldList"
+        },
+        "optional": {
+          "$ref": "#/$defs/fieldList"
+        }
+      },
+      "required": ["required"]
+    },
+    "responseShape": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "$ref": "#/$defs/fieldList"
+        },
+        "optional": {
+          "$ref": "#/$defs/fieldList"
+        }
+      },
+      "required": ["required"]
+    },
+    "endpointBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "$ref": "#/$defs/httpMethod"
+        },
+        "path": {
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/requestShape"
+        },
+        "response": {
+          "$ref": "#/$defs/responseShape"
+        }
+      },
+      "required": ["method", "path"]
+    },
+    "deviceBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deviceId": { "type": "string" },
+        "ikPublic": { "type": "string" },
+        "spkId": { "type": "integer" },
+        "spkPublic": { "type": "string" },
+        "spkSignature": { "type": "string" },
+        "opkId": { "type": "integer" },
+        "opkPublic": { "type": "string" }
+      },
+      "required": ["deviceId", "ikPublic", "spkId", "spkPublic", "spkSignature"]
+    },
+    "authRegisterRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "displayName": { "type": "string" },
+        "ikPublic": { "type": "string" },
+        "spkId": { "type": "integer" },
+        "spkPublic": { "type": "string" },
+        "spkSignature": { "type": "string" },
+        "opkPublics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "integer" },
+              "key": { "type": "string" }
+            },
+            "required": ["id", "key"]
+          }
+        }
+      },
+      "required": ["username", "password", "displayName", "ikPublic", "spkId", "spkPublic", "spkSignature", "opkPublics"]
+    },
+    "registerEndpoint": {
+      "allOf": [
+        { "$ref": "#/$defs/endpointBase" },
+        {
+          "properties": {
+            "request": { "$ref": "#/$defs/requestShape" },
+            "response": { "$ref": "#/$defs/responseShape" }
+          }
+        }
+      ]
+    },
+    "loginEndpoint": {
+      "allOf": [
+        { "$ref": "#/$defs/endpointBase" },
+        {
+          "properties": {
+            "request": { "$ref": "#/$defs/requestShape" },
+            "response": { "$ref": "#/$defs/responseShape" }
+          }
+        }
+      ]
+    },
+    "basicEndpoint": {
+      "$ref": "#/$defs/endpointBase"
+    },
+    "chatsListEndpoint": {
+      "$ref": "#/$defs/endpointBase"
+    },
+    "chatMessagesEndpoint": {
+      "allOf": [
+        { "$ref": "#/$defs/endpointBase" },
+        {
+          "properties": {
+            "query": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "optional": {
+                  "$ref": "#/$defs/fieldList"
+                }
+              },
+              "required": ["optional"]
+            }
+          }
+        }
+      ]
+    },
+    "deviceRegisterEndpoint": {
+      "$ref": "#/$defs/endpointBase"
+    },
+    "prekeysEndpoint": {
+      "$ref": "#/$defs/endpointBase"
+    },
+    "mediaUploadEndpoint": {
+      "$ref": "#/$defs/endpointBase"
+    },
+    "authenticatedEndpoint": {
+      "allOf": [
+        { "$ref": "#/$defs/endpointBase" },
+        {
+          "properties": {
+            "authRequired": { "type": "boolean", "const": true }
+          },
+          "required": ["authRequired"]
+        }
+      ]
+    }
+  },
+  "version": 1,
+  "description": "Language-neutral REST contract schema for Messenger clients.",
+  "endpoints": {
+    "auth": {
+      "register": {
+        "method": "POST",
+        "path": "/api/auth/register",
+        "request": {
+          "encoding": "application/json",
+          "required": ["username", "password", "displayName", "ikPublic", "spkId", "spkPublic", "spkSignature", "opkPublics"]
+        },
+        "response": {
+          "required": ["userId", "accessToken"]
+        }
+      },
+      "login": {
+        "method": "POST",
+        "path": "/api/auth/login",
+        "request": {
+          "encoding": "application/json",
+          "required": ["username", "challenge", "signature"]
+        },
+        "response": {
+          "required": ["accessToken", "user"]
+        }
+      },
+      "refresh": {
+        "method": "POST",
+        "path": "/api/auth/refresh",
+        "request": {
+          "required": []
+        },
+        "response": {
+          "required": ["accessToken"]
+        }
+      },
+      "logout": {
+        "method": "POST",
+        "path": "/api/auth/logout",
+        "request": {
+          "required": []
+        },
+        "response": {
+          "required": []
+        }
+      }
+    },
+    "chats": {
+      "list": {
+        "method": "GET",
+        "path": "/api/chats",
+        "response": {
+          "required": ["chats"]
+        }
+      },
+      "messages": {
+        "method": "GET",
+        "path": "/api/chats/{chatId}/messages",
+        "query": {
+          "optional": ["cursor"]
+        },
+        "response": {
+          "required": ["messages"],
+          "optional": ["nextCursor"]
+        }
+      },
+      "markRead": {
+        "method": "POST",
+        "path": "/api/chats/{chatId}/read",
+        "response": {
+          "required": []
+        }
+      }
+    },
+    "keys": {
+      "bundle": {
+        "method": "GET",
+        "path": "/api/keys/{userId}",
+        "response": {
+          "required": ["devices"]
+        }
+      },
+      "register": {
+        "method": "POST",
+        "path": "/api/keys/register",
+        "request": {
+          "encoding": "application/json",
+          "required": ["deviceName", "ikPublic", "spkId", "spkPublic", "spkSignature", "opkPublics"]
+        },
+        "response": {
+          "required": ["deviceId"]
+        }
+      },
+      "prekeys": {
+        "method": "POST",
+        "path": "/api/keys/prekeys",
+        "request": {
+          "encoding": "application/json",
+          "required": ["prekeys"]
+        }
+      }
+    },
+    "media": {
+      "upload": {
+        "method": "POST",
+        "path": "/api/media/upload",
+        "request": {
+          "encoding": "multipart/form-data",
+          "required": ["file"],
+          "optional": ["chat_id"]
+        },
+        "response": {
+          "required": ["mediaId", "originalName", "contentType"]
+        }
+      },
+      "download": {
+        "method": "GET",
+        "path": "/api/media/{mediaId}",
+        "authRequired": true
+      },
+      "bind": {
+        "method": "PATCH",
+        "path": "/api/media/{mediaId}",
+        "request": {
+          "encoding": "application/json",
+          "required": ["chatId"]
+        }
+      }
+    }
+  }
+}

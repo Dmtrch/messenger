@@ -1,0 +1,20 @@
+{
+  "name": "shared-native-core",
+  "version": 1,
+  "kind": "runtime-starter-module",
+  "modules": [
+    "auth",
+    "websocket",
+    "sync",
+    "crypto",
+    "storage",
+    "messages"
+  ],
+  "dependsOn": [
+    "shared/protocol",
+    "shared/domain",
+    "shared/crypto-contracts",
+    "shared/test-vectors"
+  ],
+  "status": "bootstrap"
+}

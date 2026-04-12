@@ -33,50 +33,93 @@
 
 ### Стартовая точка
 
-Существующие документы (созданы ранее, требуют актуализации):
+Документы Foundation уже зафиксированы:
 - `docs/superpowers/plans/2026-04-10-cross-platform-client-apps.md`
 - `docs/superpowers/plans/2026-04-10-native-client-execution-plan.md`
 - `docs/superpowers/specs/native-client-architecture.md`
+- `docs/superpowers/specs/native-client-compatibility-matrix.md`
+- `docs/superpowers/specs/adr-native-secure-storage.md`
+- `docs/superpowers/specs/adr-native-local-db.md`
+- `docs/superpowers/specs/adr-native-crypto-stack.md`
+- `docs/superpowers/specs/adr-native-desktop-framework.md`
+- `docs/superpowers/specs/adr-native-ios-ui.md`
 
 ### Этап A — Foundation (стартовый приоритет)
 
-**Цель:** зафиксировать архитектурные решения и создать каркас репозитория.
+**Статус:** выполнен.
 
-**Задачи:**
+**Принятые решения:**
 
-1. Создать `docs/superpowers/specs/native-client-compatibility-matrix.md`:
-   - матрица платформа × capability (auth, crypto, storage, push, media, calls)
-   - decision record: какую crypto lib использовать на каждой платформе
-   - decision record: SwiftUI vs Compose Multiplatform для iOS UI
+1. `Desktop`: `Kotlin Multiplatform + Compose Multiplatform Desktop`
+2. `Android`: `Kotlin + Compose` поверх shared core
+3. `iOS`: `KMP shared core + SwiftUI`
+4. `Local DB`: нативная реализация через `SQLite`, но с той же offline/outbox/pagination-семантикой, что уже есть у PWA
+5. `Crypto stack`: перенос текущей модели из `client/src/crypto/` без смены `X3DH`, `Double Ratchet`, `Sender Keys`; базовый примитивный слой остаётся в семействе `libsodium`
+6. `Cursor-based pagination`: обязательна для всех нативных клиентов
 
-2. Подготовить каркас каталогов в репозитории:
-   ```
-   shared/
-     protocol/      # типы WS-фреймов, REST-контракты (shared definitions)
-     domain/        # модели: Chat, Message, User, Device
-     crypto-contracts/  # интерфейсы: Ratchet, X3DH, SenderKey (язык-независимо)
-     test-vectors/  # cross-platform crypto test vectors
-   apps/
-     desktop/       # Electron или Tauri (TBD)
-     mobile/
-       android/
-       ios/
-   ```
+**Что уже подготовлено в репозитории:**
 
-3. Зафиксировать decision records (ADR-формат) по:
-   - **Secure storage**: keychain (iOS), Android Keystore, OS credential store (desktop)
-   - **Local DB**: SQLite (все платформы) или SQLCipher для шифрования
-   - **Native crypto stack**: libsodium-sys (Rust/Tauri), libsodium Java wrapper (Android), libsodium Swift (iOS)
-   - **Desktop framework**: Tauri (Rust + WebView, меньше размер) vs Electron (больше экосистема)
+1. Создан каркас каталогов:
+   - `shared/protocol`
+   - `shared/domain`
+   - `shared/crypto-contracts`
+   - `shared/test-vectors`
+   - `apps/desktop`
+   - `apps/mobile/android`
+   - `apps/mobile/ios`
+2. Добавлены baseline `README.md` для `shared/` и `apps/`.
+3. Созданы formal schemas:
+   - `shared/protocol/rest-schema.json`
+   - `shared/protocol/ws-schema.json`
+   - `shared/protocol/message-envelope.schema.json`
 
 ### Этап B — Shared Core
 
-**Цель:** реализовать платформенно-независимый core.
+**Статус:** выполнен в контрактном слое, без runtime-реализаций.
 
-**Задачи:**
-- Описать интерфейсы (не реализации): `AuthEngine`, `WSClient`, `CryptoEngine`, `MessageRepository`
-- Зафиксировать cursor-based pagination как обязательный capability всех клиентов
-- Подготовить `shared/test-vectors/` для cross-platform crypto верификации
+**Что уже сделано:**
+- описаны platform-neutral интерфейсы `AuthEngine`, `WSClient`, `CryptoEngine`, `MessageRepository`;
+- описаны domain models, repositories, auth/session lifecycle, websocket lifecycle, sync/outbox semantics;
+- `cursor-based pagination` зафиксирована как обязательный capability всех клиентов;
+- подготовлен стартовый набор `shared/test-vectors/` для `X3DH`, `Double Ratchet`, `Sender Keys`;
+- formal protocol schemas связаны с текущими REST/WS/message envelope контрактами.
+
+**Следующий шаг:** начать писать runtime-код для `shared/native-core`.
+
+**Важно для следующей сессии:**
+
+Если пользователь пишет фразу уровня:
+
+- `начинаем писать код для shared`
+- `переходим к shared`
+- `начинай реализацию shared/native-core`
+
+то это означает:
+
+1. не возвращаться к этапу проектирования;
+2. не предлагать снова RFC / ADR / совместимость;
+3. сразу начинать реализацию кода в `shared/native-core`;
+4. первый приоритет — `shared/native-core/auth` и `shared/native-core/websocket`;
+5. работать от уже зафиксированных контрактов в:
+   - `shared/protocol/*.json`
+   - `shared/domain/*.md`
+   - `shared/crypto-contracts/interfaces.md`
+   - `shared/test-vectors/*`
+
+**Первый кодовый трек для старта:**
+
+1. Создать структуру `shared/native-core/` по модулям:
+   - `auth/`
+   - `websocket/`
+   - `sync/`
+   - `crypto/`
+   - `storage/`
+   - `messages/`
+2. Начать с runtime-контрактов и минимальных реализаций для:
+   - session state / token lifecycle
+   - websocket connection state machine
+   - reconnect policy
+3. Сразу добавлять тесты на новый runtime-слой, а не только документы.
 
 ### Этапы C/D/E — Desktop → Android → iOS
 
@@ -94,6 +137,7 @@
 - Web-клиент полностью работает с multi-device (Signal Sesame spec)
 - Сервер: Go, SQLite, WebSocket Hub с device routing
 - Frontend: React PWA, Vite, TypeScript, libsodium, IndexedDB
+- Foundation и Shared Core для native track зафиксированы на уровне RFC, ADR, каркаса каталогов и formal contract layer
 
 **Ключевые файлы для понимания протокола:**
 - `client/src/crypto/session.ts` — полная E2E сессия (X3DH + Double Ratchet)
@@ -104,3 +148,7 @@
 - `client/src/types/index.ts` — WS фреймы (WSFrame, WSSendFrame)
 - `server/internal/ws/hub.go` — WS Hub с device routing
 - `server/db/schema.go` — схема БД
+- `shared/protocol/rest-schema.json` — formal REST schema
+- `shared/protocol/ws-schema.json` — formal WS schema
+- `shared/protocol/message-envelope.schema.json` — formal message envelope schema
+- `shared/native-core/module.json` — стартовый runtime-модуль Shared Core

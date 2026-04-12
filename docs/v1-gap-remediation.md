@@ -249,38 +249,72 @@
 - `Must`-пункт чеклиста закрыт; ✅
 - фронтенд-тесты: 33 теста (ratchet x11, x3dh x6, client x9, session x7). ✅
 
-## Этап 11. Нативные приложения для разных ОС 🔲 Запланирован
+## Этап 11. Нативные приложения для разных ОС 🟡 Foundation и Shared Core contract layer зафиксированы
 
 ### Цель этапа
 
 Реализовать полноценные нативные клиенты (не PWA-обёртки) для Desktop, Android и iOS с полной E2E-криптографией и cursor-based пагинацией.
 
-### Этап A — Foundation
+### Этап A — Foundation ✅ Архитектурные решения зафиксированы
 
-**Цель:** зафиксировать архитектурные решения и создать каркас репозитория.
+**Цель:** зафиксировать архитектурные решения и подготовить почву для каркаса репозитория.
 
-1. Создать `docs/superpowers/specs/native-client-compatibility-matrix.md`:
-   - матрица платформа × capability (auth, crypto, storage, push, media, calls)
-   - decision record: crypto lib на каждой платформе
-   - decision record: SwiftUI vs Compose Multiplatform для iOS UI
-2. Подготовить каркас каталогов:
+**Выполнено:**
+
+1. Создан `docs/superpowers/specs/native-client-compatibility-matrix.md`:
+   - матрица платформа × capability (`auth`, `crypto`, `storage`, `push`, `media`, `calls`, `cursor pagination`);
+   - зафиксированы общие и platform-specific boundaries;
+   - добавлены ссылки на ADR.
+2. Зафиксированы ADR по:
+   - **Secure storage**: `Keychain` (iOS), `Android Keystore`, `OS credential store` (desktop);
+   - **Local DB**: `SQLite` как нативная реализация текущей PWA offline-модели;
+   - **Native crypto stack**: перенос текущей PWA crypto-модели на базе `libsodium` family;
+   - **Desktop framework**: `Compose Multiplatform Desktop`;
+   - **iOS UI**: `SwiftUI`.
+3. Обновлён `docs/superpowers/specs/native-client-architecture.md`:
+   - статус переведён в `Accepted`;
+   - закрыты основные open questions Foundation;
+   - RFC привязан к новым decision records.
+
+**Следующий подэтап:**
+
+1. Подготовить каркас каталогов:
    ```
    shared/protocol/, shared/domain/, shared/crypto-contracts/, shared/test-vectors/
    apps/desktop/, apps/mobile/android/, apps/mobile/ios/
    ```
-3. Зафиксировать ADR по:
-   - **Secure storage**: Keychain (iOS), Android Keystore, OS credential store (desktop)
-   - **Local DB**: SQLite / SQLCipher
-   - **Native crypto stack**: libsodium-sys (Tauri), libsodium Java wrapper (Android), libsodium Swift (iOS)
-   - **Desktop framework**: Tauri vs Electron
+2. Описать platform-neutral интерфейсы `AuthEngine`, `WSClient`, `CryptoEngine`, `MessageRepository`.
+3. Подготовить `shared/test-vectors/` как канонический источник cross-platform crypto compatibility.
 
-### Этап B — Shared Core
+### Этап B — Shared Core ✅ Контрактный слой зафиксирован
 
-**Цель:** платформенно-независимый core.
+**Цель:** реализовать платформенно-независимый core.
 
-1. Описать интерфейсы: `AuthEngine`, `WSClient`, `CryptoEngine`, `MessageRepository`
-2. Зафиксировать cursor-based pagination как обязательный capability всех клиентов
-3. Подготовить `shared/test-vectors/` для cross-platform crypto верификации
+**Выполнено:**
+
+1. Описаны интерфейсы:
+   - `AuthEngine`
+   - `WSClient`
+   - `CryptoEngine`
+   - `MessageRepository`
+2. Зафиксированы:
+   - domain models;
+   - domain events;
+   - repository contracts;
+   - auth/session lifecycle;
+   - websocket lifecycle;
+   - sync/outbox semantics.
+3. `cursor-based pagination` зафиксирована как обязательный capability всех клиентов.
+4. Подготовлены `shared/test-vectors/` для `X3DH`, `Double Ratchet`, `Sender Keys`.
+5. Добавлены formal schemas:
+   - `shared/protocol/rest-schema.json`
+   - `shared/protocol/ws-schema.json`
+   - `shared/protocol/message-envelope.schema.json`
+
+**Следующий подэтап:**
+
+1. Ужесточить formal schemas до полноценного JSON Schema-слоя.
+2. Начать первый runtime-модуль `shared/native-core` или platform adapters на основе уже зафиксированных контрактов.
 
 ### Этапы C / D / E — Desktop → Android → iOS
 
@@ -291,7 +325,57 @@
 ### Выход этапа
 
 - нативные клиенты на трёх платформах с полным E2E по Signal Protocol;
-- общий crypto-контракт верифицирован cross-platform test-vectors.
+- общий crypto-контракт и formal protocol layer верифицированы seed-набором cross-platform test-vectors.
+
+## Этап 12. Multi-Server Support & Admin Panel ✅ Закрыт
+
+### Цель этапа
+
+Добавить поддержку нескольких серверов на клиенте (динамический BASE URL) и полноценную панель администрирования сервера: управление пользователями, режимы регистрации, инвайт-коды, запросы на регистрацию, сброс паролей.
+
+### Задачи
+
+**Backend ✅ Закрыт**
+
+1. Config — новые поля: `server_name`, `server_description`, `registration_mode`, `admin_username`, `admin_password`. ✅
+2. Endpoint `GET /api/server/info` — публичный, без JWT, возвращает name/description/registrationMode. ✅
+3. Роль пользователя — `role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'admin'))` в users; роль в JWT claims и ответе `/api/auth/login`. ✅
+4. Bootstrap-admin — `EnsureAdminUser` создаёт из конфига при первом старте. ✅
+5. Invite codes — `invite_codes` таблица; `POST /api/auth/register` проверяет код (not found/used/expired → 403); `UseInviteCode` — атомарное потребление. ✅
+6. Registration requests — `registration_requests` таблица; `POST /api/auth/request-register` → 201; admin API для подтверждения/отклонения. ✅
+7. Password reset requests — `password_reset_requests` таблица; `POST /api/auth/password-reset-request` → 200 (без user enumeration); admin API для установки временного пароля. ✅
+8. `RequireAdmin` middleware — читает роль из JWT context (через `auth.RoleFromCtx`); 403 если не admin. ✅
+9. Admin handlers — 9 handler'ов: ListRegistrationRequests, ApproveRegistrationRequest (проверка дубля username → 409), RejectRegistrationRequest, CreateInviteCode, ListInviteCodes, ListUsers, ResetUserPassword, ListPasswordResetRequests, ResolvePasswordResetRequest. ✅
+10. Migrations #9–13 — добавляют role, invite_codes, registration_requests, password_reset_requests, indexes. ✅
+
+**Client ✅ Закрыт**
+
+11. `client/src/config/serverConfig.ts` — `getServerUrl/setServerUrl/clearServerUrl/hasServerUrl/initServerUrl` через localStorage; URL-валидация через `new URL()` + http/https protocol check. ✅
+12. `client/src/api/client.ts` — динамический BASE через `getServerUrl()`; `AuthRegisterReq.inviteCode?: string`. ✅
+13. `client/src/api/websocket.ts` — WS base строится через `getServerUrl()` с конвертацией http→ws. ✅
+14. `client/src/store/authStore.ts` — поле `role: 'admin' | 'user' | null`; устанавливается из ответа login; включён в `partialize`. ✅
+15. `client/src/store/chatStore.ts` — добавлен `reset()` action для очистки при смене сервера. ✅
+16. `client/src/pages/ServerSetupPage.tsx` — ввод URL, fetch `/api/server/info`, preview карточки сервера, `setServerUrl`, редирект на /auth. ✅
+17. `client/src/pages/AdminPage.tsx` — 4 вкладки: Заявки / Пользователи / Инвайты / Сброс паролей; всё через API с inline error/success messages. ✅
+18. `client/src/pages/AuthPage.tsx` — invite code поле (при registrationMode === 'invite'); request-register flow; forgot-password flow (без user enumeration); `serverInfo` из `/api/server/info`. ✅
+19. `client/src/components/Profile/Profile.tsx` — кнопка "Сменить сервер" (logout + clearServerUrl + chatStore.reset + wsStore.setSend(null) → /setup); кнопка "Панель администратора" (только для role === 'admin'). ✅
+20. `client/src/App.tsx` — `initServerUrl()` на старте; роут /setup; `/admin` только для role === 'admin'. ✅
+21. `client/tsconfig.json` — exclude test files из production build. ✅
+22. `client/vite.config.ts` — `maximumFileSizeToCacheInBytes: 4 MB` (libsodium ~2.38 MB превышает дефолт). ✅
+
+### Ключевые дизайнерские решения
+
+- **Temp password** — admin устанавливает plaintext-пароль, который читает и сообщает пользователю out-of-band. Intentional MVP design, не хранится долго.
+- **No user enumeration** в `password-reset-request` — ответ 200 независимо от наличия пользователя.
+- **Registration keys saved after server confirm** — `handleRequestRegister` сохраняет ключи в IndexedDB только после `res.ok`, чтобы исключить mismatch при отказе сервера.
+- **chatStore.reset() при смене сервера** — чаты предыдущего сервера не утекают в новый контекст.
+
+### Выход этапа
+
+- клиент поддерживает подключение к любому серверу по URL; ✅
+- администратор управляет регистрацией, пользователями и сбросом паролей; ✅
+- три режима регистрации: `open | invite | approval`; ✅
+- роль admin встроена в JWT и отражена в клиентском UI. ✅
 
 ---
 
@@ -308,6 +392,7 @@
 9. Этап 9
 10. Этап 10
 11. Этап 11 (A → B → C → D → E)
+12. Этап 12
 
 ## Критерий завершения
 

@@ -106,6 +106,11 @@ export async function loadMySenderKey(chatId: string): Promise<string | undefine
   return get<string>(`my_sender_key:${chatId}`, keyStore)
 }
 
+/** Удалить свой SenderKey для группового чата (вызывается при смене состава) */
+export async function deleteMySenderKey(chatId: string): Promise<void> {
+  await del(`my_sender_key:${chatId}`, keyStore)
+}
+
 /** Сохранить SenderKey другого участника группового чата */
 export async function savePeerSenderKey(chatId: string, senderId: string, serialized: string): Promise<void> {
   await set(`peer_sender_key:${chatId}:${senderId}`, serialized, keyStore)
@@ -136,4 +141,18 @@ export async function savePushSubscription(sub: PushSubscriptionJSON): Promise<v
 
 export async function loadPushSubscription(): Promise<PushSubscriptionJSON | undefined> {
   return get<PushSubscriptionJSON>('push_subscription', keyStore)
+}
+
+// ── Prekey replenish backoff ──────────────────────────────
+
+/** Сохраняет timestamp последнего успешного пополнения OPK */
+export async function savePreKeyReplenishTime(): Promise<void> {
+  await set('prekey_replenish_ts', Date.now(), keyStore)
+}
+
+/** Возвращает true, если с момента последнего пополнения прошло < minIntervalMs */
+export async function isPreKeyReplenishOnCooldown(minIntervalMs: number): Promise<boolean> {
+  const ts = await get<number>('prekey_replenish_ts', keyStore)
+  if (!ts) return false
+  return Date.now() - ts < minIntervalMs
 }

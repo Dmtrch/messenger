@@ -29,6 +29,8 @@
 
 Важно: проект уже содержит E2E-модули на клиенте, но не все аспекты спецификации Signal Protocol и безопасности доведены до production-уровня. Это MVP-реализация с заметным заделом на дальнейшее развитие.
 
+Отдельно зафиксировано направление дальнейшего развития: поверх текущего backend и протокольного слоя проект переходит к native-first семейству клиентов для `Desktop`, `Android` и `iOS`. На момент этого документа это архитектурно принято, но ещё не реализовано как реальные приложения в репозитории.
+
 ## 3. Фактическая структура репозитория
 
 На текущий момент в репозитории реально используются:
@@ -40,12 +42,16 @@ messenger/
 │   │   └── push-handler.js
 │   ├── src/
 │   │   ├── api/
+│   │   ├── config/
+│   │   │   └── serverConfig.ts     # multi-server URL management
 │   │   ├── components/
 │   │   │   └── OfflineIndicator/   # UI-баннер offline-состояния
 │   │   ├── crypto/
 │   │   ├── hooks/
 │   │   ├── pages/
-│   │   ├── store/                  # Zustand + IDB модули
+│   │   │   ├── ServerSetupPage.tsx # выбор сервера
+│   │   │   └── AdminPage.tsx       # панель администратора
+│   │   ├── store/                  # Zustand + IDB модули (authStore: role, chatStore: reset)
 │   │   ├── styles/
 │   │   └── types/
 │   ├── package.json
@@ -57,12 +63,17 @@ messenger/
 │       ├── plans/
 │       └── specs/
 ├── server/
-│   ├── cmd/server/main.go      # entrypoint, роутинг, static hosting
+│   ├── cmd/server/
+│   │   ├── main.go             # entrypoint, роутинг, static hosting
+│   │   └── config.go           # Config struct, YAML + env
 │   ├── db/
 │   │   ├── schema.go
+│   │   ├── migrate.go
 │   │   └── queries.go
 │   ├── internal/
-│   │   ├── auth/
+│   │   ├── auth/               # JWT, bcrypt, role in claims
+│   │   ├── admin/              # RequireAdmin, admin handlers
+│   │   ├── serverinfo/         # GET /api/server/info
 │   │   ├── chat/
 │   │   ├── keys/
 │   │   ├── media/
@@ -78,6 +89,9 @@ messenger/
 
 - в репозитории сейчас нет второго фронтенда `frontend/`, хотя он упоминается в некоторых инструкциях;
 - в `server/` лежат локальные файлы SQLite (`messenger.db`, `-wal`, `-shm`) и собранный бинарник `server/bin/server`, то есть репозиторий использовался для локального запуска.
+- для native track уже созданы `shared/` и `apps/` как каркас будущих нативных клиентов;
+- в `shared/protocol/` уже лежат formal schemas для REST, WebSocket и message envelope;
+- в `shared/domain/` уже зафиксирован language-neutral contract layer Shared Core.
 
 ## 4. Технологический стек
 
@@ -129,6 +143,31 @@ messenger/
 - клиент расшифровывает их локально и кладёт в Zustand store;
 - offline-получатели получают Web Push без текста сообщения.
 
+### 5.1 Native track status
+
+Для следующего продуктового трека уже приняты следующие архитектурные решения:
+
+- `Desktop`: `Kotlin Multiplatform + Compose Multiplatform Desktop`
+- `Android`: `Kotlin + Compose`
+- `iOS`: `SwiftUI` поверх shared core
+- локальная БД для нативных клиентов: `SQLite`
+- crypto-модель нативных клиентов должна совпадать с уже реализованной PWA-моделью на базе `X3DH`, `Double Ratchet`, `Sender Keys`
+- cursor-based pagination обязательна для всех будущих клиентов
+
+Дополнительно уже реализован контрактный слой Shared Core:
+
+- `shared/protocol/rest-schema.json`
+- `shared/protocol/ws-schema.json`
+- `shared/protocol/message-envelope.schema.json`
+- `shared/domain/models.md`
+- `shared/domain/repositories.md`
+- `shared/domain/auth-session.md`
+- `shared/domain/websocket-lifecycle.md`
+- `shared/domain/sync-engine.md`
+- `shared/test-vectors/*`
+
+Это пока не меняет runtime-код клиента или сервера, но уже меняет фактическую структуру репозитория и фиксирует канонический protocol/domain слой для будущих нативных клиентов.
+
 ## 6. Backend: точка входа и конфигурация
 
 Файлы:
@@ -158,6 +197,11 @@ messenger/
 | `turn_credential_ttl` | `TURN_CREDENTIAL_TTL` | `86400` |
 | `vapid_private_key` | `VAPID_PRIVATE_KEY` | авто-генерация |
 | `vapid_public_key` | `VAPID_PUBLIC_KEY` | авто-генерация |
+| `server_name` | `SERVER_NAME` | `Messenger` |
+| `server_description` | `SERVER_DESCRIPTION` | `""` |
+| `registration_mode` | `REGISTRATION_MODE` | `open` |
+| `admin_username` | `ADMIN_USERNAME` | — |
+| `admin_password` | `ADMIN_PASSWORD` | — |
 
 `BEHIND_PROXY=true` при запуске за reverse proxy (Cloudflare Tunnel, nginx): включает HSTS, доверяет X-Real-IP/X-Forwarded-For.
 
@@ -168,9 +212,10 @@ messenger/
 На старте сервер:
 
 - открывает SQLite через `db.Open`;
-- применяет схему и миграции;
+- применяет схему и миграции (#1–13);
+- запускает `EnsureAdminUser` — создаёт bootstrap-admin из конфига, если не существует;
 - создаёт WebSocket Hub;
-- инициализирует хендлеры `auth`, `chat`, `media`, `users`, `keys`, `push`;
+- инициализирует хендлеры `auth`, `chat`, `media`, `users`, `keys`, `push`, `serverinfo`, `admin`;
 - поднимает `chi.Router`;
 - раздаёт встроенную статику из `server/static`.
 
@@ -193,6 +238,9 @@ messenger/
 - `POST /api/auth/refresh`
 - `POST /api/auth/logout`
 - `GET /api/push/vapid-public-key`
+- `GET /api/server/info` — name, description, registrationMode (без JWT)
+- `POST /api/auth/request-register` — заявка на регистрацию (режим approval)
+- `POST /api/auth/password-reset-request` — запрос сброса пароля
 - `GET /ws`
 
 ### 7.2 Защищённые маршруты
@@ -213,6 +261,20 @@ messenger/
 - `POST /api/media/upload`
 - `GET /api/media/{mediaId}`
 - `PATCH /api/media/{mediaId}`
+
+### 7.3 Маршруты администратора
+
+Под `auth.Middleware` + `admin.RequireAdmin` (role = admin):
+
+- `GET /api/admin/registration-requests`
+- `POST /api/admin/registration-requests/{id}/approve`
+- `POST /api/admin/registration-requests/{id}/reject`
+- `POST /api/admin/invite-codes`
+- `GET /api/admin/invite-codes`
+- `GET /api/admin/users`
+- `POST /api/admin/users/{id}/reset-password`
+- `GET /api/admin/password-reset-requests`
+- `POST /api/admin/password-reset-requests/{id}/resolve`
 
 ## 8. Backend: модуль аутентификации
 
@@ -293,8 +355,68 @@ messenger/
 
 - требует `Authorization: Bearer <token>`;
 - валидирует HMAC JWT;
-- извлекает `sub`;
-- кладёт `userID` в `request.Context`.
+- извлекает `sub` (userID) и `role`;
+- кладёт `userID` и `role` в `request.Context`;
+- `auth.RoleFromCtx(r)` — хелпер для получения роли (по умолчанию `"user"`).
+
+JWT claims включают: `sub` (userID), `username`, `displayName`, `role`.
+
+### 8.7 Регистрация (расширенные сценарии)
+
+Поведение `POST /api/auth/register` зависит от `registrationMode`:
+
+- **open** — свободная регистрация, invite code не нужен.
+- **invite** — обязателен `inviteCode`; проверяется: существование, не использован, не просрочен; после создания пользователя code помечается как `used_by`.
+- **approval** — регистрация прямым POST запрещена (403); нужно сначала подать заявку через `POST /api/auth/request-register`.
+
+### 8.8 Запрос на регистрацию
+
+`POST /api/auth/request-register` (режим approval):
+
+- принимает `username`, `displayName`, `password`;
+- хеширует пароль, сохраняет заявку со статусом `pending`;
+- возвращает `201 Created`;
+- admin одобряет или отклоняет через admin API.
+
+### 8.9 Сброс пароля
+
+`POST /api/auth/password-reset-request`:
+
+- принимает `username`;
+- создаёт запись в `password_reset_requests` со статусом `pending`;
+- **всегда** возвращает `200 OK` независимо от существования пользователя (no user enumeration);
+- admin устанавливает временный пароль через `POST /api/admin/users/{id}/reset-password` и сообщает его пользователю out-of-band.
+
+## 8a. Backend: модуль администрирования
+
+Файлы:
+- `server/internal/admin/middleware.go` — `RequireAdmin`
+- `server/internal/admin/handler.go` — 9 handler'ов
+
+### 8a.1 RequireAdmin
+
+Проверяет роль из `auth.RoleFromCtx(r)`. Если не `"admin"` → `403 {"error": "forbidden"}`.
+
+### 8a.2 Управление заявками на регистрацию
+
+- `GET /api/admin/registration-requests` — список всех заявок.
+- `POST /api/admin/registration-requests/{id}/approve` — одобрить: проверить уникальность username (409 при конфликте), создать пользователя с `role=user`, обновить статус заявки на `approved`.
+- `POST /api/admin/registration-requests/{id}/reject` — обновить статус заявки на `rejected`.
+
+### 8a.3 Инвайт-коды
+
+- `POST /api/admin/invite-codes` — создать код (8-символьный префикс UUID); опциональный `expires_at`.
+- `GET /api/admin/invite-codes` — список всех кодов с полями `id`, `createdBy`, `usedBy`, `expiresAt`.
+
+### 8a.4 Управление пользователями
+
+- `GET /api/admin/users` — список пользователей (id, username, displayName, role, createdAt).
+- `POST /api/admin/users/{id}/reset-password` — принимает `temp_password`, обновляет хеш; admin сам сообщает пользователю временный пароль out-of-band.
+
+### 8a.5 Запросы сброса пароля
+
+- `GET /api/admin/password-reset-requests` — список запросов со статусом `pending`.
+- `POST /api/admin/password-reset-requests/{id}/resolve` — закрыть запрос (установить `status=resolved`).
 
 ## 9. Backend: модуль чатов и сообщений
 
@@ -636,6 +758,7 @@ Content sniffing (`http.DetectContentType`) намеренно убран — з
 - `display_name`
 - `password_hash`
 - `created_at`
+- `role` (`user` | `admin`, DEFAULT `user`)
 
 #### `sessions`
 
@@ -744,6 +867,30 @@ One-time prekeys с привязкой к устройству:
 - `p256dh`
 - `auth`
 
+#### `invite_codes`
+
+- `id` — 8-символьный префикс UUID
+- `created_by` — user_id создателя
+- `used_by` — user_id потребителя (NULL пока не использован)
+- `expires_at` — unix ms, 0 = без срока
+
+#### `registration_requests`
+
+- `id`
+- `username`
+- `display_name`
+- `password_hash`
+- `status` (`pending` | `approved` | `rejected`)
+- `created_at`
+
+#### `password_reset_requests`
+
+- `id`
+- `user_id`
+- `temp_password` — устанавливается admin'ом, пустая строка изначально
+- `status` (`pending` | `resolved`)
+- `created_at`
+
 ### 15.3 Индексы и миграции
 
 Схема содержит индекс по истории сообщений:
@@ -761,6 +908,11 @@ Versioned migration runner (`server/db/migrate.go`) применяет все н
 6. `pre_keys.device_id`
 7. пересоздание `identity_keys` с composite PK `(user_id, device_id)`
 8. `messages.destination_device_id TEXT NOT NULL DEFAULT ''`
+9. `users.role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'admin'))`
+10. создание таблицы `invite_codes`
+11. создание таблицы `registration_requests`
+12. создание таблицы `password_reset_requests`
+13. индексы `idx_registration_requests_status`, `idx_password_reset_requests_status`
 
 ## 16. Frontend: архитектура приложения
 
@@ -780,12 +932,28 @@ Versioned migration runner (`server/db/migrate.go`) применяет все н
 
 ### 16.2 Роутинг
 
-- `/auth` — экран логина/регистрации
+- `/setup` — выбор и валидация URL сервера (если `serverUrl` не сохранён в localStorage)
+- `/auth` — логин / регистрация / request-register / forgot-password
 - `/` — список чатов
 - `/chat/:chatId` — окно переписки
 - `/profile` — профиль пользователя
+- `/admin` — панель администратора (только для role === 'admin')
 
-Неавторизованный пользователь всегда редиректится на `/auth`.
+Неавторизованный пользователь всегда редиректится на `/auth`. Если serverUrl не установлен — редирект на `/setup`.
+
+### 16.3 Multi-server client
+
+Файл: `client/src/config/serverConfig.ts`
+
+Клиент поддерживает подключение к произвольному серверу через динамический BASE URL:
+
+- `getServerUrl()` — читает URL из localStorage (или `''` если не установлен)
+- `setServerUrl(url)` — сохраняет URL с валидацией через `new URL()` + проверкой `http:/https:` протокола; убирает trailing slash
+- `clearServerUrl()` — удаляет из localStorage
+- `hasServerUrl()` — проверяет наличие
+- `initServerUrl()` — при отсутствии пробует установить `window.location.origin` (только при `http/https` схеме, игнорирует `null`/`file://`)
+
+Все запросы в `client.ts` и URL WS-соединения используют `getServerUrl()` как база. При смене сервера (кнопка в Profile) выполняется: `api.logout()` → `clearServerUrl()` → `chatStore.reset()` → `wsStore.setSend(null)` → navigate(`/setup`).
 
 ## 17. Frontend: REST API клиент
 
@@ -795,6 +963,7 @@ Versioned migration runner (`server/db/migrate.go`) применяет все н
 
 Клиент использует единый helper `req<T>()`, который:
 
+- строит URL как `${getServerUrl()}${path}` — BASE динамически читается из localStorage;
 - автоматически подставляет `Authorization: Bearer <accessToken>`;
 - отправляет `credentials: include` для refresh cookie;
 - при `401` один раз выполняет silent refresh;
@@ -821,6 +990,9 @@ API-клиент реализует методы:
 - `editMessage`
 - `subscribePush`
 - `searchUsers`
+- `getServerInfo` — GET `/api/server/info`, без токена
+- `requestRegister` — POST `/api/auth/request-register`
+- `passwordResetRequest` — POST `/api/auth/password-reset-request`
 
 ## 18. Frontend: WebSocket клиент
 
@@ -845,11 +1017,12 @@ API-клиент реализует методы:
 - `currentUser`
 - `accessToken`
 - `isAuthenticated`
+- `role` (`'admin' | 'user' | null`) — устанавливается из ответа login; включён в `partialize` (persist)
 
 Также реализует:
 
-- `setSession`
-- `logout`
+- `setSession` / `login` — устанавливает `accessToken`, `currentUser`, `role`
+- `logout` — сбрасывает все поля включая `role`
 
 ### 19.2 `chatStore`
 
@@ -872,6 +1045,7 @@ API-клиент реализует методы:
 - `editMessage`
 - `setTyping`
 - `markRead`
+- `reset()` — сбрасывает `chats: [], messages: {}` при смене сервера
 
 Есть локальная дедупликация сообщений и optimistic update.
 
