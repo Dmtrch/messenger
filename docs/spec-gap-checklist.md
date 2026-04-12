@@ -4,7 +4,7 @@
 
 ## Must
 
-- [ ] Ввести полноценную multi-device модель — **сервер ✅, клиент в работе**
+- [x] Ввести полноценную multi-device модель ✅ Закрыт
   - [x] GET /api/keys/:userId возвращает `{ devices: [...] }` — bundle для каждого устройства
   - [x] WS Hub: `client.deviceID`, `DeliverToDevice`, `senderDeviceId` в WS payload
   - [x] `messages.destination_device_id` (migration #8) — адресное хранение
@@ -87,7 +87,7 @@
 - [x] **PopPreKey не учитывает device_id**: `PopPreKey(userID, deviceID)` фильтрует `WHERE user_id=? AND device_id=?`; `GetBundle` передаёт `ik.DeviceID`; WS hub передаёт `""` для суммарного подсчёта
 - [x] **POST /api/keys/register не идемпотентен**: `GetIdentityKeyByIKPublic` ищет существующее устройство по IK — если найдено, переиспользуем device_id; иначе создаём новое
 
-### Этап 10 — Полноценная multi-device модель (в работе, ветка `feature/stage9-multi-device`)
+### Этап 10 — Полноценная multi-device модель ✅ Закрыт
 
 **Сервер — закрыто:**
 - [x] **GetBundle → массив устройств**: `GetIdentityKeysByUserID` возвращает `[]IdentityKey`; `GET /api/keys/:userId` → `{ "devices": [{deviceId, ikPublic, spkId, spkPublic, spkSignature, opkId?, opkPublic?}] }`
