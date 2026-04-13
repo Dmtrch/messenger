@@ -8,9 +8,11 @@ object DatabaseProvider {
     private val dbPath: String = "${System.getProperty("user.home")}/.messenger/messenger.db"
 
     val database: MessengerDatabase by lazy {
-        File(dbPath).parentFile.mkdirs()
+        val file = File(dbPath)
+        file.parentFile.mkdirs()
+        val isNew = !file.exists() || file.length() == 0L
         val driver = JdbcSqliteDriver("jdbc:sqlite:$dbPath")
-        MessengerDatabase.Schema.create(driver)
+        if (isNew) MessengerDatabase.Schema.create(driver)
         MessengerDatabase(driver)
     }
 }
