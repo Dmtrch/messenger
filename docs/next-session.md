@@ -1,77 +1,77 @@
 # План на следующую сессию
 
-Актуально на: 2026-04-13 08:55
+Актуально на: 2026-04-13
 Ветка: `main`
 
 ## Следующий приоритет
 
-Stage 11C — Desktop client. Browser runtime слой завершён, следующий шаг — первый нативный клиент.
+Stage 11C-2 — Android-клиент (Kotlin + Compose).
+
+Desktop MVP (Stage 11C-1) завершён и запушен. Все Kotlin-тесты, TypeScript type-check и lint — зелёные.
 
 ## Что делать дальше
 
-1. **Stage 11C — Desktop** (следующий крупный этап)
-   - Brainstorm архитектуру desktop-клиента (Compose Multiplatform или Electron)
-   - Создать `apps/desktop/` каркас
-   - Реализовать non-browser адаптеры для `WSClient`, `CryptoEngine`, `MessageRepository`
-   - Переиспользовать `shared/native-core` как есть
+1. **Stage 11C-2 — Android** (следующий крупный этап)
+   - Brainstorm архитектуру Android-клиента (Jetpack Compose, Room или SQLDelight, Ktor)
+   - Создать `apps/mobile/android/` каркас (Gradle, Compose Activity, минимальный Manifest)
+   - Переиспользовать крипто-логику из `apps/desktop/src/main/kotlin/crypto/` (lazysodium-android)
+   - Реализовать адаптеры: `ApiClient`, `MessengerWS`, `DatabaseProvider` под Android
+   - Cursor-based пагинация обязательна
 
-2. Возможные мелкие доработки (не блокируют):
-   - Thread `bindingsRef` через `createBrowserWSWiring` для hot-path freshness (сейчас Zustand-actions стабильны — практического импакта нет)
+2. **Stage 11C-3 — iOS** (после Android)
+   - SwiftUI + Swift Concurrency
+   - libsodium через Swift Package Manager (swift-sodium)
+   - SQLite через GRDB или SQLite.swift
 
-## Stage 11B — Browser Runtime: завершён ✅
+3. Возможные мелкие доработки (не блокируют):
+   - Обновить `docs/technical-documentation.md` по мере роста native track
+   - Встроить обязательную синхронизацию документации в процесс разработки (`spec-gap-checklist.md` — единственный незакрытый Could)
 
-Все browser-only зависимости вынесены из consumer-слоя:
+## Stage 11C-1 — Desktop MVP: завершён ✅
 
-| Хук | До | После |
-|-----|----|-------|
-| `useMessengerWS` | импортировал api/client, authStore, chatStore, wsStore, 7 crypto-функций | принимает `(apiClient, bindings)`, нет store/crypto импортов |
-| `useWebRTC` | импортировал `api` из api/client | принимает `apiClient: BrowserApiClient` |
-| `useCallHandler` | нет зависимостей на api/client | принимает `apiClient: BrowserApiClient`, передаёт в useWebRTC |
-| `useBrowserWSBindings` | консолидирует все store/crypto deps | action-деструктуринг внутри useMemo |
+Все 13 задач выполнены. Коммиты на `main`:
+
+| Коммит | Содержание |
+|--------|-----------|
+| `c8307d9` | push main after rebase on remote deletions |
+| `123bece` | fix(client): eslint exhaustive-deps |
+| `a83d4b1` | fix(desktop): @Volatile wsSend + suspend logout |
+| `a4473d5` | feat(desktop): sendMessage — outbox + WS dispatch |
+| `3ff9560` | fix(desktop): ChatStore onTypingStop + ChatWindowViewModel DB/WS merge |
+| `9d9373a` | feat(desktop): Stores + ViewModels + полный UI |
+| `2506ce0` | fix(desktop): WSOrchestrator handleEdited |
+| `003d19a` | feat(desktop): MessengerWS + WSOrchestrator |
+
+Реализованные файлы `apps/desktop/`:
+- `build.gradle.kts`, `settings.gradle.kts`, `gradle/libs.versions.toml`
+- `crypto/X3DH.kt`, `crypto/Ratchet.kt`, `crypto/SenderKey.kt`, `crypto/KeyStorage.kt`
+- `db/messenger.sq`, `db/DatabaseProvider.kt`
+- `service/ApiClient.kt`, `service/TokenStore.kt`, `service/MessengerWS.kt`, `service/WSOrchestrator.kt`
+- `store/AuthStore.kt`, `store/ChatStore.kt`
+- `viewmodel/AppViewModel.kt`, `viewmodel/ChatListViewModel.kt`, `viewmodel/ChatWindowViewModel.kt`
+- `ui/App.kt`, `ui/screens/ServerSetupScreen.kt`, `ui/screens/AuthScreen.kt`, `ui/screens/ChatListScreen.kt`, `ui/screens/ChatWindowScreen.kt`, `ui/screens/ProfileScreen.kt`
+
+Целевые платформы в `build.gradle.kts`: `TargetFormat.Dmg` (macOS), `TargetFormat.Msi` (Windows), `TargetFormat.Deb` (Linux).
 
 ## Что уже завершено и не трогать повторно
 
-- `shared/native-core/calls/call-session.ts`
-- `shared/native-core/calls/call-controller.ts`
-- `shared/native-core/calls/web/browser-webrtc-runtime.ts`
-- `shared/native-core/calls/web/call-handler-orchestrator.ts`
-- `client/src/store/callStore.ts` как adapter-store
-- `client/src/hooks/useCallHandler.ts`
-- `client/src/hooks/useWebRTC.ts`
-- удаление legacy bridge callbacks из `callStore`
-- top-level wiring `call-controller` через `App.tsx`
-- `shared/native-core/websocket/web/*` без зависимости от `client/src/types`
-- `client/src/api/websocket.ts` и `client/src/store/wsStore.ts` на shared websocket type surface
-- shared browser platform helpers для `WebSocket`, browser timers, `RTCPeerConnection` и `getUserMedia`
-- shared browser deps helper для `useMessengerWS`
-- **`shared/native-core/websocket/web/browser-ws-wiring.ts`** — `createBrowserWSWiring` factory + `BrowserWSBindings` type (6 unit tests)
-- **`client/src/hooks/useBrowserWSBindings.ts`** — консолидация store + crypto deps в одном хуке
-- **`client/src/hooks/useMessengerWS.ts`** — упрощён: принимает `(apiClient, bindings)`, bindingsRef, нет store/crypto импортов
-- **`client/src/api/client.ts`** — добавлен `export const browserApiClient`
-- **`client/src/App.tsx`** — wired up `useBrowserWSBindings` + `useMessengerWS(browserApiClient, bindings)` + `useCallHandler(browserApiClient)`
-- **`client/src/hooks/useWebRTC.ts`** — убран импорт `api/client`, принимает `apiClient: BrowserApiClient`
-- **`client/src/hooks/useCallHandler.ts`** — принимает `apiClient: BrowserApiClient`, передаёт в `useWebRTC`
-- `useBrowserWSBindings` — action-деструктуринг внутри `useMemo` (корректен по construction)
+- Весь `shared/native-core/` (runtime modules, web adapters, call stack)
+- `apps/desktop/` — полный MVP, все тесты зелёные
+- `client/` web PWA — все фичи до этапа 12 включительно
+- `server/` Go backend — все миграции #1–13
+- WS wiring рефакторинг (`useMessengerWS` принимает `apiClient + bindings`)
 
 ## Ключевые документы
 
-- `docs/superpowers/specs/2026-04-12-call-state-machine-design.md`
-- `docs/superpowers/plans/2026-04-12-browser-ws-wiring.md` (выполнен)
+- `docs/superpowers/specs/native-client-architecture.md`
+- `docs/superpowers/specs/native-client-compatibility-matrix.md`
 - `docs/architecture.md`
 - `docs/technical-documentation.md`
+- `docs/v1-gap-remediation.md`
 
 ## Обязательная проверка после следующего шага
 
-1. `cd client && npm run type-check`
-2. `cd client && npm test -- shared/native-core/websocket/web/browser-ws-wiring.test.ts`
-3. `cd client && npm test -- src/api/client.test.ts`
-4. при изменениях вне call-стека — расширенный shared/client regression run
-
-## Напоминание для следующего старта
-
-Не возвращаться к реализации WS wiring как к незавершённым задачам — рефакторинг `useMessengerWS` полностью завершён.
-
-Следующий рабочий трек:
-- следующий shared/native adapter этап
-- усиление интеграции call stack с общим realtime runtime
-- дальнейшее уменьшение browser-only границ перед non-web adapters
+1. `cd apps/desktop && ./gradlew test`
+2. `cd client && npm run type-check`
+3. `cd client && npm run lint`
+4. При изменениях в crypto — сверка с `shared/test-vectors/*.json`

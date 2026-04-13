@@ -60,6 +60,42 @@
 - [x] Зафиксировать formal schemas для REST, WebSocket и message envelope
 - [x] Описать domain models, repositories, auth/session, websocket lifecycle, sync/outbox semantics
 
+## Этап 11C — Native clients Implementation
+
+### 11C-1 Desktop MVP ✅ Закрыт
+
+- [x] Gradle scaffold — `build.gradle.kts`, `settings.gradle.kts`, `libs.versions.toml`, `Main.kt`
+- [x] Cross-platform test-vectors верифицированы из web-клиента
+- [x] `X3DH.kt` — кросс-клиентный тест против `shared/test-vectors/x3dh.json`
+- [x] `Ratchet.kt` — encrypt/decrypt + test vectors
+- [x] `SenderKey.kt` + `KeyStorage.kt` (PKCS12, `~/.messenger/keystore.p12`)
+- [x] SQLDelight схема (4 таблицы: chat, message, ratchet_session, outbox) + `DatabaseProvider`
+- [x] `ApiClient` (Ktor 3.x CIO, Auth bearer plugin, auto-refresh) + `TokenStore`
+- [x] `MessengerWS` (Ktor WS + exponential backoff reconnect) + `WSOrchestrator`
+- [x] `AuthStore`, `ChatStore` (StateFlow)
+- [x] `AppViewModel`, `ChatListViewModel`, `ChatWindowViewModel`
+- [x] Все экраны: `ServerSetupScreen`, `AuthScreen`, `ChatListScreen`, `ChatWindowScreen`, `ProfileScreen`
+- [x] `sendMessage` — DB persist + WS dispatch + outbox fallback при offline
+- [x] Нативные дистрибутивы: `.dmg` (macOS), `.msi` (Windows), `.deb` (Linux)
+
+### 11C-2 Android ⬜ Не начат
+
+- [ ] Gradle scaffold + Compose Activity + Manifest
+- [ ] Crypto адаптеры (lazysodium-android)
+- [ ] ApiClient + MessengerWS (Ktor Android engine)
+- [ ] SQLDelight или Room база данных
+- [ ] UI экраны (Jetpack Compose)
+- [ ] Push notifications (FCM)
+
+### 11C-3 iOS ⬜ Не начат
+
+- [ ] Swift Package Manager scaffold + SwiftUI App entry point
+- [ ] Crypto адаптеры (swift-sodium)
+- [ ] URLSession / URLSessionWebSocketTask transport
+- [ ] SQLite (GRDB или SQLite.swift)
+- [ ] SwiftUI экраны
+- [ ] Push notifications (APNs)
+
 ## Звонки (этап 9)
 
 - [x] Реализовать WebRTC-сигнализацию (call_offer / call_answer / ice_candidate / call_end / call_reject)

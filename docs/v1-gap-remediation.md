@@ -249,7 +249,7 @@
 - `Must`-пункт чеклиста закрыт; ✅
 - фронтенд-тесты: 33 теста (ratchet x11, x3dh x6, client x9, session x7). ✅
 
-## Этап 11. Нативные приложения для разных ОС 🟡 Foundation завершён, Shared Core runtime в активной реализации
+## Этап 11. Нативные приложения для разных ОС 🟡 Desktop MVP завершён, Android/iOS — следующие
 
 ### Цель этапа
 
@@ -337,9 +337,23 @@
 3. Переделать `client/src/store/callStore.ts` в adapter-store над shared call session snapshot.
 4. После стабилизации call runtime продолжить подготовку native-friendly adapters для desktop/android/ios клиентов.
 
-### Этапы C / D / E — Desktop → Android → iOS
+### Этап C — Desktop MVP ✅ Закрыт
 
-**Последовательность:** Desktop первым (проще стабилизировать), Android вторым, iOS последним.
+**Реализовано (`apps/desktop/`):**
+
+- Gradle Compose Desktop 1.7.x + Ktor 3.x (CIO) + lazysodium-java 5.1.4 + SQLDelight 2.x
+- Крипто: `X3DH.kt`, `Ratchet.kt`, `SenderKey.kt`, `KeyStorage.kt` (PKCS12) — верифицированы против `shared/test-vectors/*.json`
+- БД: SQLDelight (4 таблицы: chat, message, ratchet_session, outbox) + `DatabaseProvider`
+- Сервисы: `ApiClient` (Ktor Auth bearer, auto-refresh), `TokenStore`, `MessengerWS` (exponential backoff), `WSOrchestrator`
+- Stores: `AuthStore`, `ChatStore` (StateFlow)
+- ViewModels: `AppViewModel`, `ChatListViewModel`, `ChatWindowViewModel`
+- UI: `ServerSetupScreen`, `AuthScreen`, `ChatListScreen`, `ChatWindowScreen`, `ProfileScreen`
+- `sendMessage` — DB persist + WS dispatch + outbox offline fallback + `@Volatile` для thread safety
+- Нативные дистрибутивы: `.dmg` (macOS), `.msi` (Windows), `.deb` (Linux)
+
+### Этапы D / E — Android → iOS
+
+**Последовательность:** Android вторым, iOS последним.
 
 **Обязательное требование для всех:** cursor-based догрузка старой истории с сервера.
 

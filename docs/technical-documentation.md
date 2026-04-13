@@ -29,7 +29,7 @@
 
 Важно: проект уже содержит E2E-модули на клиенте, но не все аспекты спецификации Signal Protocol и безопасности доведены до production-уровня. Это MVP-реализация с заметным заделом на дальнейшее развитие.
 
-Отдельно зафиксировано направление дальнейшего развития: поверх текущего backend и протокольного слоя проект переходит к native-first семейству клиентов для `Desktop`, `Android` и `iOS`. На момент этого документа это архитектурно принято, но ещё не реализовано как реальные приложения в репозитории.
+Отдельно зафиксировано направление дальнейшего развития: поверх текущего backend и протокольного слоя проект переходит к native-first семейству клиентов для `Desktop`, `Android` и `iOS`. Desktop MVP реализован в `apps/desktop/` и покрывает macOS/Windows/Linux. Android и iOS — следующие этапы.
 
 ## 3. Фактическая структура репозитория
 
@@ -88,11 +88,57 @@ messenger/
 Примечание:
 
 - в репозитории сейчас нет второго фронтенда `frontend/`, хотя он упоминается в некоторых инструкциях;
-- в `server/` лежат локальные файлы SQLite (`messenger.db`, `-wal`, `-shm`) и собранный бинарник `server/bin/server`, то есть репозиторий использовался для локального запуска.
-- для native track уже созданы `shared/` и `apps/` как каркас будущих нативных клиентов;
-- в `shared/protocol/` уже лежат formal schemas для REST, WebSocket и message envelope;
-- в `shared/domain/` уже зафиксирован language-neutral contract layer Shared Core;
-- в `shared/native-core/` уже реализован отдельный runtime-пакет, который постепенно становится source-of-truth для web и будущих native-клиентов.
+- в `server/` лежат локальные файлы SQLite (`messenger.db`, `-wal`, `-shm`) и собранный бинарник `server/bin/server`, то есть репозиторий использовался для локального запуска;
+- `shared/` и `apps/` — native track, `apps/desktop/` уже содержит полноценный MVP;
+- `shared/protocol/` — formal schemas (REST, WebSocket, message envelope);
+- `shared/domain/` — language-neutral contract layer;
+- `shared/native-core/` — реализованный runtime-пакет, source-of-truth для web и native клиентов;
+- `apps/mobile/android/` и `apps/mobile/ios/` — только `README.md`, реализация не начата.
+
+### Структура `apps/desktop/` (реализовано)
+
+```text
+apps/desktop/
+├── build.gradle.kts               # Compose Desktop 1.7.x, Ktor 3.x, lazysodium-java 5.1.4, SQLDelight 2.x
+├── settings.gradle.kts
+├── gradle/libs.versions.toml
+└── src/main/kotlin/
+    ├── Main.kt
+    ├── config/ServerConfig.kt
+    ├── crypto/
+    │   ├── X3DH.kt                # X3DH initiator + responder (верифицирован через test-vectors)
+    │   ├── Ratchet.kt             # Double Ratchet encrypt/decrypt
+    │   ├── SenderKey.kt           # Группы: encrypt/decrypt через SenderKey
+    │   └── KeyStorage.kt          # PKCS12 (~/.messenger/keystore.p12)
+    ├── db/
+    │   ├── messenger.sq           # 4 таблицы: chat, message, ratchet_session, outbox
+    │   └── DatabaseProvider.kt    # SQLDelight singleton
+    ├── service/
+    │   ├── ApiClient.kt           # Ktor HTTP + Auth bearer (auto-refresh)
+    │   ├── TokenStore.kt          # Хранение JWT в памяти/файле
+    │   ├── MessengerWS.kt         # WebSocket + exponential backoff reconnect
+    │   └── WSOrchestrator.kt      # Диспетчер WS-фреймов (message/ack/typing/read/deleted/edited)
+    ├── store/
+    │   ├── AuthStore.kt           # StateFlow<AuthState>
+    │   └── ChatStore.kt           # StateFlow<List<ChatItem>> + messages + typing
+    ├── viewmodel/
+    │   ├── AppViewModel.kt        # login/logout/sendMessage + WS lifecycle
+    │   ├── ChatListViewModel.kt
+    │   └── ChatWindowViewModel.kt # DB + WS merge, cursor pagination
+    └── ui/
+        ├── App.kt                 # Навигация: ServerSetup → Auth → ChatList → ChatWindow / Profile
+        └── screens/
+            ├── ServerSetupScreen.kt
+            ├── AuthScreen.kt
+            ├── ChatListScreen.kt
+            ├── ChatWindowScreen.kt
+            └── ProfileScreen.kt
+```
+
+Нативные дистрибутивы (собираются на соответствующей ОС):
+- macOS: `./gradlew packageDmg`
+- Windows: `./gradlew packageMsi`
+- Linux: `./gradlew packageDeb`
 
 ## 4. Технологический стек
 
@@ -146,14 +192,14 @@ messenger/
 
 ### 5.1 Native track status
 
-Для следующего продуктового трека уже приняты следующие архитектурные решения:
+Архитектурные решения зафиксированы:
 
-- `Desktop`: `Kotlin Multiplatform + Compose Multiplatform Desktop`
-- `Android`: `Kotlin + Compose`
-- `iOS`: `SwiftUI` поверх shared core
-- локальная БД для нативных клиентов: `SQLite`
-- crypto-модель нативных клиентов должна совпадать с уже реализованной PWA-моделью на базе `X3DH`, `Double Ratchet`, `Sender Keys`
-- cursor-based pagination обязательна для всех будущих клиентов
+- `Desktop`: `Kotlin + Compose Multiplatform Desktop` ✅ **MVP реализован** (`apps/desktop/`)
+- `Android`: `Kotlin + Compose` ⬜ не начат (`apps/mobile/android/` — только README)
+- `iOS`: `SwiftUI` поверх shared core ⬜ не начат (`apps/mobile/ios/` — только README)
+- локальная БД: `SQLite` (SQLDelight 2.x на desktop, Room или SQLDelight на Android, GRDB на iOS)
+- crypto: `libsodium` family — `lazysodium-java` на JVM, `swift-sodium` на iOS
+- cursor-based pagination обязательна для всех клиентов
 
 Дополнительно уже реализован не только контрактный, но и runtime-слой Shared Core:
 
@@ -256,10 +302,10 @@ messenger/
 - `calls/web/call-handler-orchestrator.ts`
   - signalling orchestration для звонков
 
-Незавершённый участок в call/realtime-стеке:
+Следующие шаги для native track:
 
-- browser-specific эффекты и адаптерные границы в `calls/web/*` и `websocket/web/*` ещё можно дополнительно почистить перед desktop/android/ios adapters;
-- следующий шаг — усилить интеграцию call stack с общим realtime runtime и продолжить уменьшать web-only зависимости, начиная с оставшегося app/browser wiring внутри `useMessengerWS`.
+- **Stage 11C-2**: реализовать Android-клиент (`apps/mobile/android/`) — Jetpack Compose, Ktor Android engine, lazysodium-android;
+- **Stage 11C-3**: реализовать iOS-клиент (`apps/mobile/ios/`) — SwiftUI, URLSession, swift-sodium, GRDB.
 
 ## 6. Backend: точка входа и конфигурация
 
