@@ -56,6 +56,8 @@ class X3DH(private val sodium: LazySodiumJava) {
     }
 
     private fun scalarmult(priv: ByteArray, pub: ByteArray): ByteArray {
+        require(priv.size == 32) { "curve25519 private key must be 32 bytes, got ${priv.size}" }
+        require(pub.size == 32) { "curve25519 public key must be 32 bytes, got ${pub.size}" }
         val out = ByteArray(32)
         check(sodium.cryptoScalarMult(out, priv, pub)) { "cryptoScalarMult failed" }
         return out
@@ -70,6 +72,7 @@ class X3DH(private val sodium: LazySodiumJava) {
     }
 
     private fun ed25519PkToCurve25519(edPk: ByteArray): ByteArray {
+        require(edPk.size == 32) { "ed25519 public key must be 32 bytes, got ${edPk.size}" }
         val out = ByteArray(32)
         check(sodium.convertPublicKeyEd25519ToCurve25519(out, edPk)) {
             "ed25519PkToCurve25519 failed"
@@ -78,6 +81,7 @@ class X3DH(private val sodium: LazySodiumJava) {
     }
 
     private fun ed25519SkToCurve25519(edSk: ByteArray): ByteArray {
+        require(edSk.size == 64) { "ed25519 secret key must be 64 bytes, got ${edSk.size}" }
         val out = ByteArray(32)
         check(sodium.convertSecretKeyEd25519ToCurve25519(out, edSk)) {
             "ed25519SkToCurve25519 failed"
