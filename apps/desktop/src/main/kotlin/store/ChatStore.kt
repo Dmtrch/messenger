@@ -44,9 +44,17 @@ class ChatStore {
         _messages.value = updated
     }
 
+    // TODO: MVP — индикатор печати не истекает автоматически; вызывать onTypingStop вручную или через таймер.
     fun onTyping(chatId: String, userId: String) {
         val current = _typing.value.toMutableMap()
         current[chatId] = (current[chatId] ?: emptySet()) + userId
+        _typing.value = current
+    }
+
+    fun onTypingStop(chatId: String, userId: String) {
+        val current = _typing.value.toMutableMap()
+        val updated = (current[chatId] ?: emptySet()) - userId
+        if (updated.isEmpty()) current.remove(chatId) else current[chatId] = updated
         _typing.value = current
     }
 

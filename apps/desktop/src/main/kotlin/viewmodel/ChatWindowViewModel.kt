@@ -26,7 +26,7 @@ class ChatWindowViewModel(
         scope.launch {
             val rows = DatabaseProvider.database.messengerQueries
                 .getMessagesForChat(chatId).executeAsList()
-            chatStore.setMessages(chatId, rows.map { row ->
+            val dbMessages = rows.map { row ->
                 MessageItem(
                     id = row.id,
                     clientMsgId = row.client_msg_id,
@@ -37,7 +37,13 @@ class ChatWindowViewModel(
                     status = row.status,
                     isDeleted = row.is_deleted != 0L,
                 )
-            })
+            }
+            // Merge: keep in-memory messages not in DB (newly received via WS)
+            val existing = chatStore.messages.value[chatId] ?: emptyList()
+            val dbIds = dbMessages.map { it.clientMsgId }.toSet()
+            val merged = (dbMessages + existing.filter { it.clientMsgId !in dbIds })
+                .sortedBy { it.timestamp }
+            chatStore.setMessages(chatId, merged)
         }
         scope.launch {
             chatStore.messages.collect { allMessages ->
