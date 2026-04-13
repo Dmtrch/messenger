@@ -111,6 +111,12 @@ class ApiClient(
         if (!resp.status.isSuccess()) error("registerKeys failed: ${resp.status}")
     }
 
-    fun wsUrl(token: String): String =
-        baseUrl.replace("https://", "wss://").replace("http://", "ws://") + "/ws?token=$token"
+    fun wsUrl(token: String): String {
+        val wsBase = when {
+            baseUrl.startsWith("https://") -> baseUrl.replaceFirst("https://", "wss://")
+            baseUrl.startsWith("http://") -> baseUrl.replaceFirst("http://", "ws://")
+            else -> baseUrl
+        }
+        return "$wsBase/ws?token=$token"
+    }
 }

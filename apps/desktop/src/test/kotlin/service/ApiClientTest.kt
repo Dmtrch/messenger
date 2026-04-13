@@ -29,25 +29,21 @@ class ApiClientTest {
     }
 
     @Test
-    fun `refreshTokens called on 401`() = runTest {
-        var callCount = 0
-        val engine = MockEngine { request ->
-            callCount++
-            if (callCount == 1) {
-                respond(content = ByteReadChannel(""), status = HttpStatusCode.Unauthorized)
-            } else {
-                respond(
-                    content = ByteReadChannel("""{"accessToken":"new","refreshToken":"ref"}"""),
-                    status = HttpStatusCode.OK,
-                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                )
-            }
+    fun `login stores tokens in tokenStore`() = runTest {
+        val engine = MockEngine { _ ->
+            respond(
+                content = ByteReadChannel("""{"accessToken":"acc","refreshToken":"ref"}"""),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
         }
-        val tokenStore = InMemoryTokenStore("old", "ref")
+        val tokenStore = InMemoryTokenStore()
         val client = ApiClient(baseUrl = "http://localhost", engine = engine, tokenStore = tokenStore)
 
-        // Проверяем что текущий токен хранится корректно
-        assertEquals("old", tokenStore.accessToken)
+        client.login("user", "pass")
+
+        assertEquals("acc", tokenStore.accessToken)
+        assertEquals("ref", tokenStore.refreshToken)
     }
 }
 
