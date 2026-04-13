@@ -57,6 +57,8 @@ class WSOrchestrator(
                 val chainKey = DatabaseProvider.database.messengerQueries
                     .loadRatchetSession(sessionKey)
                     .executeAsOneOrNull() ?: return
+                // TODO: MVP упрощение — используется индекс 0 вместо реального счётчика рачета.
+                // В полной реализации Double Ratchet нужно хранить и инкрементировать счётчик per-session.
                 val msgKey = ratchet.deriveMessageKey(chainKey, 0)
                 ratchet.decrypt(ct, nonce, msgKey)
             }
@@ -106,7 +108,34 @@ class WSOrchestrator(
 
     private fun handleEdited(obj: JsonObject) {
         val clientMsgId = obj["clientMsgId"]?.jsonPrimitive?.content ?: return
-        // Редактирование требует повторной дешифровки — упрощённая версия для MVP
-        chatStore.onMessageEdited(clientMsgId, "[edited]")
+        val ciphertext = obj["ciphertext"]?.jsonPrimitive?.content ?: return
+        val senderId = obj["senderId"]?.jsonPrimitive?.content ?: return
+        val chatId = obj["chatId"]?.jsonPrimitive?.content ?: return
+        val isGroup = chatStore.isGroup(chatId)
+
+        val plaintext = try {
+            val parts = ciphertext.split(":")
+            if (parts.size != 2) return
+            val nonce = b64Dec.decode(parts[0])
+            val ct = b64Dec.decode(parts[1])
+            if (isGroup) {
+                val skBlob = DatabaseProvider.database.messengerQueries
+                    .loadRatchetSession("sk_$chatId")
+                    .executeAsOneOrNull() ?: return
+                senderKey.decrypt(ct, nonce, skBlob)
+            } else {
+                val sessionKey = "session_${minOf(senderId, currentUserId)}_${maxOf(senderId, currentUserId)}"
+                val chainKey = DatabaseProvider.database.messengerQueries
+                    .loadRatchetSession(sessionKey)
+                    .executeAsOneOrNull() ?: return
+                // TODO: MVP упрощение — см. handleMessage
+                val msgKey = ratchet.deriveMessageKey(chainKey, 0)
+                ratchet.decrypt(ct, nonce, msgKey)
+            }
+        } catch (e: Exception) {
+            return
+        }
+
+        chatStore.onMessageEdited(clientMsgId, String(plaintext))
     }
 }
