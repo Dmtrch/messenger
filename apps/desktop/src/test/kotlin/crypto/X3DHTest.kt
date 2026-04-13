@@ -22,18 +22,18 @@ class X3DHTest {
         val v = loadVector("x3dh")
 
         val aliceIKPriv = b64.decode(v["aliceIdentityKeyPair"]!!.jsonObject["privateKey"]!!.jsonPrimitive.content)
-        val aliceSPKPriv = b64.decode(v["aliceSignedPreKey"]!!.jsonObject["privateKey"]!!.jsonPrimitive.content)
-        val aliceOPKPriv = b64.decode(v["aliceOneTimePreKey"]!!.jsonObject["privateKey"]!!.jsonPrimitive.content)
-        val bobSPKPub = b64.decode(v["bobSignedPreKey"]!!.jsonObject["publicKey"]!!.jsonPrimitive.content)
+        val aliceEKPriv = b64.decode(v["aliceEphemeralKeyPair"]!!.jsonObject["privateKey"]!!.jsonPrimitive.content)
         val bobIKPub = b64.decode(v["bobIdentityKeyPair"]!!.jsonObject["publicKey"]!!.jsonPrimitive.content)
+        val bobSPKPub = b64.decode(v["bobSignedPreKey"]!!.jsonObject["publicKey"]!!.jsonPrimitive.content)
+        val bobOPKPub = b64.decode(v["bobOneTimePreKey"]!!.jsonObject["publicKey"]!!.jsonPrimitive.content)
         val expected = v["expectedSharedSecret"]!!.jsonPrimitive.content
 
         val result = X3DH(sodium).computeSharedSecret(
             aliceIKPrivEd = aliceIKPriv,
-            aliceSPKPriv = aliceSPKPriv,
-            aliceOPKPriv = aliceOPKPriv,
+            aliceEKPriv = aliceEKPriv,
             bobIKPubEd = bobIKPub,
             bobSPKPub = bobSPKPub,
+            bobOPKPub = bobOPKPub,
         )
 
         assertEquals(expected, Base64.getEncoder().encodeToString(result))

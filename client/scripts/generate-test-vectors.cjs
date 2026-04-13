@@ -13,30 +13,27 @@ async function main() {
   mkdirSync(outDir, { recursive: true })
 
   // --- X3DH vector ---
-  const aliceIK = sodium.crypto_sign_keypair()
-  const aliceSPK = sodium.crypto_box_keypair()
-  const aliceOPK = sodium.crypto_box_keypair()
-  const bobIK = sodium.crypto_sign_keypair()
-  const bobSPK = sodium.crypto_box_keypair()
+  // Стандартный Signal X3DH: Alice-initiator
+  const aliceIK = sodium.crypto_sign_keypair()      // ed25519 identity key
+  const aliceEK = sodium.crypto_box_keypair()        // curve25519 ephemeral key
 
-  // Alice IK ed→curve
-  const aliceIKCurve = {
-    publicKey: sodium.crypto_sign_ed25519_pk_to_curve25519(aliceIK.publicKey),
-    privateKey: sodium.crypto_sign_ed25519_sk_to_curve25519(aliceIK.privateKey),
-  }
-  const bobIKCurve = {
-    publicKey: sodium.crypto_sign_ed25519_pk_to_curve25519(bobIK.publicKey),
-    privateKey: sodium.crypto_sign_ed25519_sk_to_curve25519(bobIK.privateKey),
-  }
+  const bobIK = sodium.crypto_sign_keypair()         // ed25519 identity key
+  const bobSPK = sodium.crypto_box_keypair()         // curve25519 signed pre-key
+  const bobOPK = sodium.crypto_box_keypair()         // curve25519 one-time pre-key
 
-  // DH1 = DH(Alice_IK_curve, Bob_SPK)
-  const dh1 = sodium.crypto_scalarmult(aliceIKCurve.privateKey, bobSPK.publicKey)
-  // DH2 = DH(Alice_SPK, Bob_IK_curve)
-  const dh2 = sodium.crypto_scalarmult(aliceSPK.privateKey, bobIKCurve.publicKey)
-  // DH3 = DH(Alice_SPK, Bob_SPK)
-  const dh3 = sodium.crypto_scalarmult(aliceSPK.privateKey, bobSPK.publicKey)
-  // DH4 = DH(Alice_OPK, Bob_SPK)
-  const dh4 = sodium.crypto_scalarmult(aliceOPK.privateKey, bobSPK.publicKey)
+  // Конвертируем ed25519 → curve25519
+  const aliceIKCurvePriv = sodium.crypto_sign_ed25519_sk_to_curve25519(aliceIK.privateKey)
+  const bobIKCurvePub = sodium.crypto_sign_ed25519_pk_to_curve25519(bobIK.publicKey)
+
+  // Стандартные DH-операции X3DH
+  // DH1 = Alice_IK_curve × Bob_SPK
+  const dh1 = sodium.crypto_scalarmult(aliceIKCurvePriv, bobSPK.publicKey)
+  // DH2 = Alice_EK × Bob_IK_curve
+  const dh2 = sodium.crypto_scalarmult(aliceEK.privateKey, bobIKCurvePub)
+  // DH3 = Alice_EK × Bob_SPK
+  const dh3 = sodium.crypto_scalarmult(aliceEK.privateKey, bobSPK.publicKey)
+  // DH4 = Alice_EK × Bob_OPK
+  const dh4 = sodium.crypto_scalarmult(aliceEK.privateKey, bobOPK.publicKey)
 
   const combined = new Uint8Array(dh1.length + dh2.length + dh3.length + dh4.length)
   combined.set(dh1, 0)
@@ -51,13 +48,9 @@ async function main() {
       publicKey: Buffer.from(aliceIK.publicKey).toString('base64'),
       privateKey: Buffer.from(aliceIK.privateKey).toString('base64'),
     },
-    aliceSignedPreKey: {
-      publicKey: Buffer.from(aliceSPK.publicKey).toString('base64'),
-      privateKey: Buffer.from(aliceSPK.privateKey).toString('base64'),
-    },
-    aliceOneTimePreKey: {
-      publicKey: Buffer.from(aliceOPK.publicKey).toString('base64'),
-      privateKey: Buffer.from(aliceOPK.privateKey).toString('base64'),
+    aliceEphemeralKeyPair: {
+      publicKey: Buffer.from(aliceEK.publicKey).toString('base64'),
+      privateKey: Buffer.from(aliceEK.privateKey).toString('base64'),
     },
     bobIdentityKeyPair: {
       publicKey: Buffer.from(bobIK.publicKey).toString('base64'),
@@ -66,6 +59,10 @@ async function main() {
     bobSignedPreKey: {
       publicKey: Buffer.from(bobSPK.publicKey).toString('base64'),
       privateKey: Buffer.from(bobSPK.privateKey).toString('base64'),
+    },
+    bobOneTimePreKey: {
+      publicKey: Buffer.from(bobOPK.publicKey).toString('base64'),
+      privateKey: Buffer.from(bobOPK.privateKey).toString('base64'),
     },
     expectedSharedSecret: Buffer.from(sharedSecret).toString('base64'),
   }

@@ -1,23 +1,23 @@
 {
   "aliceIdentityKeyPair": {
-    "publicKey": "aXw1R6MJ3hPTwQYfXGbMIvZKIXESJwzVa+cYB+D0hHQ=",
-    "privateKey": "o0ZBSjNO55stEES2XPU9iKBmF7yM7E77fWiqSFZuU3FpfDVHowneE9PBBh9cZswi9kohcRInDNVr5xgH4PSEdA=="
+    "publicKey": "jXP8v/bysieoToUf2hSSBPYZzfb2Vmbcf055KHBDfuA=",
+    "privateKey": "1+TRR5D3aKUKcYyL6IG0p9E5/RCd0H/XDO988NZVE8uNc/y/9vKyJ6hOhR/aFJIE9hnN9vZWZtx/TnkocEN+4A=="
   },
-  "aliceSignedPreKey": {
-    "publicKey": "jnvKSpbT/s6EN+FiLfH57ShM9aU0sBmXCrcQwZTQOws=",
-    "privateKey": "Cl7Q/OKPYRGOqL/mWPXithfzjYPgRy34wrjhmwOyuH8="
-  },
-  "aliceOneTimePreKey": {
-    "publicKey": "NIV2vM828iZr50NVV7AwHIwcJGT5H8H1BK06zRQ6iWQ=",
-    "privateKey": "PqgZ3QF82pRWkbRcT+dCntCXsrlXRkkGuhtC8wtjCNE="
+  "aliceEphemeralKeyPair": {
+    "publicKey": "+9KZrO1507Fm8RjxSJBA2POBm1k8RXnJJm/pgVdbmD0=",
+    "privateKey": "WCs+6sHZag1WyQx0BFKX41Tx25zcAlbYUp1aIbg9qE8="
   },
   "bobIdentityKeyPair": {
-    "publicKey": "4hew12Q1Wfpu0xSkutX/7hqKzT+RBDj9NmGHeBCD5qs=",
-    "privateKey": "pvK2O/lO/tpVMsRixa+5EQK74UAioWlq2mTKZNmJIlHiF7DXZDVZ+m7TFKS61f/uGorNP5EEOP02YYd4EIPmqw=="
+    "publicKey": "Cqx8jVpVOar0ZdcqERsNUlwSF+H75uW/Y+2jSOWnPN4=",
+    "privateKey": "LR2jZW+E/eefGmmstzByCbLVtJT7qu9kQmySy+yhmAoKrHyNWlU5qvRl1yoRGw1SXBIX4fvm5b9j7aNI5ac83g=="
   },
   "bobSignedPreKey": {
-    "publicKey": "/ybpKQ5VI3nU1XTPmkjs7ZZzAlllR5eNMecrVVUlVlI=",
-    "privateKey": "EdPmsZKV2bsKtoXaVo1yEgWQJyPPa014oYgHPhIoPDE="
+    "publicKey": "mHoyaH38QtgclBy8x0KDMUMKNjh27SHRnziAnGe4NTQ=",
+    "privateKey": "lDb/rmdZHu6SG0sMXw2chAcEK9xCfWjJQ1ELB4X6MHw="
   },
-  "expectedSharedSecret": "eDKkkOymdLqPRJR3vrXR1AEymEmedpew5DPO5rtIx/w="
+  "bobOneTimePreKey": {
+    "publicKey": "BHhJsNq/qQ8tv43/azSfbtvcUMBxouOAo7Y2xsWi3xk=",
+    "privateKey": "96UjR9KDLZqKnK70PSmpY/GvVIhDout2UJY7eo6opIU="
+  },
+  "expectedSharedSecret": "eaBj3HWzwzh5Vz8dVRdxIxpEsGluAQqeWsowF8I4q28="
 }
