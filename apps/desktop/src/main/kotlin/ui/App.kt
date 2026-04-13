@@ -3,6 +3,7 @@ package ui
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import config.ServerConfig
+import kotlinx.coroutines.launch
 import ui.screens.*
 import viewmodel.AppViewModel
 import viewmodel.ChatListViewModel
@@ -79,7 +80,7 @@ fun App() {
                 username = authState.username,
                 serverUrl = ServerConfig.serverUrl,
                 onBack = { screen = Screen.ChatList },
-                onLogout = { vm.logout(); screen = Screen.Auth },
+                onLogout = { scope.launch { vm.logout(); screen = Screen.Auth } },
                 onChangeServer = { screen = Screen.ServerSetup },
             )
         }

@@ -29,7 +29,7 @@ class AppViewModel {
 
     var apiClient: ApiClient? = null
     private var ws: MessengerWS? = null
-    private var wsSend: ((String) -> Unit)? = null
+    @Volatile private var wsSend: ((String) -> Unit)? = null
 
     fun setServerUrl(url: String) {
         ServerConfig.serverUrl = url
