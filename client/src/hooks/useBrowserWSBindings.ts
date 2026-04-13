@@ -26,55 +26,59 @@ export function useBrowserWSBindings(
   const currentUser     = useAuthStore((s) => s.currentUser)
   const logout          = useAuthStore((s) => s.logout)
 
-  const {
-    addMessage,
-    updateMessageStatus,
-    setTyping,
-    upsertChat,
-    deleteMessage,
-    editMessage,
-    markRead,
-  } = useChatStore.getState()
-
   const setSend = useWsStore((s) => s.setSend)
 
   return useMemo(
-    () => ({
-      token,
-      isAuthenticated,
-      currentUserId: currentUser?.id,
-      logout,
+    () => {
+      // Zustand actions стабильны — читаем через getState() внутри useMemo,
+      // чтобы захват происходил в момент пересчёта memo, а не на каждый render.
+      const {
+        addMessage,
+        updateMessageStatus,
+        setTyping,
+        upsertChat,
+        deleteMessage,
+        editMessage,
+        markRead,
+      } = useChatStore.getState()
 
-      getCallFrameHandler: () => handleCallFrame ?? null,
+      return {
+        token,
+        isAuthenticated,
+        currentUserId: currentUser?.id,
+        logout,
 
-      addMessage,
-      appendMessages,
-      updateMessageStatus,
-      setTyping,
-      upsertChat,
-      deleteMessage,
-      editMessage,
-      markRead,
+        getCallFrameHandler: () => handleCallFrame ?? null,
 
-      // Используем getState() — не подписка, всегда актуальное состояние
-      getKnownChat: (chatId: string) =>
-        useChatStore.getState().chats.find((c) => c.id === chatId) ?? null,
-      getMessagesForChat: (chatId: string) =>
-        useChatStore.getState().messages[chatId] ?? [],
+        addMessage,
+        appendMessages,
+        updateMessageStatus,
+        setTyping,
+        upsertChat,
+        deleteMessage,
+        editMessage,
+        markRead,
 
-      setSend,
+        // Используем getState() — не подписка, всегда актуальное состояние
+        getKnownChat: (chatId: string) =>
+          useChatStore.getState().chats.find((c) => c.id === chatId) ?? null,
+        getMessagesForChat: (chatId: string) =>
+          useChatStore.getState().messages[chatId] ?? [],
 
-      // Crypto — стабильные ссылки, не зависят от render-цикла
-      decryptMessage,
-      decryptGroupMessage,
-      handleIncomingSKDM,
-      tryDecryptPreview,
-      appendOneTimePreKeys,
-      savePreKeyReplenishTime,
-      isPreKeyReplenishOnCooldown,
-      generateDHKeyPair,
-      toBase64,
-    }),
+        setSend,
+
+        // Crypto — стабильные ссылки, не зависят от render-цикла
+        decryptMessage,
+        decryptGroupMessage,
+        handleIncomingSKDM,
+        tryDecryptPreview,
+        appendOneTimePreKeys,
+        savePreKeyReplenishTime,
+        isPreKeyReplenishOnCooldown,
+        generateDHKeyPair,
+        toBase64,
+      }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [token, isAuthenticated, currentUser?.id, logout, setSend, handleCallFrame],
   )

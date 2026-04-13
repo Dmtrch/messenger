@@ -1,116 +1,100 @@
-import { useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { useCallStore } from '@/store/callStore'
 import { useWebRTC } from '@/hooks/useWebRTC'
 import { useWsStore } from '@/store/wsStore'
-import type { WSFrame } from '@/types'
 
-// Тип для call-фреймов, приходящих с сервера
-type CallWSFrame = Extract<WSFrame, {
-  type: 'call_offer' | 'call_answer' | 'call_end' | 'call_reject' | 'call_busy' | 'ice_candidate'
-}>
+import {
+  createCallController,
+  type BrowserApiClient,
+  type CallWSFrame,
+} from '../../../shared/native-core'
 
 export interface CallActions {
   initiateCall: (chatId: string, targetId: string, isVideo: boolean) => void
   acceptCall: () => void
   rejectCall: () => void
   hangUp: () => void
+  handleCallFrame: (frame: CallWSFrame) => void
 }
 
-export function useCallHandler(): CallActions {
-  const webRTC = useWebRTC()
-  const setCallFrameHandler = useCallStore((s) => s.setCallFrameHandler)
-  const setInitiateCall = useCallStore((s) => s.setInitiateCall)
-  const setIncoming = useCallStore((s) => s.setIncoming)
-  const setNotification = useCallStore((s) => s.setNotification)
+export function useCallHandler(apiClient: BrowserApiClient): CallActions {
+  const webRTC = useWebRTC(apiClient)
+  const applySession = useCallStore((s) => s.applySession)
+  const clearMedia = useCallStore((s) => s.clearMedia)
+  const setCallControls = useCallStore((s) => s.setCallControls)
   const send = useWsStore((s) => s.send)
 
-  // Обработчик call-фреймов, вызывается из useMessengerWS
-  const handleCallFrame = useCallback((frame: CallWSFrame) => {
-    switch (frame.type) {
-      case 'call_offer':
-        setIncoming({
-          callId: frame.callId,
-          chatId: frame.chatId,
-          callerId: frame.callerId,
-          sdp: frame.sdp,
-          isVideo: frame.isVideo,
-        })
-        break
+  const controller = useMemo(() => createCallController({
+    createCallId() {
+      return crypto.randomUUID()
+    },
+    send(frame) {
+      return send?.(frame)
+    },
+    schedule(delayMs, run) {
+      return setTimeout(run, delayMs)
+    },
+    webRTC,
+  }), [send, webRTC])
 
-      case 'call_answer':
-        webRTC.handleAnswer(frame.sdp).catch((e) =>
-          console.error('handleAnswer failed', e)
-        )
-        break
-
-      case 'ice_candidate':
-        webRTC.addIceCandidate(frame.candidate).catch((e) =>
-          console.error('addIceCandidate failed', e)
-        )
-        break
-
-      case 'call_end':
-        // closeOnly закрывает PC без повторной отправки call_end серверу
-        webRTC.closeOnly()
-        break
-
-      case 'call_reject':
-        webRTC.closeOnly()
-        setNotification('Звонок отклонён')
-        setTimeout(() => setNotification(null), 3000)
-        break
-
-      case 'call_busy':
-        webRTC.closeOnly()
-        setNotification('Абонент занят')
-        setTimeout(() => setNotification(null), 3000)
-        break
-    }
-  }, [webRTC, setIncoming, setNotification])
-
-  // Регистрируем обработчик в callStore, чтобы useMessengerWS мог его вызывать
   useEffect(() => {
-    setCallFrameHandler(handleCallFrame)
-    return () => setCallFrameHandler(null)
-  }, [handleCallFrame, setCallFrameHandler])
+    applySession(controller.getState())
+    const unsubscribe = controller.subscribe((session) => {
+      applySession(session)
+      if (session.status === 'idle') {
+        clearMedia()
+      }
+    })
+    return unsubscribe
+  }, [applySession, clearMedia, controller])
 
-  // === Публичные action-функции ===
+  useEffect(() => {
+    setCallControls({
+      toggleMute() {
+        controller.toggleMute()
+      },
+      toggleCamera() {
+        controller.toggleCamera()
+      },
+    })
+    return () => setCallControls(null)
+  }, [controller, setCallControls])
 
   const initiateCall = useCallback((chatId: string, targetId: string, isVideo: boolean) => {
-    const callId = crypto.randomUUID()
-    useCallStore.getState().startOutgoing(callId, chatId, targetId, isVideo)
-    webRTC.initiateCall(callId, chatId, targetId, isVideo).catch((e) => {
-      console.error('initiateCall failed', e)
-      useCallStore.getState().reset()
+    void controller.initiateCall(chatId, targetId, isVideo).catch((error) => {
+      console.error('initiateCall failed', error)
+      controller.reset()
+      clearMedia()
     })
-  }, [webRTC])
-
-  // Регистрируем initiateCall в store, чтобы AppRoutes мог получить его без дублирования хука
-  useEffect(() => {
-    setInitiateCall(initiateCall)
-    return () => setInitiateCall(null)
-  }, [initiateCall, setInitiateCall])
+  }, [clearMedia, controller])
 
   const acceptCall = useCallback(() => {
-    const { incomingOffer } = useCallStore.getState()
-    if (!incomingOffer) return
-    webRTC.acceptOffer(incomingOffer.callId, incomingOffer.sdp, incomingOffer.isVideo).catch((e) => {
-      console.error('acceptOffer failed', e)
-      useCallStore.getState().reset()
+    void controller.acceptCall().catch((error) => {
+      console.error('acceptOffer failed', error)
+      controller.reset()
+      clearMedia()
     })
-  }, [webRTC])
+  }, [clearMedia, controller])
 
   const rejectCall = useCallback(() => {
-    const { callId } = useCallStore.getState()
-    if (callId) {
-      send?.({ type: 'call_reject', callId })
-    }
-    useCallStore.getState().reset()
-  }, [send])
+    controller.rejectCall()
+  }, [controller])
 
   const hangUp = useCallback(() => {
-    webRTC.hangUp()
-  }, [webRTC])
+    controller.hangUp()
+  }, [controller])
 
-  return { initiateCall, acceptCall, rejectCall, hangUp }
+  const handleCallFrame = useCallback((frame: CallWSFrame) => {
+    void controller.onFrame(frame).catch((error) => {
+      console.error('call frame handling failed', error)
+    })
+  }, [controller])
+
+  return {
+    initiateCall,
+    acceptCall,
+    rejectCall,
+    hangUp,
+    handleCallFrame,
+  }
 }
