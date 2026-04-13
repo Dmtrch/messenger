@@ -1,0 +1,76 @@
+CREATE TABLE IF NOT EXISTS chat (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    is_group INTEGER NOT NULL DEFAULT 0,
+    last_message TEXT,
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
+
+insertChat:
+INSERT OR REPLACE INTO chat(id, name, is_group, last_message, updated_at)
+VALUES (?, ?, ?, ?, ?);
+
+getAllChats:
+SELECT * FROM chat ORDER BY updated_at DESC;
+
+getChatById:
+SELECT * FROM chat WHERE id = ?;
+
+CREATE TABLE IF NOT EXISTS message (
+    id TEXT NOT NULL PRIMARY KEY,
+    client_msg_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    sender_id TEXT NOT NULL,
+    plaintext TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'sent',
+    is_deleted INTEGER NOT NULL DEFAULT 0
+);
+
+insertMessage:
+INSERT OR REPLACE INTO message(id, client_msg_id, chat_id, sender_id, plaintext, timestamp, status, is_deleted)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+getMessagesForChat:
+SELECT * FROM message
+WHERE chat_id = ? AND is_deleted = 0
+ORDER BY timestamp ASC;
+
+getMessagesBefore:
+SELECT * FROM message
+WHERE chat_id = ? AND timestamp < ? AND is_deleted = 0
+ORDER BY timestamp DESC
+LIMIT ?;
+
+softDeleteMessage:
+UPDATE message SET is_deleted = 1 WHERE client_msg_id = ?;
+
+updateMessageStatus:
+UPDATE message SET status = ? WHERE client_msg_id = ?;
+
+CREATE TABLE IF NOT EXISTS ratchet_session (
+    session_key TEXT NOT NULL PRIMARY KEY,
+    state BLOB NOT NULL
+);
+
+saveRatchetSession:
+INSERT OR REPLACE INTO ratchet_session(session_key, state) VALUES (?, ?);
+
+loadRatchetSession:
+SELECT state FROM ratchet_session WHERE session_key = ?;
+
+CREATE TABLE IF NOT EXISTS outbox (
+    client_msg_id TEXT NOT NULL PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    plaintext TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+insertOutbox:
+INSERT OR REPLACE INTO outbox(client_msg_id, chat_id, plaintext, created_at) VALUES (?, ?, ?, ?);
+
+deleteOutbox:
+DELETE FROM outbox WHERE client_msg_id = ?;
+
+getAllOutbox:
+SELECT * FROM outbox ORDER BY created_at ASC;
