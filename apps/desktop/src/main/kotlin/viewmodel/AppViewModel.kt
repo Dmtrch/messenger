@@ -29,6 +29,7 @@ class AppViewModel {
 
     var apiClient: ApiClient? = null
     private var ws: MessengerWS? = null
+    private var wsSend: ((String) -> Unit)? = null
 
     fun setServerUrl(url: String) {
         ServerConfig.serverUrl = url
@@ -67,9 +68,11 @@ class AppViewModel {
             http = client.http,
             onFrame = { frame -> orchestrator.onFrame(frame) },
             onConnect = { send ->
+                wsSend = send
                 scope.launch {
                     DatabaseProvider.database.messengerQueries.getAllOutbox().executeAsList().forEach { item ->
                         send(item.plaintext)
+                        DatabaseProvider.database.messengerQueries.deleteOutbox(item.client_msg_id)
                     }
                 }
             },
@@ -77,6 +80,47 @@ class AppViewModel {
         )
         wsInstance.connect(client.wsUrl(token))
         ws = wsInstance
+    }
+
+    fun sendMessage(chatId: String, plaintext: String) {
+        val userId = authStore.state.value.userId
+        val clientMsgId = java.util.UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis()
+
+        // Сохраняем сообщение в БД со статусом 'sending'
+        DatabaseProvider.database.messengerQueries.insertMessage(
+            id = clientMsgId,
+            client_msg_id = clientMsgId,
+            chat_id = chatId,
+            sender_id = userId,
+            plaintext = plaintext,
+            timestamp = timestamp,
+            status = "sending",
+            is_deleted = 0L,
+        )
+        chatStore.onMessageReceived(chatId, clientMsgId, plaintext, userId, timestamp)
+
+        // Строим JSON-фрейм
+        val frame = kotlinx.serialization.json.buildJsonObject {
+            put("type", kotlinx.serialization.json.JsonPrimitive("message"))
+            put("chatId", kotlinx.serialization.json.JsonPrimitive(chatId))
+            put("clientMsgId", kotlinx.serialization.json.JsonPrimitive(clientMsgId))
+            put("plaintext", kotlinx.serialization.json.JsonPrimitive(plaintext))
+        }.toString()
+
+        val send = wsSend
+        if (send != null) {
+            // MVP: отправляем plaintext — E2E encrypt добавляется в 11C-2 (X3DH handshake)
+            send(frame)
+        } else {
+            // Нет WS-соединения — сохраняем в outbox, отправится при reconnect
+            DatabaseProvider.database.messengerQueries.insertOutbox(
+                client_msg_id = clientMsgId,
+                chat_id = chatId,
+                plaintext = frame,
+                created_at = timestamp,
+            )
+        }
     }
 
     private suspend fun loadChats() {

@@ -72,7 +72,7 @@ fun App() {
                     typingUsers = typingUsers,
                     currentUserId = authState.userId,
                     onBack = { screen = Screen.ChatList },
-                    onSend = { _ -> /* TODO: encrypt + send в Task 12 */ },
+                    onSend = { text -> vm.sendMessage(chatId, text) },
                 )
             }
             Screen.Profile -> ProfileScreen(
