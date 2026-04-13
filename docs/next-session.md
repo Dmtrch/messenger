@@ -1,25 +1,33 @@
 # План на следующую сессию
 
-Актуально на: 2026-04-12 19:45
+Актуально на: 2026-04-13 08:55
 Ветка: `main`
 
 ## Следующий приоритет
 
-Подготовить следующий shared/native adapter этап — уменьшение browser-only границ перед non-web adapters.
+Stage 11C — Desktop client. Browser runtime слой завершён, следующий шаг — первый нативный клиент.
 
 ## Что делать дальше
 
-1. Усилить интеграцию call stack с общим realtime runtime
-   - проверить, какие call-specific browser эффекты ещё живут в consumer-слое
-   - свести runtime boundaries к shared controller + browser adapters без лишней React-логики
+1. **Stage 11C — Desktop** (следующий крупный этап)
+   - Brainstorm архитектуру desktop-клиента (Compose Multiplatform или Electron)
+   - Создать `apps/desktop/` каркас
+   - Реализовать non-browser адаптеры для `WSClient`, `CryptoEngine`, `MessageRepository`
+   - Переиспользовать `shared/native-core` как есть
 
-2. Подготовить `shared/native-core` к desktop/android/ios adapters
-   - продолжить уменьшать browser-only зависимости в call/web и websocket/web
-   - проверить, какие browser runtime factories ещё можно вынести из компонентов
-
-3. Возможные follow-up задачи по текущему рефакторингу (не блокируют):
+2. Возможные мелкие доработки (не блокируют):
    - Thread `bindingsRef` через `createBrowserWSWiring` для hot-path freshness (сейчас Zustand-actions стабильны — практического импакта нет)
-   - Переместить `useChatStore.getState()` action-деструктуринг внутрь `useMemo` в `useBrowserWSBindings`
+
+## Stage 11B — Browser Runtime: завершён ✅
+
+Все browser-only зависимости вынесены из consumer-слоя:
+
+| Хук | До | После |
+|-----|----|-------|
+| `useMessengerWS` | импортировал api/client, authStore, chatStore, wsStore, 7 crypto-функций | принимает `(apiClient, bindings)`, нет store/crypto импортов |
+| `useWebRTC` | импортировал `api` из api/client | принимает `apiClient: BrowserApiClient` |
+| `useCallHandler` | нет зависимостей на api/client | принимает `apiClient: BrowserApiClient`, передаёт в useWebRTC |
+| `useBrowserWSBindings` | консолидирует все store/crypto deps | action-деструктуринг внутри useMemo |
 
 ## Что уже завершено и не трогать повторно
 
@@ -40,7 +48,10 @@
 - **`client/src/hooks/useBrowserWSBindings.ts`** — консолидация store + crypto deps в одном хуке
 - **`client/src/hooks/useMessengerWS.ts`** — упрощён: принимает `(apiClient, bindings)`, bindingsRef, нет store/crypto импортов
 - **`client/src/api/client.ts`** — добавлен `export const browserApiClient`
-- **`client/src/App.tsx`** — wired up `useBrowserWSBindings` + `useMessengerWS(browserApiClient, bindings)`
+- **`client/src/App.tsx`** — wired up `useBrowserWSBindings` + `useMessengerWS(browserApiClient, bindings)` + `useCallHandler(browserApiClient)`
+- **`client/src/hooks/useWebRTC.ts`** — убран импорт `api/client`, принимает `apiClient: BrowserApiClient`
+- **`client/src/hooks/useCallHandler.ts`** — принимает `apiClient: BrowserApiClient`, передаёт в `useWebRTC`
+- `useBrowserWSBindings` — action-деструктуринг внутри `useMemo` (корректен по construction)
 
 ## Ключевые документы
 
