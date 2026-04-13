@@ -16,16 +16,19 @@ function formatDuration(seconds: number): string {
 }
 
 export default function CallOverlay({ onAccept, onReject, onHangUp }: Props) {
-  const status       = useCallStore((s) => s.status)
-  const peerId       = useCallStore((s) => s.peerId)
-  const isVideo      = useCallStore((s) => s.isVideo)
+  const session      = useCallStore((s) => s.session)
   const localStream  = useCallStore((s) => s.localStream)
   const remoteStream = useCallStore((s) => s.remoteStream)
-  const isMuted      = useCallStore((s) => s.isMuted)
-  const isCameraOff  = useCallStore((s) => s.isCameraOff)
   const toggleMute   = useCallStore((s) => s.toggleMute)
   const toggleCamera = useCallStore((s) => s.toggleCamera)
-  const notification = useCallStore((s) => s.notification)
+  const {
+    status,
+    peerId,
+    isVideo,
+    isMuted,
+    isCameraOff,
+    notification,
+  } = session
 
   const [elapsed, setElapsed] = useState(0)
   const localVideoRef  = useRef<HTMLVideoElement>(null)

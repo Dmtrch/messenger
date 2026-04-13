@@ -57,3 +57,6 @@ shared/native-core/dist-types/
 .osgrep
 .worktrees/
 config.yaml
+
+AGENTS.md
+CLAUDE.md

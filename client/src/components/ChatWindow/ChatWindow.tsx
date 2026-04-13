@@ -83,7 +83,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
   const markRead = useChatStore((st) => st.markRead)
   const currentUser = useAuthStore((st) => st.currentUser)
   const wsSend = useWsStore((st) => st.send)
-  const callStatus = useCallStore((s) => s.status)
+  const callStatus = useCallStore((s) => s.session.status)
   const [text, setText] = useState('')
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)

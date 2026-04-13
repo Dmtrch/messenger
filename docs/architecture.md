@@ -88,14 +88,60 @@ Self-hosted мессенджер с E2E-шифрованием, серверно
 
 ### Текущее состояние Shared Core
 
-В репозитории уже зафиксирован стартовый Shared Core на уровне контрактов:
+В репозитории уже есть не только контрактный слой, но и рабочий runtime-пакет `shared/native-core`.
+
+Слои сейчас выглядят так:
 
 - `shared/protocol/` — formal schemas для REST, WebSocket и message envelope;
 - `shared/domain/` — language-neutral модели, события, repositories, auth/session, websocket lifecycle, sync/outbox;
 - `shared/crypto-contracts/` — общий crypto contract;
-- `shared/test-vectors/` — seed-набор cross-platform crypto vectors и контрактный тест.
+- `shared/test-vectors/` — seed-набор cross-platform crypto vectors;
+- `shared/native-core/` — platform-neutral runtime и browser/web adapters.
 
-Это ещё не runtime-реализация, но уже канонический слой проектирования для всех будущих нативных клиентов.
+`shared/native-core` уже содержит:
+
+- runtime-модули:
+  - `auth/session-runtime.ts`
+  - `websocket/connection-runtime.ts`
+  - `messages/message-repository.ts`
+  - `sync/sync-engine.ts`
+  - `storage/storage-runtime.ts`
+  - `crypto/crypto-runtime.ts`
+- browser/web adapters и orchestrators:
+  - `api/web/browser-api-client.ts`
+  - `websocket/web/browser-websocket-client.ts`
+  - `websocket/web/browser-websocket-platform.ts`
+  - `websocket/web/browser-messenger-ws-deps.ts`
+  - `websocket/web/ws-frame-types.ts`
+  - `websocket/web/ws-model-types.ts`
+  - `websocket/web/messenger-ws-orchestrator.ts`
+  - `storage/web/browser-keystore.ts`
+  - `crypto/web-crypto-adapter.ts`
+  - `crypto/web/session-web.ts`
+  - `calls/call-session.ts`
+  - `calls/call-controller.ts`
+  - `calls/web/browser-webrtc-runtime.ts`
+  - `calls/web/browser-webrtc-platform.ts`
+  - `calls/web/call-ws-types.ts`
+  - `calls/web/call-handler-orchestrator.ts`
+
+Web-клиент уже использует shared source-of-truth для:
+
+- `api/client.ts`
+- `api/websocket.ts`
+- `crypto/x3dh.ts`
+- `crypto/ratchet.ts`
+- `crypto/senderkey.ts`
+- `crypto/session.ts`
+- `crypto/keystore.ts`
+- `hooks/useMessengerWS.ts`
+- `hooks/useCallHandler.ts`
+- `hooks/useWebRTC.ts`
+- `store/callStore.ts`
+- `store/wsStore.ts`
+- `components/CallOverlay/CallOverlay.tsx`
+
+То есть `shared` уже является каноническим слоем не только для контрактов, но и для значительной части runtime-логики web-клиента. Для call-стека это теперь включает полный доменный слой (`call-session`, `call-controller`), browser signalling/runtime adapters и top-level wiring без скрытых runtime callbacks в Zustand. Для realtime-слоя дополнительно вынесены shared-local frame/model contracts, поэтому `calls/web/*` и `websocket/web/*` больше не зависят от `client/src/types`. Отдельно в shared уже вынесены browser platform helpers для `WebSocket`, browser timers, `RTCPeerConnection` и `getUserMedia`, а `useMessengerWS` использует shared helper для browser scheduler и маппинга `api.getChats()` в shared realtime model.
 
 ---
 

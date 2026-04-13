@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { WSSendFrame } from '@/types'
+import type { WSSendFrame } from '../../../shared/native-core'
 
 interface WsState {
   send: ((frame: WSSendFrame) => boolean) | null

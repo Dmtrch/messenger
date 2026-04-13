@@ -10,8 +10,10 @@
   },
   "include": [
     "./index.ts",
+    "./api/**/*.ts",
     "./auth/**/*.ts",
     "./websocket/**/*.ts",
+    "./calls/**/*.ts",
     "./messages/**/*.ts",
     "./sync/**/*.ts",
     "./storage/**/*.ts",

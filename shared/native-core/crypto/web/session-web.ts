@@ -41,7 +41,6 @@ import {
   type EncryptedMessage,
   type RatchetState,
 } from './ratchet-web'
-import type { DeviceBundle } from '@/api/client'
 
 interface WirePayload {
   v: 1
@@ -49,6 +48,16 @@ interface WirePayload {
   opkId?: number
   ikPub?: string
   msg: EncryptedMessage
+}
+
+export interface DeviceBundle {
+  deviceId: string
+  ikPublic: string
+  spkId: number
+  spkPublic: string
+  spkSignature: string
+  opkId?: number
+  opkPublic?: string
 }
 
 export interface SessionRatchetSessionRecord {
@@ -114,7 +123,7 @@ export interface SessionWebRuntimeDeps {
 }
 
 let sodiumReady = false
-let defaultRuntimePromise: Promise<SessionWebRuntime> | null = null
+let defaultRuntime: SessionWebRuntime | null = null
 
 async function ensureSodium() {
   if (!sodiumReady) {
@@ -365,23 +374,45 @@ export function createSessionWebRuntime(deps: SessionWebRuntimeDeps): SessionWeb
   }
 }
 
-async function loadDefaultDeps(): Promise<SessionWebRuntimeDeps> {
-  const [{ api }, store] = await Promise.all([
-    import('@/api/client'),
-    import('@/crypto/keystore'),
-  ])
-
+export function createSessionWebStoreAdapter(store: {
+  consumeOneTimePreKey(id: number): Promise<DHKeyPair | undefined>
+  deleteMySenderKey(chatId: string): Promise<void>
+  loadIdentityKey(): Promise<IdentityKeyPair | undefined>
+  loadMySenderKey(chatId: string): Promise<string | undefined>
+  loadPeerSenderKey(chatId: string, senderId: string): Promise<string | undefined>
+  loadRatchetSession(chatId: string): Promise<SessionRatchetSessionRecord | undefined>
+  loadSignedPreKey(): Promise<DHKeyPair | undefined>
+  saveMySenderKey(chatId: string, serialized: string): Promise<void>
+  savePeerSenderKey(chatId: string, senderId: string, serialized: string): Promise<void>
+  saveRatchetSession(data: SessionRatchetSessionRecord): Promise<void>
+}): SessionWebStore {
   return {
-    api,
-    store,
+    consumeOneTimePreKey: store.consumeOneTimePreKey,
+    deleteMySenderKey: store.deleteMySenderKey,
+    loadIdentityKey: store.loadIdentityKey,
+    loadMySenderKey: store.loadMySenderKey,
+    loadPeerSenderKey: store.loadPeerSenderKey,
+    loadRatchetSession: store.loadRatchetSession,
+    loadSignedPreKey: store.loadSignedPreKey,
+    saveMySenderKey: store.saveMySenderKey,
+    savePeerSenderKey: store.savePeerSenderKey,
+    saveRatchetSession: store.saveRatchetSession,
   }
 }
 
-async function getDefaultRuntime(): Promise<SessionWebRuntime> {
-  if (!defaultRuntimePromise) {
-    defaultRuntimePromise = loadDefaultDeps().then((deps) => createSessionWebRuntime(deps))
+export function configureDefaultSessionWebRuntime(runtime: SessionWebRuntime) {
+  defaultRuntime = runtime
+}
+
+export function resetDefaultSessionWebRuntime() {
+  defaultRuntime = null
+}
+
+function getDefaultRuntime(): SessionWebRuntime {
+  if (!defaultRuntime) {
+    throw new Error('Default session runtime is not configured')
   }
-  return defaultRuntimePromise
+  return defaultRuntime
 }
 
 export async function encryptForAllDevices(
@@ -389,14 +420,14 @@ export async function encryptForAllDevices(
   bundles: DeviceBundle[],
   plaintext: string,
 ): Promise<Array<{ deviceId: string; ciphertext: string }>> {
-  return (await getDefaultRuntime()).encryptForAllDevices(recipientId, bundles, plaintext)
+  return getDefaultRuntime().encryptForAllDevices(recipientId, bundles, plaintext)
 }
 
 export async function encryptMessage(
   recipientId: string,
   plaintext: string,
 ): Promise<string> {
-  return (await getDefaultRuntime()).encryptMessage(recipientId, plaintext)
+  return getDefaultRuntime().encryptMessage(recipientId, plaintext)
 }
 
 export async function encryptGroupMessage(
@@ -408,7 +439,7 @@ export async function encryptGroupMessage(
   encodedPayload: string
   skdmRecipients: Array<{ userId: string; encodedSkdm: string }>
 }> {
-  return (await getDefaultRuntime()).encryptGroupMessage(chatId, myUserId, members, plaintext)
+  return getDefaultRuntime().encryptGroupMessage(chatId, myUserId, members, plaintext)
 }
 
 export async function decryptGroupMessage(
@@ -416,7 +447,7 @@ export async function decryptGroupMessage(
   senderId: string,
   encodedPayload: string,
 ): Promise<string> {
-  return (await getDefaultRuntime()).decryptGroupMessage(chatId, senderId, encodedPayload)
+  return getDefaultRuntime().decryptGroupMessage(chatId, senderId, encodedPayload)
 }
 
 export async function handleIncomingSKDM(
@@ -425,7 +456,7 @@ export async function handleIncomingSKDM(
   senderDeviceId: string,
   encodedSkdm: string,
 ): Promise<void> {
-  return (await getDefaultRuntime()).handleIncomingSKDM(chatId, senderId, senderDeviceId, encodedSkdm)
+  return getDefaultRuntime().handleIncomingSKDM(chatId, senderId, senderDeviceId, encodedSkdm)
 }
 
 export async function decryptMessage(
@@ -433,11 +464,11 @@ export async function decryptMessage(
   senderDeviceId: string,
   encodedPayload: string,
 ): Promise<string> {
-  return (await getDefaultRuntime()).decryptMessage(senderId, senderDeviceId, encodedPayload)
+  return getDefaultRuntime().decryptMessage(senderId, senderDeviceId, encodedPayload)
 }
 
 export async function invalidateGroupSenderKey(chatId: string): Promise<void> {
-  return (await getDefaultRuntime()).invalidateGroupSenderKey(chatId)
+  return getDefaultRuntime().invalidateGroupSenderKey(chatId)
 }
 
 export async function tryDecryptPreview(
@@ -447,7 +478,7 @@ export async function tryDecryptPreview(
   senderDeviceId: string,
   encryptedPayload: string,
 ): Promise<string> {
-  return (await getDefaultRuntime()).tryDecryptPreview(
+  return getDefaultRuntime().tryDecryptPreview(
     chatType,
     chatId,
     senderId,

@@ -10,59 +10,18 @@ import {
 } from './x3dh-web'
 import type { DeviceBundle } from '@/api/client'
 
-const aliceSessions = new Map<string, string>()
-const bobSessions = new Map<string, string>()
+const aliceSessions = new Map<string, Uint8Array>()
+const bobSessions = new Map<string, Uint8Array>()
 const mySenderKeys = new Map<string, string>()
 const peerSenderKeys = new Map<string, string>()
-
-let activeSessions = aliceSessions
 
 let aliceIdentity: ReturnType<typeof generateIdentityKeyPair>
 let bobIdentity: ReturnType<typeof generateIdentityKeyPair>
 let bobSpk: ReturnType<typeof generateDHKeyPair>
 
-vi.mock('@/crypto/keystore', () => ({
-  loadIdentityKey: vi.fn(),
-  loadSignedPreKey: vi.fn(),
-  consumeOneTimePreKey: vi.fn().mockResolvedValue(undefined),
-  loadRatchetSession: vi.fn().mockImplementation(async (key: string) => {
-    const raw = activeSessions.get(key)
-    return raw ? { chatId: key, state: raw, updatedAt: Date.now() } : null
-  }),
-  saveRatchetSession: vi.fn().mockImplementation(async ({ chatId, state }: { chatId: string; state: string }) => {
-    activeSessions.set(chatId, state)
-  }),
-  saveMySenderKey: vi.fn().mockImplementation(async (chatId: string, state: string) => {
-    mySenderKeys.set(chatId, state)
-  }),
-  loadMySenderKey: vi.fn().mockImplementation(async (chatId: string) => mySenderKeys.get(chatId) ?? null),
-  deleteMySenderKey: vi.fn().mockImplementation(async (chatId: string) => {
-    mySenderKeys.delete(chatId)
-  }),
-  savePeerSenderKey: vi.fn().mockImplementation(async (chatId: string, senderId: string, state: string) => {
-    peerSenderKeys.set(`${chatId}:${senderId}`, state)
-  }),
-  loadPeerSenderKey: vi.fn().mockImplementation(async (chatId: string, senderId: string) => {
-    return peerSenderKeys.get(`${chatId}:${senderId}`) ?? null
-  }),
-}))
-
-vi.mock('@/api/client', () => ({
-  api: {
-    getKeyBundle: vi.fn(),
-  },
-}))
-
 const {
   createSessionWebRuntime,
-  decryptGroupMessage,
-  decryptMessage,
-  encryptForAllDevices,
-  encryptGroupMessage,
-  handleIncomingSKDM,
 } = await import('./session-web')
-const { loadIdentityKey, loadSignedPreKey } = await import('@/crypto/keystore')
-const { api } = await import('@/api/client')
 
 beforeAll(async () => {
   await initSodium()
@@ -78,9 +37,6 @@ afterEach(() => {
   bobSessions.clear()
   mySenderKeys.clear()
   peerSenderKeys.clear()
-  vi.mocked(loadIdentityKey).mockReset()
-  vi.mocked(loadSignedPreKey).mockReset()
-  vi.mocked(api.getKeyBundle).mockReset()
 })
 
 function makeBobBundle(deviceId: string): DeviceBundle {
@@ -105,37 +61,97 @@ function uniqueIds() {
   }
 }
 
+function createRuntimeStore(
+  identity: ReturnType<typeof generateIdentityKeyPair>,
+  signedPreKey: ReturnType<typeof generateDHKeyPair>,
+  sessions: Map<string, Uint8Array>,
+  ownerPrefix: 'alice' | 'bob',
+) {
+  return {
+    async loadIdentityKey() {
+      return identity
+    },
+    async loadSignedPreKey() {
+      return signedPreKey
+    },
+    async consumeOneTimePreKey() {
+      return undefined
+    },
+    async loadRatchetSession(chatId: string) {
+      const state = sessions.get(chatId)
+      return state ? { chatId, state, updatedAt: Date.now() } : undefined
+    },
+    async saveRatchetSession(data: { chatId: string; state: Uint8Array }) {
+      sessions.set(data.chatId, data.state)
+    },
+    async saveMySenderKey(chatId: string, serialized: string) {
+      mySenderKeys.set(`${ownerPrefix}:${chatId}`, serialized)
+    },
+    async loadMySenderKey(chatId: string) {
+      return mySenderKeys.get(`${ownerPrefix}:${chatId}`)
+    },
+    async deleteMySenderKey(chatId: string) {
+      mySenderKeys.delete(`${ownerPrefix}:${chatId}`)
+    },
+    async savePeerSenderKey(chatId: string, senderId: string, serialized: string) {
+      peerSenderKeys.set(`${ownerPrefix}:${chatId}:${senderId}`, serialized)
+    },
+    async loadPeerSenderKey(chatId: string, senderId: string) {
+      return peerSenderKeys.get(`${ownerPrefix}:${chatId}:${senderId}`)
+    },
+  }
+}
+
 describe('shared session-web', () => {
   it('выполняет individual round-trip без client/src/crypto/session.ts', async () => {
     const ids = uniqueIds()
+    const aliceRuntime = createSessionWebRuntime({
+      api: {
+        async getKeyBundle() {
+          return { devices: [makeBobBundle(ids.deviceId)] }
+        },
+      },
+      store: createRuntimeStore(aliceIdentity, bobSpk, aliceSessions, 'alice'),
+    })
+    const bobRuntime = createSessionWebRuntime({
+      api: {
+        async getKeyBundle() {
+          return { devices: [makeBobBundle(ids.deviceId)] }
+        },
+      },
+      store: createRuntimeStore(bobIdentity, bobSpk, bobSessions, 'bob'),
+    })
 
-    vi.mocked(loadIdentityKey).mockResolvedValue(aliceIdentity)
-    activeSessions = aliceSessions
-
-    const [{ ciphertext }] = await encryptForAllDevices(
+    const [{ ciphertext }] = await aliceRuntime.encryptForAllDevices(
       ids.bobId,
       [makeBobBundle(ids.deviceId)],
       'shared-session-secret',
     )
 
-    vi.mocked(loadIdentityKey).mockResolvedValue(bobIdentity)
-    vi.mocked(loadSignedPreKey).mockResolvedValue(bobSpk)
-    activeSessions = bobSessions
-
-    const plaintext = await decryptMessage(ids.aliceId, `${ids.aliceId}-device`, ciphertext)
+    const plaintext = await bobRuntime.decryptMessage(ids.aliceId, `${ids.aliceId}-device`, ciphertext)
     expect(plaintext).toBe('shared-session-secret')
   })
 
   it('выполняет Sender Keys distribution и group decrypt без client/src/crypto/session.ts', async () => {
     const ids = uniqueIds()
-
-    vi.mocked(loadIdentityKey).mockResolvedValue(aliceIdentity)
-    activeSessions = aliceSessions
-    vi.mocked(api.getKeyBundle).mockResolvedValue({
-      devices: [makeBobBundle(ids.deviceId)],
+    const aliceRuntime = createSessionWebRuntime({
+      api: {
+        async getKeyBundle() {
+          return { devices: [makeBobBundle(ids.deviceId)] }
+        },
+      },
+      store: createRuntimeStore(aliceIdentity, bobSpk, aliceSessions, 'alice'),
+    })
+    const bobRuntime = createSessionWebRuntime({
+      api: {
+        async getKeyBundle() {
+          return { devices: [makeBobBundle(ids.deviceId)] }
+        },
+      },
+      store: createRuntimeStore(bobIdentity, bobSpk, bobSessions, 'bob'),
     })
 
-    const groupEncrypted = await encryptGroupMessage(
+    const groupEncrypted = await aliceRuntime.encryptGroupMessage(
       ids.chatId,
       ids.aliceId,
       [ids.aliceId, ids.bobId],
@@ -144,18 +160,14 @@ describe('shared session-web', () => {
 
     expect(groupEncrypted.skdmRecipients).toHaveLength(1)
 
-    vi.mocked(loadIdentityKey).mockResolvedValue(bobIdentity)
-    vi.mocked(loadSignedPreKey).mockResolvedValue(bobSpk)
-    activeSessions = bobSessions
-
-    await handleIncomingSKDM(
+    await bobRuntime.handleIncomingSKDM(
       ids.chatId,
       ids.aliceId,
       `${ids.aliceId}-device`,
       groupEncrypted.skdmRecipients[0].encodedSkdm,
     )
 
-    const plaintext = await decryptGroupMessage(
+    const plaintext = await bobRuntime.decryptGroupMessage(
       ids.chatId,
       ids.aliceId,
       groupEncrypted.encodedPayload,

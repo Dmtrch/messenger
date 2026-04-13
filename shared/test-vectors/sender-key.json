@@ -1,6 +1,6 @@
 {
-  "senderKey": "Xad2IesVkLep20bcDpvrPmn+MEI12Jo0Vi/6W+FOsGE=",
-  "nonce": "bGWWl3YNVP2G7BJeRCvBkjYaaH37yG7V",
+  "senderKey": "AledVfdNSsw9Kina4Dpw+Df5yHbFCGltA/iEsGQE3ng=",
+  "nonce": "dYJS95cDVn8D7a5dr6BfJXQH4L2bu9/W",
   "plaintext": "hello group",
-  "expectedCiphertext": "mRB3wtKVzNSRRvHX7u6TOncZHAKIuD5fEAeS"
+  "expectedCiphertext": "OUCOq8MUyLoxQtlS5T71BBl0wvpIcvX5Np/h"
 }

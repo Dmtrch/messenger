@@ -1,113 +1,95 @@
 import { create } from 'zustand'
-import type { WSFrame } from '@/types'
+import type { CallSessionState } from '../../../shared/native-core/calls/call-session'
+import { createInitialCallSession } from '../../../shared/native-core/calls/call-session'
 
-export type CallStatus = 'idle' | 'ringing' | 'calling' | 'active'
+export type CallStatus = CallSessionState['status']
+export type IncomingOffer = NonNullable<CallSessionState['incomingOffer']>
 
-type CallWSFrame = Extract<WSFrame, {
-  type: 'call_offer' | 'call_answer' | 'call_end' | 'call_reject' | 'call_busy' | 'ice_candidate'
-}>
-
-interface IncomingOffer {
-  callId: string
-  chatId: string
-  callerId: string
-  sdp: string
-  isVideo: boolean
+interface CallControlActions {
+  toggleMute(): void
+  toggleCamera(): void
 }
 
 interface CallState {
+  session: CallSessionState
   status: CallStatus
   callId: string | null
   chatId: string | null
   peerId: string | null
   isVideo: boolean
-  localStream: MediaStream | null
-  remoteStream: MediaStream | null
   isMuted: boolean
   isCameraOff: boolean
-  /** Pending offer от входящего звонка — используется при accept */
   incomingOffer: IncomingOffer | null
-  /** Уведомление для UI (busy / rejected) */
   notification: string | null
+  localStream: MediaStream | null
+  remoteStream: MediaStream | null
 
-  // Actions
-  startOutgoing: (callId: string, chatId: string, peerId: string, isVideo: boolean) => void
-  setIncoming: (offer: IncomingOffer) => void
-  setActive: () => void
-  setLocalStream: (stream: MediaStream) => void
-  setRemoteStream: (stream: MediaStream) => void
+  applySession: (session: CallSessionState) => void
+  setLocalStream: (stream: MediaStream | null) => void
+  setRemoteStream: (stream: MediaStream | null) => void
+  clearMedia: () => void
   toggleMute: () => void
   toggleCamera: () => void
-  setNotification: (msg: string | null) => void
-  reset: () => void
 
-  /**
-   * Устанавливается useCallHandler при монтировании.
-   * useMessengerWS вызывает этот обработчик для routing call-фреймов.
-   */
-  _callFrameHandler: ((frame: CallWSFrame) => void) | null
-  setCallFrameHandler: (fn: ((frame: CallWSFrame) => void) | null) => void
-
-  /**
-   * Устанавливается useCallHandler при монтировании.
-   * ChatWindowPage вызывает эту функцию для инициирования звонка.
-   */
-  _initiateCall: ((chatId: string, targetId: string, isVideo: boolean) => void) | null
-  setInitiateCall: (fn: ((chatId: string, targetId: string, isVideo: boolean) => void) | null) => void
+  _callControls: CallControlActions | null
+  setCallControls: (controls: CallControlActions | null) => void
 }
 
-const emptyState = {
-  status: 'idle' as CallStatus,
-  callId: null,
-  chatId: null,
-  peerId: null,
-  isVideo: false,
+function syncSessionFields(session: CallSessionState) {
+  return {
+    session,
+    status: session.status,
+    callId: session.callId,
+    chatId: session.chatId,
+    peerId: session.peerId,
+    isVideo: session.isVideo,
+    isMuted: session.isMuted,
+    isCameraOff: session.isCameraOff,
+    incomingOffer: session.incomingOffer,
+    notification: session.notification,
+  }
+}
+
+function stopStream(stream: MediaStream | null): void {
+  stream?.getTracks().forEach((track) => track.stop())
+}
+
+export const useCallStore = create<CallState>((set, get) => ({
+  ...syncSessionFields(createInitialCallSession()),
   localStream: null,
   remoteStream: null,
-  isMuted: false,
-  isCameraOff: false,
-  incomingOffer: null,
-  notification: null,
-}
 
-export const useCallStore = create<CallState>((set) => ({
-  ...emptyState,
-  _callFrameHandler: null,
-
-  startOutgoing: (callId, chatId, peerId, isVideo) =>
-    set({ status: 'calling', callId, chatId, peerId, isVideo }),
-
-  setIncoming: (offer) =>
-    set({ status: 'ringing', callId: offer.callId, chatId: offer.chatId, peerId: offer.callerId, isVideo: offer.isVideo, incomingOffer: offer }),
-
-  setActive: () => set({ status: 'active', incomingOffer: null }),
+  applySession: (session) => set(syncSessionFields(session)),
 
   setLocalStream: (stream) => set({ localStream: stream }),
 
   setRemoteStream: (stream) => set({ remoteStream: stream }),
 
-  toggleMute: () => set((s) => {
-    // isMuted=false → хотим замьютить → track.enabled=false (= s.isMuted)
-    s.localStream?.getAudioTracks().forEach((t) => { t.enabled = s.isMuted })
-    return { isMuted: !s.isMuted }
+  clearMedia: () => set((state) => {
+    stopStream(state.localStream)
+    stopStream(state.remoteStream)
+    return {
+      localStream: null,
+      remoteStream: null,
+    }
   }),
 
-  toggleCamera: () => set((s) => {
-    // isCameraOff=false → хотим выключить → track.enabled=false (= s.isCameraOff)
-    s.localStream?.getVideoTracks().forEach((t) => { t.enabled = s.isCameraOff })
-    return { isCameraOff: !s.isCameraOff }
-  }),
+  toggleMute: () => {
+    get()._callControls?.toggleMute()
+    const isMuted = get().isMuted
+    get().localStream?.getAudioTracks().forEach((track) => {
+      track.enabled = !isMuted
+    })
+  },
 
-  setNotification: (msg) => set({ notification: msg }),
+  toggleCamera: () => {
+    get()._callControls?.toggleCamera()
+    const isCameraOff = get().isCameraOff
+    get().localStream?.getVideoTracks().forEach((track) => {
+      track.enabled = !isCameraOff
+    })
+  },
 
-  reset: () => set((s) => {
-    s.localStream?.getTracks().forEach((t) => t.stop())
-    s.remoteStream?.getTracks().forEach((t) => t.stop())
-    return { ...emptyState }
-  }),
-
-  setCallFrameHandler: (fn) => set({ _callFrameHandler: fn }),
-
-  _initiateCall: null,
-  setInitiateCall: (fn) => set({ _initiateCall: fn }),
+  _callControls: null,
+  setCallControls: (controls) => set({ _callControls: controls }),
 }))

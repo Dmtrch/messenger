@@ -1,210 +1,249 @@
 # Messenger
 
-Self-hosted E2E encrypted messenger. PWA installs on iOS and Android.
-Server runs on your machine — all data stays local.
+Self-hosted messenger with E2E encryption, installable PWA client, Go backend, and a shared foundation for future native apps.
 
-## Requirements
+The repository currently contains:
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| Go | 1.22+ | build server |
-| Node.js | 20+ | build client |
-| Docker + Docker Compose | any | containerized run (optional) |
+- `server/` — Go API + WebSocket server with SQLite, media storage, push notifications, admin flows, and ICE configuration for calls
+- `client/` — React/Vite PWA with Signal-style crypto, offline queues, push notifications, server setup flow, admin UI, and browser WebRTC call handling
+- `shared/` — protocol contracts, domain docs, test vectors, and `shared/native-core` for future desktop/mobile clients
+- `apps/` — native app foundation directories for desktop and mobile tracks
 
----
+## Tech Stack
 
-## Quick start via Docker
+| Layer | Stack |
+|------|-------|
+| Backend | Go 1.22, Chi, Gorilla WebSocket, SQLite (`modernc.org/sqlite`), JWT |
+| Web client | React 18, Vite 5, TypeScript, Zustand, libsodium, Vite PWA |
+| Push | Web Push VAPID |
+| Calls | Browser WebRTC + server ICE config endpoint |
+| Shared contracts | TypeScript package + JSON schemas + test vectors |
 
-```bash
-cd /path/to/messenger
+## Repository Layout
 
-# Copy and configure environment
-cp .env.example .env
-# Edit .env: set JWT_SECRET (required)
-# Optionally set VAPID_PRIVATE_KEY / VAPID_PUBLIC_KEY to persist push subscriptions
-
-docker compose build && docker compose up -d
+```text
+messenger/
+├── client/                 # PWA клиент
+├── server/                 # Go сервер
+├── shared/                 # общие контракты, схемы и test vectors
+├── apps/                   # foundation для desktop/mobile native клиентов
+├── docs/                   # архитектура, спецификации, планы
+├── docker-compose.yml      # контейнерный запуск сервера
+└── .env.example            # пример переменных окружения
 ```
 
-After startup:
-- **App (PWA + API):** http://localhost:8080
+More specifically:
 
----
+- `server/cmd/server/` — entrypoint, config loading, route registration, call ICE helpers
+- `server/internal/auth` — login, refresh, logout, password change, registration request flow
+- `server/internal/admin` — approval of registration requests, invite codes, user management, password reset requests
+- `server/internal/chat` — chats, messages, read markers, edit/delete
+- `server/internal/keys` — device key registration and prekey bundle delivery
+- `server/internal/push` — VAPID public key and push subscription handling
+- `server/internal/ws` — realtime transport and call signaling
+- `client/src/pages` — auth, server setup, chats, profile, admin pages
+- `client/src/crypto` — X3DH, ratchet, sender key, keystore
+- `client/src/store` — auth/chat/call/ws/offline persistence
+- `shared/native-core` — shared runtime API boundary for future native clients
 
-## Run without Docker
+## Current Product Scope
 
-### 1. Build and run the server
+What is already reflected in code:
+
+- self-hosted Go server serving API, WebSocket, and embedded static client assets
+- PWA client with installable shell and server selection screen
+- JWT auth with refresh flow and `httpOnly` cookie refresh endpoint
+- registration modes from server config: `open`, `invite`, `request`
+- admin panel for approving registrations, creating invite codes, resetting passwords, and resolving password reset requests
+- direct and group chats, message history, edit/delete, read markers
+- device key registration and prekey upload for E2E bootstrap
+- browser push notifications using VAPID
+- browser call flow using WebRTC helpers and `/api/calls/ice-servers`
+- shared protocol/contracts and test vectors prepared for native tracks
+
+Important limitation: media files are uploaded and served by the backend, but the current README should not imply that media binaries are already end-to-end encrypted at rest unless you verify and implement that behavior explicitly.
+
+## Configuration
+
+Server config is loaded in this priority order:
+
+`environment variables` > `server/cmd/server/config.yaml` (if present as `config.yaml` near the binary working dir) > built-in defaults
+
+### Main environment variables
+
+| Variable | Purpose | Default |
+|---------|---------|---------|
+| `JWT_SECRET` | JWT signing secret, required | none |
+| `PORT` | HTTP/TLS listen port | `8080` |
+| `DB_PATH` | SQLite database path | `./messenger.db` |
+| `MEDIA_DIR` | uploaded media directory | `./media` |
+| `ALLOWED_ORIGIN` | CORS and WebSocket origin check | empty |
+| `TLS_CERT` / `TLS_KEY` | direct TLS certificate paths | empty |
+| `BEHIND_PROXY` | trust reverse proxy deployment mode | `false` |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | push keys | auto-generated if empty |
+| `STUN_URL` | default STUN server | `stun:stun.l.google.com:19302` |
+| `TURN_URL` | optional TURN server URL | empty |
+| `TURN_SECRET` | shared secret for TURN credentials | empty |
+| `TURN_CREDENTIAL_TTL` | TTL for TURN credentials | `86400` |
+| `SERVER_NAME` | public server name for setup screen | `Messenger` |
+| `SERVER_DESCRIPTION` | public server description | empty |
+| `REGISTRATION_MODE` | `open`, `invite`, or `request` | `open` |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | bootstrap admin on first run | empty |
+
+For Docker-based setup, start from the root `.env.example`.
+
+## Quick Start
+
+### Option 1: Local development
+
+1. Start the backend:
 
 ```bash
 cd server
-go mod tidy
-go build -o ./bin/messenger ./cmd/server
-JWT_SECRET=your-secret ./bin/messenger
+go run ./cmd/server
 ```
 
-Server starts on `http://localhost:8080`. SQLite database is created automatically.
-
-#### Environment variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `JWT_SECRET` | JWT signing secret (required) | — |
-| `DB_PATH` | SQLite file path | `./messenger.db` |
-| `MEDIA_DIR` | Directory for uploaded files | `./media` |
-| `PORT` | Server port | `8080` |
-| `VAPID_PRIVATE_KEY` | Web Push VAPID private key | auto-generated |
-| `VAPID_PUBLIC_KEY` | Web Push VAPID public key | auto-generated |
-| `TLS_CERT` / `TLS_KEY` | TLS certificate paths | empty (HTTP) |
-
-> **Note:** VAPID keys are auto-generated on each start if not set. Set them in `.env` to persist push subscriptions across restarts.
-
-### 2. Dev client (hot reload)
+2. In a second terminal start the PWA:
 
 ```bash
 cd client
 npm install
-npm run dev   # → http://localhost:5173 (proxies API to :8080)
+npm run dev
 ```
 
-### 3. Build embedded PWA (single binary)
+3. Open `http://localhost:5173`.
+   The client will use `window.location.origin` by default, but it also has a dedicated `/setup` flow where you can point it to another Messenger server via `/api/server/info`.
+
+### Option 2: Docker
 
 ```bash
-cd client && npm run build
-cp -r dist ../server/cmd/server/static/
-cd ../server && go build -o ./bin/messenger ./cmd/server
-JWT_SECRET=your-secret ./bin/messenger   # serves PWA + API on :8080
+cp .env.example .env
+# заполните JWT_SECRET и при необходимости остальные параметры
+
+docker compose up --build
 ```
 
----
+Default exposed address:
 
-## Features
+- `http://localhost:8080`
 
-- **E2E encryption** — Signal Protocol (X3DH + Double Ratchet, XSalsa20-Poly1305)
-- **Direct and group chats** — multi-select participants when creating
-- **File attachments** — photos and files up to 10 MB per message
-- **Message actions** — copy, edit, delete via long-press (mobile) or right-click (desktop)
-- **Push notifications** — Web Push VAPID for offline recipients
-- **PWA** — installable on iOS 16.4+ and Android, works offline for history
-- **Self-hosted** — your server, your data, no third parties
-
----
-
-## PWA Installation
-
-### iOS (Safari)
-1. Open the app address in Safari
-2. Tap the Share button (square with arrow)
-3. Select "Add to Home Screen"
-4. Tap "Add"
-
-> Push notifications require iOS 16.4+.
-
-### Android (Chrome)
-1. Open the app address in Chrome
-2. Tap menu (three dots) → "Add to Home screen"
-3. Confirm installation
-
----
-
-## Encryption architecture
-
-- **X3DH** — session establishment (Identity Keys, Signed PreKeys, One-Time PreKeys)
-- **Double Ratchet** — per-message encryption (XSalsa20-Poly1305 via libsodium)
-- Private keys live only in **IndexedDB** on the user's device
-- Server stores only ciphertext — it cannot decrypt messages
-- Media metadata (file ID, name, type) is encrypted inside message ciphertext; file content is stored unencrypted (MVP)
-
----
-
-## API overview
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| POST | `/api/auth/register` | — | Register + upload X3DH keys |
-| POST | `/api/auth/login` | — | Login, get JWT + refresh cookie |
-| POST | `/api/auth/refresh` | cookie | Silent token refresh |
-| GET | `/api/chats` | JWT | List user's chats |
-| POST | `/api/chats` | JWT | Create direct or group chat |
-| GET | `/api/chats/:id/messages` | JWT | Message history (recipient-filtered) |
-| DELETE | `/api/messages/:clientMsgId` | JWT | Soft-delete all copies (sender only) |
-| PATCH | `/api/messages/:clientMsgId` | JWT | Edit message (sender only, re-encrypted) |
-| GET | `/api/keys/:userId` | JWT | Get X3DH PreKey Bundle |
-| POST | `/api/keys/prekeys` | JWT | Upload one-time prekeys |
-| POST | `/api/media/upload` | JWT | Upload file (max 10 MB) |
-| GET | `/api/media/:filename` | — | Serve uploaded file |
-| GET | `/api/push/vapid-public-key` | — | VAPID public key |
-| POST | `/api/push/subscribe` | JWT | Register push subscription |
-| GET | `/ws` | JWT (query) | WebSocket connection |
-
----
-
-## Project structure
-
-```
-messenger/
-├── server/
-│   ├── cmd/server/main.go       # entry point, routes, env
-│   ├── internal/
-│   │   ├── auth/                # JWT auth middleware + handlers
-│   │   ├── chat/                # chat CRUD, delete/edit handlers
-│   │   ├── keys/                # X3DH key bundle handlers
-│   │   ├── media/               # file upload + serve
-│   │   ├── push/                # VAPID Web Push
-│   │   └── ws/                  # WebSocket Hub
-│   └── db/
-│       ├── schema.go            # SQLite schema + auto-migration
-│       └── queries.go           # typed SQL queries
-└── client/
-    └── src/
-        ├── api/                 # REST + WebSocket clients
-        ├── crypto/              # X3DH, Double Ratchet, keystore
-        ├── components/
-        │   └── ChatWindow/      # main chat UI, context menu, attachments
-        ├── hooks/               # useMessengerWS, usePushNotifications
-        ├── store/               # Zustand stores
-        └── types/               # shared TypeScript types
-```
-
----
-
-## Development
+Optional Cloudflare Tunnel profile:
 
 ```bash
-# Backend hot-reload (requires air)
-go install github.com/air-verse/air@latest
-cd server && air
-
-# Frontend hot-reload
-cd client && npm run dev
-
-# Type check + lint
-cd client && npm run type-check && npm run lint
-
-# Go build check
-cd server && go build ./...
+docker compose --profile cloudflare up -d
 ```
 
----
+## Build and Validation
 
-## Internet access (optional)
-
-Use Cloudflare Tunnel for public HTTPS without a static IP or port forwarding:
+### Client
 
 ```bash
-brew install cloudflare/cloudflare/cloudflared  # macOS
-cloudflared tunnel login
-cloudflared tunnel create messenger
-cloudflared tunnel run --url http://localhost:8080 <TUNNEL_ID>
+cd client
+npm install
+npm run dev
+npm run build
+npm run lint
+npm run type-check
+npm run test
 ```
 
----
-
-## Local HTTPS (TLS)
-
-Required for push notifications on some platforms. Use [mkcert](https://github.com/FiloSottile/mkcert) for a local certificate:
+### Server
 
 ```bash
-brew install mkcert && mkcert -install
-mkcert localhost 127.0.0.1
-TLS_CERT=localhost+1.pem TLS_KEY=localhost+1-key.pem JWT_SECRET=secret ./bin/messenger
+cd server
+go test ./...
+go build ./...
 ```
+
+### Embedded static build
+
+If you want the Go server to serve the built PWA from `server/cmd/server/static`:
+
+```bash
+cd client
+npm run build
+rm -rf ../server/cmd/server/static/*
+cp -R dist/. ../server/cmd/server/static/
+
+cd ../server
+go build -o ./bin/messenger ./cmd/server
+JWT_SECRET=change-me ./bin/messenger
+```
+
+## API Surface
+
+The main routes currently registered in `server/cmd/server/main.go` include:
+
+### Public
+
+- `GET /api/server/info`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/refresh`
+- `POST /api/auth/logout`
+- `POST /api/auth/request-register`
+- `POST /api/auth/password-reset-request`
+- `GET /api/push/vapid-public-key`
+- `GET /ws`
+
+### Authenticated
+
+- `POST /api/auth/change-password`
+- `GET /api/users/search`
+- `GET /api/chats`
+- `POST /api/chats`
+- `GET /api/chats/{chatId}/messages`
+- `POST /api/chats/{chatId}/read`
+- `DELETE /api/messages/{clientMsgId}`
+- `PATCH /api/messages/{clientMsgId}`
+- `GET /api/keys/{userId}`
+- `POST /api/keys/prekeys`
+- `POST /api/keys/register`
+- `POST /api/push/subscribe`
+- `POST /api/media/upload`
+- `GET /api/media/{id}`
+- `GET /api/calls/ice-servers`
+
+### Admin-only
+
+- `GET /api/admin/registration-requests`
+- `POST /api/admin/registration-requests/{id}/approve`
+- `POST /api/admin/registration-requests/{id}/reject`
+- `POST /api/admin/invite-codes`
+- `GET /api/admin/invite-codes`
+- `GET /api/admin/users`
+- `POST /api/admin/users/{id}/reset-password`
+- `GET /api/admin/password-reset-requests`
+- `POST /api/admin/password-reset-requests/{id}/resolve`
+
+## Frontend Routes
+
+The current React app exposes these main screens:
+
+- `/setup` — server connection and server info discovery
+- `/auth` — login/register flow
+- `/` — chat list
+- `/chat/:chatId` — chat window
+- `/profile` — profile/settings
+- `/admin` — admin panel, only for users with `role === 'admin'`
+
+## Native App Foundation
+
+`apps/` is not a full product yet. It defines the direction for future native clients:
+
+- `apps/desktop` — Kotlin Multiplatform + Compose Multiplatform Desktop
+- `apps/mobile` — Android on Kotlin + Compose, iOS on SwiftUI
+- `shared/native-core` — platform-neutral runtime boundary that both native tracks can reuse
+
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md) — architecture overview and system decisions
+- `docs/superpowers/specs/` — feature/spec documents
+- `shared/protocol/` — REST/WS contracts and schemas
+- `shared/test-vectors/` — crypto and protocol vectors
+
+## Notes
+
+- Push subscriptions will break after restart if you rely on auto-generated VAPID keys and do not persist them.
+- If you deploy behind a reverse proxy or Cloudflare Tunnel, set `BEHIND_PROXY=true`.
+- The semantic repository shape already assumes the web client is the current production UI and native apps are an in-progress foundation, not a finished deliverable.

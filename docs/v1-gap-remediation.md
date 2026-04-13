@@ -249,7 +249,7 @@
 - `Must`-пункт чеклиста закрыт; ✅
 - фронтенд-тесты: 33 теста (ratchet x11, x3dh x6, client x9, session x7). ✅
 
-## Этап 11. Нативные приложения для разных ОС 🟡 Foundation и Shared Core contract layer зафиксированы
+## Этап 11. Нативные приложения для разных ОС 🟡 Foundation завершён, Shared Core runtime в активной реализации
 
 ### Цель этапа
 
@@ -286,9 +286,9 @@
 2. Описать platform-neutral интерфейсы `AuthEngine`, `WSClient`, `CryptoEngine`, `MessageRepository`.
 3. Подготовить `shared/test-vectors/` как канонический источник cross-platform crypto compatibility.
 
-### Этап B — Shared Core ✅ Контрактный слой зафиксирован
+### Этап B — Shared Core 🟡 Контрактный слой завершён, runtime-слой частично реализован
 
-**Цель:** реализовать платформенно-независимый core.
+**Цель:** реализовать платформенно-независимый core и перевести на него web-клиент как первый runtime consumer.
 
 **Выполнено:**
 
@@ -310,11 +310,32 @@
    - `shared/protocol/rest-schema.json`
    - `shared/protocol/ws-schema.json`
    - `shared/protocol/message-envelope.schema.json`
+6. Создан `shared/native-core` как отдельный reusable пакет с публичным entrypoint.
+7. Реализованы runtime-модули:
+   - `auth`
+   - `websocket`
+   - `messages`
+   - `sync`
+   - `storage`
+   - `crypto`
+8. Реализованы browser/web adapters и orchestrators:
+   - `browser-api-client`
+   - `browser-websocket-client`
+   - `messenger-ws-orchestrator`
+   - `browser-keystore`
+   - `web-crypto-adapter`
+   - `session-web`
+   - `browser-webrtc-runtime`
+   - `call-handler-orchestrator`
+9. Web-клиент уже использует shared source-of-truth для `api`, `websocket`, `crypto`, `keystore`, `useMessengerWS`, `useCallHandler`, `useWebRTC`.
+10. Shared runtime покрыт unit-тестами, package-entry тестом и seed-векторами из `shared/test-vectors`.
 
 **Следующий подэтап:**
 
-1. Ужесточить formal schemas до полноценного JSON Schema-слоя.
-2. Начать первый runtime-модуль `shared/native-core` или platform adapters на основе уже зафиксированных контрактов.
+1. Реализовать `shared/native-core/calls/call-session.ts` как чистую call state machine.
+2. Реализовать `shared/native-core/calls/call-controller.ts`.
+3. Переделать `client/src/store/callStore.ts` в adapter-store над shared call session snapshot.
+4. После стабилизации call runtime продолжить подготовку native-friendly adapters для desktop/android/ios клиентов.
 
 ### Этапы C / D / E — Desktop → Android → iOS
 

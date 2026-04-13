@@ -1,9 +1,9 @@
 {
-  "rootKey": "Qx8U5uq/mvpH7EKwzxusPoN2VssG9SQGgbvfpIXlmHo=",
-  "chainKey": "/K7J61K6/rnUi+TMkaiJ4CsviTDOo7Qe4oVZYFu+xA0=",
+  "rootKey": "0aL0t16BQoY+Lq3X2PcIPCiRmqzoOalDCQEJReSaC54=",
+  "chainKey": "8H0AP3jdCPCxr7QfkXGA2V5kcAyFNzicg003l1Yg5RM=",
   "messageIndex": 1,
-  "nonce": "IQIWIec/X1+3S+CjvqcnyN5Wy1i2bmCd",
+  "nonce": "PUsQ/5hNlKUuMhE9l7nb833l5pUDzVC7",
   "plaintext": "hello ratchet",
-  "expectedCiphertext": "2g6GKPzspWjqsuyc0saTJcj1L/toS77Opv7SxDE=",
-  "expectedMsgKey": "I+PG9QJ21mmzeyu4tlDKKjUhjz6N2PX5rM/nb1GjagM="
+  "expectedCiphertext": "B5CGzhUhSTp0FuPbOuHxnSEaFJ91zpqzJKHz1QU=",
+  "expectedMsgKey": "w0vWVni7INzvdj9Y8e1KjWukjz484jfQESBsrHblBac="
 }
