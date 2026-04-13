@@ -1,11 +1,14 @@
 package crypto
 
 import com.goterl.lazysodium.LazySodiumJava
+import com.goterl.lazysodium.interfaces.SecretBox
 
 class Ratchet(private val sodium: LazySodiumJava) {
 
-    private val NONCEBYTES = 24
-    private val MACBYTES = 16
+    companion object {
+        private val NONCEBYTES = SecretBox.NONCEBYTES
+        private val MACBYTES = SecretBox.MACBYTES
+    }
 
     /**
      * Деривирует message key из chain key и индекса.
@@ -37,7 +40,7 @@ class Ratchet(private val sodium: LazySodiumJava) {
         check(sodium.cryptoSecretBoxEasy(ciphertext, plaintext, plaintext.size.toLong(), nonce, msgKey)) {
             "cryptoSecretBoxEasy failed"
         }
-        return Pair(ciphertext, nonce)
+        return ciphertext to nonce
     }
 
     /**

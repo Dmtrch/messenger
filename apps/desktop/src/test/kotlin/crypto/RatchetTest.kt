@@ -39,6 +39,7 @@ class RatchetTest {
         val plaintext = "hello ratchet"
 
         val (ciphertext, nonce) = ratchet.encrypt(plaintext.toByteArray(), msgKey)
+        assertEquals(plaintext.toByteArray().size + 16, ciphertext.size)
         val decrypted = ratchet.decrypt(ciphertext, nonce, msgKey)
 
         assertEquals(plaintext, String(decrypted))
