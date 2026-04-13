@@ -8,11 +8,15 @@ import javax.crypto.spec.SecretKeySpec
 /**
  * Хранит крипто-ключи в PKCS12 keystore (~/.messenger/keystore.p12).
  * Аналог IndexedDB keystore в web-клиенте.
+ *
+ * MVP: пароль keystore захардкожен — защищает от случайного доступа,
+ * но не от целенаправленной атаки с доступом к исходникам/бинарнику.
+ * В продакшн-версии должен заменяться на пароль из OS keychain.
  */
 class KeyStorage(
     private val keystorePath: String = "${System.getProperty("user.home")}/.messenger/keystore.p12",
     private val password: CharArray = "messenger-desktop".toCharArray(),
-) {
+) : AutoCloseable {
     private val keystore: KeyStore = KeyStore.getInstance("PKCS12")
 
     init {
@@ -43,6 +47,10 @@ class KeyStorage(
             keystore.deleteEntry(alias)
             persist()
         }
+    }
+
+    override fun close() {
+        password.fill(0.toChar())
     }
 
     private fun persist() {

@@ -6,8 +6,8 @@ import com.goterl.lazysodium.interfaces.SecretBox
 class SenderKey(private val sodium: LazySodiumJava) {
 
     companion object {
-        private val NONCEBYTES = SecretBox.NONCEBYTES
-        private val MACBYTES   = SecretBox.MACBYTES
+        private const val NONCEBYTES = SecretBox.NONCEBYTES
+        private const val MACBYTES   = SecretBox.MACBYTES
     }
 
     fun encrypt(plaintext: ByteArray, senderKey: ByteArray): Pair<ByteArray, ByteArray> {
