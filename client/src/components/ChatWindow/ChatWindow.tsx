@@ -143,6 +143,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
     } finally {
       setLoadingHistory(false)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prependMessages])
 
   // ── Вспомогательная функция расшифровки списка сообщений ─────────────────
@@ -315,7 +316,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
     } finally {
       setUploading(false)
     }
-  }, [])
+  }, [chatId])
 
   const removePendingMedia = useCallback(() => {
     if (pendingMedia?.previewUrl) URL.revokeObjectURL(pendingMedia.previewUrl)
