@@ -1,0 +1,23 @@
+{
+  "aliceIdentityKeyPair": {
+    "publicKey": "aXw1R6MJ3hPTwQYfXGbMIvZKIXESJwzVa+cYB+D0hHQ=",
+    "privateKey": "o0ZBSjNO55stEES2XPU9iKBmF7yM7E77fWiqSFZuU3FpfDVHowneE9PBBh9cZswi9kohcRInDNVr5xgH4PSEdA=="
+  },
+  "aliceSignedPreKey": {
+    "publicKey": "jnvKSpbT/s6EN+FiLfH57ShM9aU0sBmXCrcQwZTQOws=",
+    "privateKey": "Cl7Q/OKPYRGOqL/mWPXithfzjYPgRy34wrjhmwOyuH8="
+  },
+  "aliceOneTimePreKey": {
+    "publicKey": "NIV2vM828iZr50NVV7AwHIwcJGT5H8H1BK06zRQ6iWQ=",
+    "privateKey": "PqgZ3QF82pRWkbRcT+dCntCXsrlXRkkGuhtC8wtjCNE="
+  },
+  "bobIdentityKeyPair": {
+    "publicKey": "4hew12Q1Wfpu0xSkutX/7hqKzT+RBDj9NmGHeBCD5qs=",
+    "privateKey": "pvK2O/lO/tpVMsRixa+5EQK74UAioWlq2mTKZNmJIlHiF7DXZDVZ+m7TFKS61f/uGorNP5EEOP02YYd4EIPmqw=="
+  },
+  "bobSignedPreKey": {
+    "publicKey": "/ybpKQ5VI3nU1XTPmkjs7ZZzAlllR5eNMecrVVUlVlI=",
+    "privateKey": "EdPmsZKV2bsKtoXaVo1yEgWQJyPPa014oYgHPhIoPDE="
+  },
+  "expectedSharedSecret": "eDKkkOymdLqPRJR3vrXR1AEymEmedpew5DPO5rtIx/w="
+}

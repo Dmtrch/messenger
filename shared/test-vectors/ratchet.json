@@ -1,0 +1,9 @@
+{
+  "rootKey": "Qx8U5uq/mvpH7EKwzxusPoN2VssG9SQGgbvfpIXlmHo=",
+  "chainKey": "/K7J61K6/rnUi+TMkaiJ4CsviTDOo7Qe4oVZYFu+xA0=",
+  "messageIndex": 1,
+  "nonce": "IQIWIec/X1+3S+CjvqcnyN5Wy1i2bmCd",
+  "plaintext": "hello ratchet",
+  "expectedCiphertext": "2g6GKPzspWjqsuyc0saTJcj1L/toS77Opv7SxDE=",
+  "expectedMsgKey": "I+PG9QJ21mmzeyu4tlDKKjUhjz6N2PX5rM/nb1GjagM="
+}
