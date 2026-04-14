@@ -77,4 +77,10 @@ class ChatStore {
         current[chatId] = msgs
         _messages.value = current
     }
+
+    fun addMessage(chatId: String, item: MessageItem) {
+        val current = _messages.value.toMutableMap()
+        current[chatId] = ((current[chatId] ?: emptyList()) + item).sortedBy { it.timestamp }
+        _messages.value = current
+    }
 }

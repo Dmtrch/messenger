@@ -41,7 +41,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setServerUrl(url: String) {
         ServerConfig.serverUrl = url
-        apiClient = ApiClient(baseUrl = url, tokenStore = tokenStore)
+        apiClient = ApiClient(baseUrl = url, tokenStore = tokenStore, sodium = sodium)
     }
 
     suspend fun login(username: String, password: String): Result<Unit> {
@@ -102,6 +102,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             id = clientMsgId, client_msg_id = clientMsgId, chat_id = chatId,
             sender_id = userId, plaintext = plaintext, timestamp = timestamp,
             status = "sending", is_deleted = 0L,
+            media_id = null, media_key = null, original_name = null, content_type = null,
         )
         chatStore.onMessageReceived(chatId, clientMsgId, plaintext, userId, timestamp)
 

@@ -50,6 +50,8 @@ dependencies {
     implementation(libs.lazysodium.android)
     implementation(libs.sqldelight.android.driver)
     implementation(libs.coroutines.android)
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("io.coil-kt:coil-compose:2.6.0")
     // TODO: re-enable when Google Maven is accessible (googleapis CDN 404 in this dev environment)
     // implementation(libs.security.crypto)
     implementation(libs.lifecycle.viewmodel)

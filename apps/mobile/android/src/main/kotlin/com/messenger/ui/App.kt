@@ -62,6 +62,14 @@ fun App(application: Application) {
             is Screen.ChatWindow -> {
                 val chatId = s.chatId
                 val chatName = chats.find { it.id == chatId }?.name ?: chatId
+                val client = vm.apiClient!!
+                val imageLoader = remember(client) {
+                    coil.ImageLoader.Builder(application)
+                        .components {
+                            add(com.messenger.ui.coil.EncryptedMediaFetcher.Factory(client))
+                        }
+                        .build()
+                }
                 val cwVm = remember(chatId) {
                     ChatWindowViewModel(
                         application = application,
@@ -69,17 +77,26 @@ fun App(application: Application) {
                         chatStore = vm.chatStore,
                         db = vm.dbProvider.database,
                         currentUserId = authState.userId,
+                        apiClient = client,
                     )
                 }
                 val messages by cwVm.messages.collectAsState()
                 val typingUsers by cwVm.typingUsers.collectAsState()
+                val uploadError by cwVm.uploadError.collectAsState()
                 ChatWindowScreen(
                     chatName = chatName,
                     messages = messages,
                     typingUsers = typingUsers,
                     currentUserId = authState.userId,
+                    uploadError = uploadError,
+                    imageLoader = imageLoader,
                     onBack = { screen = Screen.ChatList },
                     onSend = { text -> vm.sendMessage(chatId, text) },
+                    onSendFile = { uri -> cwVm.sendFile(uri, application) },
+                    onClearUploadError = { cwVm.clearUploadError() },
+                    onDownloadFile = { mediaId, mediaKey, name ->
+                        cwVm.saveToDownloads(application, mediaId, mediaKey, name)
+                    },
                 )
             }
             Screen.Profile -> ProfileScreen(

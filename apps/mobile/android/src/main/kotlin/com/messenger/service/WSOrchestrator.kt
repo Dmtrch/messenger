@@ -57,6 +57,7 @@ class WSOrchestrator(
             id = messageId, client_msg_id = clientMsgId, chat_id = chatId,
             sender_id = senderId, plaintext = String(plaintext),
             timestamp = timestamp, status = "delivered", is_deleted = 0L,
+            media_id = null, media_key = null, original_name = null, content_type = null,
         )
         chatStore.onMessageReceived(chatId, clientMsgId, String(plaintext), senderId, timestamp)
     }
