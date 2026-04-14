@@ -4,7 +4,6 @@ package com.messenger.ui
 import android.app.Application
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.messenger.config.ServerConfig
 import com.messenger.ui.screens.*
 import com.messenger.viewmodel.AppViewModel
@@ -51,9 +50,7 @@ fun App(application: Application) {
                 )
             }
             Screen.ChatList -> {
-                val clVm: ChatListViewModel = viewModel(
-                    factory = androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.getInstance(application)
-                )
+                val clVm = remember { ChatListViewModel(application, vm.chatStore) }
                 val chatList by clVm.chats.collectAsState()
                 ChatListScreen(
                     chats = chatList,
