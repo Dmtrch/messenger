@@ -1,22 +1,38 @@
 # План на следующую сессию
 
-Актуально на: 2026-04-13
-Ветка: `main`
+Актуально на: 2026-04-14
+Ветка: `feature/stage11c-2-android` (не влита в main, ожидает решения пользователя)
 
-## Следующий приоритет
+## Текущий статус
 
-Stage 11C-2 — Android-клиент (Kotlin + Compose).
+Stage 11C-2 — Android-клиент **РЕАЛИЗОВАН**, тесты зелёные, APK собирается.
 
-Desktop MVP (Stage 11C-1) завершён и запушен. Все Kotlin-тесты, TypeScript type-check и lint — зелёные.
+### Где остановились
+
+Все 17 задач Android плана выполнены и закоммичены на ветке `feature/stage11c-2-android`.
+Последний коммит: `bdd0a7d` — fix(android): lazysodium-android 5.1.0 + LazySodium interface + lazysodium-java для тестов; security-crypto TODO
+
+Результаты проверки:
+- `./gradlew test` → BUILD SUCCESSFUL (4 теста: X3DHTest ×1, RatchetTest ×3)
+- `./gradlew assembleDebug` → BUILD SUCCESSFUL (APK собран)
+
+**Ожидает решения**: влить в main / PR / оставить / отбросить (пользователь не ответил на вопрос в конце сессии).
+
+### Ключевые решения этой сессии
+
+- `lazysodium-android:5.1.0` (production) + `lazysodium-java:5.1.4` (тесты JVM, JNA)
+- Crypto-классы (`X3DH`, `Ratchet`, `SenderKey`) принимают `LazySodium` (abstract superclass) — тестируемы без Android runtime
+- `security-crypto` (EncryptedSharedPreferences) недоступен из Google Maven в dev-среде → plain SharedPreferences + TODO comment
+- `ChatListViewModel` и `ChatWindowViewModel` инстанциируются через `remember {}` (не через `viewModel()`, т.к. factory не поддерживает кастомные аргументы)
 
 ## Что делать дальше
 
-1. **Stage 11C-2 — Android** (следующий крупный этап)
-   - Brainstorm архитектуру Android-клиента (Jetpack Compose, Room или SQLDelight, Ktor)
-   - Создать `apps/mobile/android/` каркас (Gradle, Compose Activity, минимальный Manifest)
-   - Переиспользовать крипто-логику из `apps/desktop/src/main/kotlin/crypto/` (lazysodium-android)
-   - Реализовать адаптеры: `ApiClient`, `MessengerWS`, `DatabaseProvider` под Android
-   - Cursor-based пагинация обязательна
+1. **Сначала**: принять решение по ветке `feature/stage11c-2-android` (влить или создать PR)
+
+2. **Stage 11C-3 — iOS** (следующий крупный этап после Android)
+   - SwiftUI + Swift Concurrency
+   - libsodium через Swift Package Manager (swift-sodium)
+   - SQLite через GRDB или SQLite.swift
 
 2. **Stage 11C-3 — iOS** (после Android)
    - SwiftUI + Swift Concurrency
