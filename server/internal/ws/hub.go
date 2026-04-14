@@ -114,24 +114,53 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 func (h *Hub) register(c *client) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	firstConn := h.byUser[c.userID] == nil
 	if h.byUser[c.userID] == nil {
 		h.byUser[c.userID] = make(map[*client]struct{})
 	}
 	h.byUser[c.userID][c] = struct{}{}
+	h.mu.Unlock()
+	if firstConn {
+		go h.broadcastPresence(c.userID, true)
+	}
 }
 
 func (h *Hub) unregister(c *client) {
 	h.mu.Lock()
+	wentOffline := false
 	if set, ok := h.byUser[c.userID]; ok {
 		delete(set, c)
 		if len(set) == 0 {
 			delete(h.byUser, c.userID)
+			wentOffline = true
 		}
 	}
 	h.mu.Unlock()
 	close(c.send)
 	h.cleanupCallsForUser(c.userID)
+	if wentOffline {
+		go h.broadcastPresence(c.userID, false)
+	}
+}
+
+// broadcastPresence рассылает статус online/offline всем контактам пользователя.
+func (h *Hub) broadcastPresence(userID string, online bool) {
+	peers, err := db.GetConversationPeers(h.db, userID)
+	if err != nil || len(peers) == 0 {
+		return
+	}
+	status := "offline"
+	if online {
+		status = "online"
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"type":   "presence",
+		"userId": userID,
+		"status": status,
+	})
+	for _, peerID := range peers {
+		h.Deliver(peerID, payload)
+	}
 }
 
 // Deliver sends a JSON payload to every connection of a user.

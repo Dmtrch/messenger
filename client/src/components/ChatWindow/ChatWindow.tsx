@@ -29,6 +29,7 @@ function parsePayload(raw: string): Pick<Message, 'text' | 'mediaId' | 'mediaKey
 }
 
 interface PendingMedia {
+  msgId: string         // UUID, генерируется при загрузке — связывает медиа с сообщением на сервере
   mediaId: string
   mediaKey: string      // base64, ключ шифрования — включается в E2E payload
   originalName: string
@@ -297,12 +298,15 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
 
     const mediaType: PendingMedia['mediaType'] = file.type.startsWith('image/') ? 'image' : 'file'
     const previewUrl = mediaType === 'image' ? URL.createObjectURL(file) : undefined
+    // Генерируем msgId заранее — он свяжет медиафайл с сообщением на сервере
+    const msgId = generateId()
 
     setUploading(true)
     try {
       // Шифруем файл на клиенте перед загрузкой — сервер хранит только ciphertext
-      const res = await uploadEncryptedMedia(file, chatId)
+      const res = await uploadEncryptedMedia(file, chatId, msgId)
       setPendingMedia({
+        msgId,
         mediaId: res.mediaId,
         mediaKey: res.mediaKey,
         originalName: file.name,
@@ -356,7 +360,9 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
       return
     }
 
-    const msgId = generateId()
+    // Если к сообщению прикреплён файл — используем msgId, сгенерированный при загрузке
+    // (он уже связан с медиафайлом на сервере через поле client_msg_id)
+    const msgId = pendingMedia?.msgId ?? generateId()
 
     // Формируем payload — текст или медиа-JSON
     let plainPayload: string

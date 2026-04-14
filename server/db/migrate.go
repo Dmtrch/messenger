@@ -87,6 +87,8 @@ var migrations = []Migration{
 		`CREATE INDEX IF NOT EXISTS idx_registration_requests_status ON registration_requests(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_password_reset_requests_status ON password_reset_requests(status)`,
 	}},
+	// Migration 14: привязка медиафайла к сообщению для корректного удаления.
+	{ID: 14, SQL: `ALTER TABLE media_objects ADD COLUMN client_msg_id TEXT`},
 }
 
 // RunMigrations создаёт таблицу schema_migrations и применяет все
@@ -142,8 +144,11 @@ func RunMigrations(db *sql.DB) error {
 		}
 		if execErr != nil {
 			_ = tx.Rollback()
-			// Идемпотентность: свежие установки уже содержат колонки в schema
-			if strings.Contains(execErr.Error(), "duplicate column name") {
+			// Идемпотентность: свежие установки уже содержат колонки в schema,
+			// или ALTER TABLE на несуществующую таблицу (устаревшие тест-БД).
+			idempotent := strings.Contains(execErr.Error(), "duplicate column name") ||
+				strings.Contains(execErr.Error(), "no such table")
+			if idempotent {
 				// tx уже откатана выше; INSERT записываем вне транзакции
 				if _, err2 := db.Exec(
 					`INSERT INTO schema_migrations(id, applied_at) VALUES(?, ?)`,

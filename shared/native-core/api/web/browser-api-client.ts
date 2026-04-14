@@ -149,6 +149,7 @@ export interface BrowserApiClient {
     uploadEncryptedMedia(
       file: File,
       chatId?: string,
+      msgId?: string,
     ): Promise<{ mediaId: string; mediaKey: string; originalName: string; contentType: string }>
     fetchMediaBlobUrl(mediaId: string): Promise<string>
     fetchEncryptedMediaBlobUrl(mediaId: string, mediaKey: string, mimeType: string): Promise<string>
@@ -321,6 +322,7 @@ export function createBrowserApiClient(deps: BrowserApiClientDeps): BrowserApiCl
   async function uploadEncryptedMedia(
     file: File,
     chatId?: string,
+    msgId?: string,
   ): Promise<{ mediaId: string; mediaKey: string; originalName: string; contentType: string }> {
     const sodium = await loadSodium()
     if (sodium.ready) await sodium.ready
@@ -338,6 +340,7 @@ export function createBrowserApiClient(deps: BrowserApiClientDeps): BrowserApiCl
     const form = new FormData()
     form.append('file', encryptedFile)
     if (chatId) form.append('chat_id', chatId)
+    if (msgId) form.append('msg_id', msgId)
 
     const response = await req<MediaUploadRes>('/api/media/upload', {
       method: 'POST',

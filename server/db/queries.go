@@ -289,6 +289,31 @@ func GetConversationMembers(db *sql.DB, conversationID string) ([]string, error)
 	return ids, rows.Err()
 }
 
+// GetConversationPeers возвращает уникальные user_id всех пользователей,
+// разделяющих хотя бы один чат с userID (исключая самого пользователя).
+func GetConversationPeers(database *sql.DB, userID string) ([]string, error) {
+	rows, err := database.Query(`
+		SELECT DISTINCT cm2.user_id
+		FROM conversation_members cm1
+		JOIN conversation_members cm2 ON cm1.conversation_id = cm2.conversation_id
+		WHERE cm1.user_id = ? AND cm2.user_id != ?`,
+		userID, userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query conversation peers: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan peer: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func IsConversationMember(db *sql.DB, conversationID, userID string) (bool, error) {
 	var n int
 	err := db.QueryRow(
@@ -702,6 +727,7 @@ type MediaObject struct {
 	ID             string
 	UploaderID     string
 	ConversationID string // пустая строка = не привязан к чату
+	ClientMsgID    string // пустая строка = сообщение ещё не отправлено
 	Filename       string // имя файла на диске
 	OriginalName   string
 	ContentType    string
@@ -714,12 +740,49 @@ func InsertMediaObject(db *sql.DB, m MediaObject) error {
 	if m.ConversationID != "" {
 		convID = m.ConversationID
 	}
+	var msgID any
+	if m.ClientMsgID != "" {
+		msgID = m.ClientMsgID
+	}
 	_, err := db.Exec(`
-		INSERT INTO media_objects (id, uploader_id, conversation_id, filename, original_name, content_type, size, created_at)
-		VALUES (?,?,?,?,?,?,?,?)`,
-		m.ID, m.UploaderID, convID, m.Filename, m.OriginalName, m.ContentType, m.Size, m.CreatedAt,
+		INSERT INTO media_objects (id, uploader_id, conversation_id, client_msg_id, filename, original_name, content_type, size, created_at)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		m.ID, m.UploaderID, convID, msgID, m.Filename, m.OriginalName, m.ContentType, m.Size, m.CreatedAt,
 	)
 	return err
+}
+
+// DeleteMediaByMsgID удаляет записи media_objects с заданным client_msg_id.
+// Возвращает имена файлов на диске для последующего физического удаления.
+func DeleteMediaByMsgID(database *sql.DB, clientMsgID string) ([]string, error) {
+	rows, err := database.Query(
+		`SELECT filename FROM media_objects WHERE client_msg_id = ?`, clientMsgID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query media by msg: %w", err)
+	}
+	defer rows.Close()
+
+	var filenames []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan media filename: %w", err)
+		}
+		filenames = append(filenames, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate media: %w", err)
+	}
+	if len(filenames) == 0 {
+		return nil, nil
+	}
+	if _, err := database.Exec(
+		`DELETE FROM media_objects WHERE client_msg_id = ?`, clientMsgID,
+	); err != nil {
+		return nil, fmt.Errorf("delete media by msg: %w", err)
+	}
+	return filenames, nil
 }
 
 func GetMediaObject(db *sql.DB, id string) (*MediaObject, error) {

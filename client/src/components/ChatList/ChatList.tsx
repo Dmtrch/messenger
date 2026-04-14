@@ -1,4 +1,5 @@
 import { useChatStore } from '@/store/chatStore'
+import { useAuthStore } from '@/store/authStore'
 import type { Chat } from '@/types'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { ru } from 'date-fns/locale'
@@ -12,6 +13,8 @@ export default function ChatList({ onSelect }: Props) {
   const chats = useChatStore((st) =>
     [...st.chats].sort((a, b) => b.updatedAt - a.updatedAt)
   )
+  const presenceMap = useChatStore((st) => st.presenceMap)
+  const currentUserId = useAuthStore((st) => st.currentUser?.id)
 
   if (chats.length === 0) {
     return <p className={s.empty}>Нет чатов. Начните новый разговор.</p>
@@ -19,14 +22,20 @@ export default function ChatList({ onSelect }: Props) {
 
   return (
     <ul className={s.list} role="list">
-      {chats.map((chat) => (
-        <ChatItem key={chat.id} chat={chat} onClick={() => onSelect(chat.id)} />
-      ))}
+      {chats.map((chat) => {
+        const peerId = chat.type === 'direct'
+          ? chat.members.find((id) => id !== currentUserId)
+          : undefined
+        const isOnline = peerId ? (presenceMap[peerId] ?? false) : false
+        return (
+          <ChatItem key={chat.id} chat={chat} isOnline={isOnline} onClick={() => onSelect(chat.id)} />
+        )
+      })}
     </ul>
   )
 }
 
-function ChatItem({ chat, onClick }: { chat: Chat; onClick: () => void }) {
+function ChatItem({ chat, isOnline, onClick }: { chat: Chat; isOnline: boolean; onClick: () => void }) {
   const time = chat.updatedAt
     ? formatDistanceToNowStrict(chat.updatedAt, { locale: ru })
     : ''
@@ -34,7 +43,10 @@ function ChatItem({ chat, onClick }: { chat: Chat; onClick: () => void }) {
   return (
     <li>
       <button className={s.item} onClick={onClick} aria-label={`Чат ${chat.name}`}>
-        <Avatar name={chat.name} avatarPath={chat.avatarPath} />
+        <div className={s.avatarWrap}>
+          <Avatar name={chat.name} avatarPath={chat.avatarPath} />
+          {isOnline && <span className={s.onlineDot} aria-label="онлайн" />}
+        </div>
         <div className={s.content}>
           <div className={s.row}>
             <span className={s.name}>{chat.name}</span>

@@ -90,7 +90,7 @@ func main() {
 		RegistrationMode: cfg.RegistrationMode,
 	}
 	adminHandler := &admin.Handler{DB: database}
-	chatHandler := &chat.Handler{DB: database, Hub: hub}
+	chatHandler := &chat.Handler{DB: database, Hub: hub, MediaDir: cfg.MediaDir}
 	mediaHandler := &media.Handler{MediaDir: cfg.MediaDir, DB: database}
 	media.StartOrphanCleaner(database, cfg.MediaDir)
 	usersHandler := &users.Handler{DB: database}

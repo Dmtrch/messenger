@@ -43,6 +43,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chatID := r.FormValue("chat_id")
+	clientMsgID := r.FormValue("msg_id")
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -76,6 +77,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		ID:             mediaID,
 		UploaderID:     uploaderID,
 		ConversationID: chatID,
+		ClientMsgID:    clientMsgID,
 		Filename:       diskName,
 		OriginalName:   header.Filename,
 		ContentType:    uploadContentType,
