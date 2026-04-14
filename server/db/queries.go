@@ -339,13 +339,14 @@ type Message struct {
 	CreatedAt            int64
 	DeliveredAt          sql.NullInt64
 	ReadAt               sql.NullInt64
+	ReplyToID            string
 }
 
 func SaveMessage(db *sql.DB, m Message) error {
 	_, err := db.Exec(`
-		INSERT INTO messages (id, client_msg_id, conversation_id, sender_id, recipient_id, destination_device_id, ciphertext, sender_key_id, created_at)
-		VALUES (?,?,?,?,?,?,?,?,?)`,
-		m.ID, m.ClientMsgID, m.ConversationID, m.SenderID, m.RecipientID, m.DestinationDeviceID, m.Ciphertext, m.SenderKeyID, m.CreatedAt,
+		INSERT INTO messages (id, client_msg_id, conversation_id, sender_id, recipient_id, destination_device_id, ciphertext, sender_key_id, reply_to_id, created_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		m.ID, m.ClientMsgID, m.ConversationID, m.SenderID, m.RecipientID, m.DestinationDeviceID, m.Ciphertext, m.SenderKeyID, m.ReplyToID, m.CreatedAt,
 	)
 	return err
 }
@@ -357,10 +358,10 @@ func GetMessageByID(db *sql.DB, id string) (*Message, error) {
 	err := db.QueryRow(`
 		SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
 		       COALESCE(destination_device_id,''), ciphertext, sender_key_id, COALESCE(is_deleted,0),
-		       edited_at, created_at, delivered_at, read_at
+		       edited_at, created_at, delivered_at, read_at, COALESCE(reply_to_id,'')
 		FROM messages WHERE id=?`, id,
 	).Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
-		&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt)
+		&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt, &m.ReplyToID)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -380,7 +381,7 @@ func GetMessages(db *sql.DB, conversationID, recipientID, beforeMsgID string, li
 	args := []any{conversationID, recipientID}
 	q := `SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
 	             COALESCE(destination_device_id,''), ciphertext, sender_key_id, COALESCE(is_deleted,0),
-	             edited_at, created_at, delivered_at, read_at
+	             edited_at, created_at, delivered_at, read_at, COALESCE(reply_to_id,'')
 	      FROM messages
 	      WHERE conversation_id=? AND (recipient_id=? OR recipient_id='') AND COALESCE(is_deleted,0)=0`
 	if beforeMsgID != "" {
@@ -400,7 +401,7 @@ func GetMessages(db *sql.DB, conversationID, recipientID, beforeMsgID string, li
 		var m Message
 		var isDeleted int
 		if err := rows.Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
-			&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt); err != nil {
+			&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt, &m.ReplyToID); err != nil {
 			return nil, err
 		}
 		m.IsDeleted = isDeleted == 1
@@ -414,7 +415,7 @@ func GetMessagesByClientMsgID(db *sql.DB, clientMsgID string) ([]Message, error)
 	rows, err := db.Query(`
 		SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
 		       COALESCE(destination_device_id,''), ciphertext, sender_key_id, COALESCE(is_deleted,0),
-		       edited_at, created_at, delivered_at, read_at
+		       edited_at, created_at, delivered_at, read_at, COALESCE(reply_to_id,'')
 		FROM messages WHERE client_msg_id=?`, clientMsgID)
 	if err != nil {
 		return nil, err
@@ -425,7 +426,7 @@ func GetMessagesByClientMsgID(db *sql.DB, clientMsgID string) ([]Message, error)
 		var m Message
 		var isDeleted int
 		if err := rows.Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
-			&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt); err != nil {
+			&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt, &m.ReplyToID); err != nil {
 			return nil, err
 		}
 		m.IsDeleted = isDeleted == 1

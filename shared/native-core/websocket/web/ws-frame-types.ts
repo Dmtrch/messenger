@@ -30,6 +30,7 @@ export type WSMessageFrame = {
   timestamp: number
   messageId: string
   clientMsgId?: string
+  replyToId?: string
 }
 
 export type WSAckFrame = {
@@ -107,6 +108,7 @@ export type WSSendMessageFrame = {
   clientMsgId: string
   senderKeyId: number
   recipients: MessageRecipient[]
+  replyToId?: string
 }
 
 export type WSSendSKDMFrame = {

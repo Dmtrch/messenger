@@ -71,7 +71,7 @@ export function createMessengerWSOrchestrator(deps: MessengerWSOrchestratorDeps)
     async onFrame(frame: WSFrame): Promise<void> {
       switch (frame.type) {
         case 'message': {
-          const { messageId, chatId, senderId, senderDeviceId, ciphertext, senderKeyId, timestamp, clientMsgId } = frame
+          const { messageId, chatId, senderId, senderDeviceId, ciphertext, senderKeyId, timestamp, clientMsgId, replyToId } = frame
           const knownChat = deps.getKnownChat(chatId)
           if (!knownChat) {
             deps.getChats().then(async (response) => {
@@ -113,6 +113,7 @@ export function createMessengerWSOrchestrator(deps: MessengerWSOrchestratorDeps)
             const message: RealtimeMessage = {
               id: messageId,
               clientMsgId,
+              replyToId,
               chatId,
               senderId,
               encryptedPayload: ciphertext,
@@ -127,6 +128,7 @@ export function createMessengerWSOrchestrator(deps: MessengerWSOrchestratorDeps)
             deps.addMessage({
               id: messageId,
               clientMsgId,
+              replyToId,
               chatId,
               senderId,
               encryptedPayload: ciphertext,

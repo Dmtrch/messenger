@@ -96,6 +96,7 @@ export interface MessageRecord {
   timestamp: number
   delivered: boolean
   read: boolean
+  replyToId?: string
 }
 
 export interface MessagesPage {

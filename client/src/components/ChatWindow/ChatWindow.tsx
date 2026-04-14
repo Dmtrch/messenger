@@ -89,6 +89,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [editingMsg, setEditingMsg] = useState<Message | null>(null)
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const [pendingMedia, setPendingMedia] = useState<PendingMedia | null>(null)
   const [uploading, setUploading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -172,6 +173,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
         senderKeyId: m.senderKeyId,
         timestamp: m.timestamp,
         status: (m.read ? 'read' : m.delivered ? 'delivered' : 'sent') as Message['status'],
+        replyToId: m.replyToId,
         ...parsed,
       }
     }))
@@ -219,6 +221,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
     // Сбрасываем cursor при смене чата
     setNextCursor(null)
     setHasMoreHistory(false)
+    setReplyingTo(null)
     markRead(chatId)
     loadHistory(chatId)
     bottomRef.current?.scrollIntoView({ behavior: 'instant' })
@@ -271,6 +274,12 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
     if (!menu) return
     setEditingMsg(menu.msg)
     setText(menu.msg.text ?? '')
+    setMenu(null)
+  }, [menu])
+
+  const handleReply = useCallback(() => {
+    if (!menu) return
+    setReplyingTo(menu.msg)
     setMenu(null)
   }, [menu])
 
@@ -394,11 +403,13 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
       timestamp: Date.now(),
       status: 'sending',
       type: msgType,
+      replyToId: replyingTo?.id,
     }
     addMessage(msg)
     // Сохраняем исходящее сообщение в IDB (статус 'sending' перезапишется позже)
     appendMessages(chatId, [msg]).catch(() => {})
     setText('')
+    setReplyingTo(null)
     removePendingMedia()
 
     const members = chat?.members ?? [currentUser.id]
@@ -454,6 +465,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
       clientMsgId: msgId,
       senderKeyId: 0,
       recipients,
+      replyToId: replyingTo?.id,
     }
 
     if (wsSend) {
@@ -531,6 +543,8 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
             onRightClick={handleRightClick}
+            replyMsg={msg.replyToId ? messages.find((m) => m.id === msg.replyToId) : undefined}
+            hasReply={!!msg.replyToId}
           />
         ))}
         <div ref={bottomRef} />
@@ -540,6 +554,15 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
         <div className={s.editBanner}>
           <span>Редактирование: {editingMsg.text}</span>
           <button onClick={() => { setEditingMsg(null); setText('') }} aria-label="Отмена">✕</button>
+        </div>
+      )}
+
+      {replyingTo && (
+        <div className={s.replyBanner}>
+          <span className={s.replyText}>
+            Ответ: {replyingTo.text?.slice(0, 50) ?? '[медиа]'}
+          </span>
+          <button onClick={() => setReplyingTo(null)} aria-label="Отмена">✕</button>
         </div>
       )}
 
@@ -602,6 +625,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
             y={menu.y}
             isOwn={menu.msg.senderId === currentUser?.id}
             onCopy={handleCopy}
+            onReply={handleReply}
             onEdit={handleEdit}
             onDelete={handleDelete}
           />
@@ -619,9 +643,11 @@ interface BubbleProps {
   onTouchStart: (msg: Message, e: React.TouchEvent) => void
   onTouchEnd: () => void
   onRightClick: (msg: Message, e: React.MouseEvent) => void
+  replyMsg?: Message
+  hasReply?: boolean
 }
 
-function Bubble({ msg, isOwn, onTouchStart, onTouchEnd, onRightClick }: BubbleProps) {
+function Bubble({ msg, isOwn, onTouchStart, onTouchEnd, onRightClick, replyMsg, hasReply }: BubbleProps) {
   const time = new Date(msg.timestamp).toLocaleTimeString('ru', {
     hour: '2-digit', minute: '2-digit',
   })
@@ -633,6 +659,13 @@ function Bubble({ msg, isOwn, onTouchStart, onTouchEnd, onRightClick }: BubblePr
       onTouchMove={onTouchEnd}
       onContextMenu={(e) => onRightClick(msg, e)}
     >
+      {hasReply && (
+        <div className={s.replyQuote}>
+          <span className={s.replyQuoteText}>
+            {replyMsg ? (replyMsg.text?.slice(0, 60) ?? '[медиа]') : '↩ Ответ на сообщение'}
+          </span>
+        </div>
+      )}
       {msg.type === 'image' && msg.mediaId && (
         <AuthImage mediaId={msg.mediaId} mediaKey={msg.mediaKey} className={s.bubbleImage} alt={msg.originalName ?? 'изображение'} />
       )}
@@ -660,11 +693,12 @@ interface ContextMenuProps {
   y: number
   isOwn: boolean
   onCopy: () => void
+  onReply: () => void
   onEdit: () => void
   onDelete: () => void
 }
 
-function ContextMenu({ x, y, isOwn, onCopy, onEdit, onDelete }: ContextMenuProps) {
+function ContextMenu({ x, y, isOwn, onCopy, onReply, onEdit, onDelete }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ x, y })
 
@@ -686,6 +720,9 @@ function ContextMenu({ x, y, isOwn, onCopy, onEdit, onDelete }: ContextMenuProps
       style={{ left: pos.x, top: pos.y }}
       role="menu"
     >
+      <button className={s.menuItem} onClick={onReply} role="menuitem">
+        <ReplyIcon /> Ответить
+      </button>
       <button className={s.menuItem} onClick={onCopy} role="menuitem">
         <CopyIcon /> Копировать
       </button>
@@ -818,6 +855,14 @@ function SendIcon() {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+    </svg>
+  )
+}
+
+function ReplyIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/>
     </svg>
   )
 }

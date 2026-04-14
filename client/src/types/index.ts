@@ -42,6 +42,7 @@ export interface Message {
   status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
   type: 'text' | 'image' | 'file' | 'system'
   isEdited?: boolean
+  replyToId?: string
 }
 
 /** Публичный ключевой пакет пользователя (X3DH) */
@@ -57,7 +58,7 @@ export interface PublicKeyBundle {
 
 /** WebSocket фреймы — имена полей соответствуют Go-серверу */
 export type WSFrame =
-  | { type: 'message'; chatId: string; ciphertext: string; senderKeyId: number; senderId: string; senderDeviceId?: string; timestamp: number; messageId: string; clientMsgId?: string }
+  | { type: 'message'; chatId: string; ciphertext: string; senderKeyId: number; senderId: string; senderDeviceId?: string; timestamp: number; messageId: string; clientMsgId?: string; replyToId?: string }
   | { type: 'ack'; clientMsgId: string; chatId?: string; timestamp: number }
   | { type: 'typing'; chatId: string; userId: string }
   | { type: 'presence'; userId: string; status: 'online' | 'offline' }
@@ -75,7 +76,7 @@ export type WSFrame =
   | { type: 'ice_candidate'; callId: string; candidate: RTCIceCandidateInit }
 
 export type WSSendFrame =
-  | { type: 'message'; chatId: string; clientMsgId: string; senderKeyId: number; recipients: Array<{ userId: string; deviceId?: string; ciphertext: string }> }
+  | { type: 'message'; chatId: string; clientMsgId: string; senderKeyId: number; recipients: Array<{ userId: string; deviceId?: string; ciphertext: string }>; replyToId?: string }
   | { type: 'skdm'; chatId: string; recipients: Array<{ userId: string; ciphertext: string }> }
   | { type: 'typing'; chatId: string }
   | { type: 'read'; chatId: string; messageId: string }
