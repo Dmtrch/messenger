@@ -1,9 +1,9 @@
 // apps/mobile/android/src/main/kotlin/com/messenger/crypto/X3DH.kt
 package com.messenger.crypto
 
-import com.goterl.lazysodium.LazySodiumAndroid
+import com.goterl.lazysodium.LazySodium
 
-class X3DH(private val sodium: LazySodiumAndroid) {
+class X3DH(private val sodium: LazySodium) {
 
     fun computeSharedSecret(
         aliceIKPrivEd: ByteArray,

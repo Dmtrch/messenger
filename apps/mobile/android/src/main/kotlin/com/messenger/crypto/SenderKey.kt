@@ -1,10 +1,10 @@
 // apps/mobile/android/src/main/kotlin/com/messenger/crypto/SenderKey.kt
 package com.messenger.crypto
 
-import com.goterl.lazysodium.LazySodiumAndroid
+import com.goterl.lazysodium.LazySodium
 import com.goterl.lazysodium.interfaces.SecretBox
 
-class SenderKey(private val sodium: LazySodiumAndroid) {
+class SenderKey(private val sodium: LazySodium) {
 
     companion object {
         private const val NONCEBYTES = SecretBox.NONCEBYTES

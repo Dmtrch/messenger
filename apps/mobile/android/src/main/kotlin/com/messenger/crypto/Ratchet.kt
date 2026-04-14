@@ -1,10 +1,10 @@
 // apps/mobile/android/src/main/kotlin/com/messenger/crypto/Ratchet.kt
 package com.messenger.crypto
 
-import com.goterl.lazysodium.LazySodiumAndroid
+import com.goterl.lazysodium.LazySodium
 import com.goterl.lazysodium.interfaces.SecretBox
 
-class Ratchet(private val sodium: LazySodiumAndroid) {
+class Ratchet(private val sodium: LazySodium) {
 
     companion object {
         private val NONCEBYTES = SecretBox.NONCEBYTES

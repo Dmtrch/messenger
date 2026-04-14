@@ -3,21 +3,13 @@ package com.messenger.crypto
 
 import android.content.Context
 import android.util.Base64
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+
+// TODO: Replace with EncryptedSharedPreferences once androidx.security:crypto 1.1.0-alpha06
+//       is accessible via Google Maven. Current dev environment has a CDN 404 on that path.
+//       Production deployment should use EncryptedSharedPreferences.
 
 class KeyStorage(context: Context) : AutoCloseable {
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
-
-    private val prefs = EncryptedSharedPreferences.create(
-        context,
-        "messenger_crypto_keys",
-        masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    private val prefs = context.getSharedPreferences("messenger_crypto_keys", Context.MODE_PRIVATE)
 
     fun saveKey(alias: String, keyBytes: ByteArray) {
         prefs.edit()

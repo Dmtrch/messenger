@@ -50,13 +50,15 @@ dependencies {
     implementation(libs.lazysodium.android)
     implementation(libs.sqldelight.android.driver)
     implementation(libs.coroutines.android)
-    implementation(libs.security.crypto)
+    // TODO: re-enable when Google Maven is accessible (googleapis CDN 404 in this dev environment)
+    // implementation(libs.security.crypto)
     implementation(libs.lifecycle.viewmodel)
     implementation(libs.lifecycle.viewmodel.compose)
     debugImplementation(libs.compose.ui.tooling)
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.ktor.client.mock)
+    testImplementation(libs.lazysodium.java)
 }
 
 sqldelight {

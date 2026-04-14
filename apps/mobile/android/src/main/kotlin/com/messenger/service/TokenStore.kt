@@ -2,8 +2,10 @@
 package com.messenger.service
 
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+
+// TODO: Replace with EncryptedSharedPreferences once androidx.security:crypto 1.1.0-alpha06
+//       is accessible via Google Maven. Current dev environment has a CDN 404 on that path.
+//       Production deployment should use EncryptedSharedPreferences.
 
 interface TokenStoreInterface {
     var accessToken: String
@@ -13,17 +15,7 @@ interface TokenStoreInterface {
 }
 
 class TokenStore(context: Context) : TokenStoreInterface {
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
-
-    private val prefs = EncryptedSharedPreferences.create(
-        context,
-        "messenger_tokens",
-        masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    private val prefs = context.getSharedPreferences("messenger_tokens", Context.MODE_PRIVATE)
 
     override var accessToken: String
         get() = prefs.getString("access_token", "") ?: ""
