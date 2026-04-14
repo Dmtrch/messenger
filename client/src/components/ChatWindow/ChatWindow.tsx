@@ -6,6 +6,7 @@ import { useCallStore } from '@/store/callStore'
 import { api, uploadEncryptedMedia } from '@/api/client'
 import { encryptMessage, encryptForAllDevices, decryptMessage, encryptGroupMessage, decryptGroupMessage } from '@/crypto/session'
 import { saveKnownPeerIK, loadKnownPeerIK } from '@/crypto/keystore'
+import SafetyNumber from '@/components/SafetyNumber/SafetyNumber'
 import { loadMessages, appendMessages, saveMessages } from '@/store/messageDb'
 import { enqueueOutbox } from '@/store/outboxDb'
 import type { OutboxItem } from '@/store/outboxDb'
@@ -89,6 +90,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
   const [text, setText] = useState('')
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const [showSafetyNumber, setShowSafetyNumber] = useState(false)
   const [editingMsg, setEditingMsg] = useState<Message | null>(null)
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const [pendingMedia, setPendingMedia] = useState<PendingMedia | null>(null)
@@ -549,6 +551,16 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
             </button>
           </div>
         )}
+        {chat?.type === 'direct' && peerId && (
+          <button
+            className={s.safetyBtn}
+            onClick={() => setShowSafetyNumber(true)}
+            aria-label="Safety Number"
+            title="Верификация идентичности"
+          >
+            🔒
+          </button>
+        )}
       </header>
 
       <div className={s.messages} role="log" aria-live="polite">
@@ -656,6 +668,13 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
             onDelete={handleDelete}
           />
         </>
+      )}
+      {showSafetyNumber && peerId && (
+        <SafetyNumber
+          peerId={peerId}
+          peerName={chat?.name ?? peerId}
+          onClose={() => setShowSafetyNumber(false)}
+        />
       )}
     </div>
   )

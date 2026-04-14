@@ -215,3 +215,13 @@
   padding: 4px 12px;
   margin: 4px 0;
 }
+
+.safetyBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 4px;
+  opacity: 0.7;
+}
+.safetyBtn:hover { opacity: 1; }
