@@ -5,6 +5,7 @@ import { useWsStore } from '@/store/wsStore'
 import { useCallStore } from '@/store/callStore'
 import { api, uploadEncryptedMedia } from '@/api/client'
 import { encryptMessage, encryptForAllDevices, decryptMessage, encryptGroupMessage, decryptGroupMessage } from '@/crypto/session'
+import { saveKnownPeerIK, loadKnownPeerIK } from '@/crypto/keystore'
 import { loadMessages, appendMessages, saveMessages } from '@/store/messageDb'
 import { enqueueOutbox } from '@/store/outboxDb'
 import type { OutboxItem } from '@/store/outboxDb'
@@ -440,6 +441,31 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
         allUsers.map(async (userId) => {
           try {
             const { devices } = await api.getKeyBundle(userId)
+
+            // Проверяем смену Identity Key
+            if (devices.length > 0) {
+              const freshIK = devices[0].ikPublic
+              const storedIK = await loadKnownPeerIK(userId)
+              if (storedIK !== undefined && storedIK !== freshIK) {
+                // IK изменился — добавляем системное предупреждение в чат
+                const peerName = chat?.type === 'direct' ? chat.name : userId
+                const sysMsg: Message = {
+                  id: generateId(),
+                  chatId,
+                  senderId: '',
+                  encryptedPayload: '',
+                  senderKeyId: 0,
+                  text: `⚠ Identity of ${peerName} has changed`,
+                  timestamp: Date.now(),
+                  status: 'sent',
+                  type: 'system',
+                }
+                addMessage(sysMsg)
+              }
+              // Сохраняем IK (при первом контакте или после изменения)
+              await saveKnownPeerIK(userId, freshIK)
+            }
+
             const encrypted = await encryptForAllDevices(userId, devices, plainPayload)
             return encrypted.map((e) => ({ userId, deviceId: e.deviceId, ciphertext: e.ciphertext }))
           } catch {
@@ -651,6 +677,16 @@ function Bubble({ msg, isOwn, onTouchStart, onTouchEnd, onRightClick, replyMsg, 
   const time = new Date(msg.timestamp).toLocaleTimeString('ru', {
     hour: '2-digit', minute: '2-digit',
   })
+
+  // Системное сообщение (например, предупреждение о смене Identity Key)
+  if (msg.type === 'system') {
+    return (
+      <div className={s.systemMsg}>
+        {msg.text}
+      </div>
+    )
+  }
+
   return (
     <div
       className={`${s.bubble} ${isOwn ? s.out : s.in}`}

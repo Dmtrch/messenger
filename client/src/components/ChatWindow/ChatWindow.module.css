@@ -206,3 +206,12 @@
   opacity: 1;
   background: rgba(0,0,0,0.05);
 }
+
+/* Системное сообщение (например, предупреждение о смене Identity Key) */
+.systemMsg {
+  text-align: center;
+  color: var(--c-text-muted, #888);
+  font-size: 0.75rem;
+  padding: 4px 12px;
+  margin: 4px 0;
+}
