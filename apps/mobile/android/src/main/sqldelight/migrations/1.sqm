@@ -1,0 +1,4 @@
+ALTER TABLE message ADD COLUMN media_id TEXT;
+ALTER TABLE message ADD COLUMN media_key TEXT;
+ALTER TABLE message ADD COLUMN original_name TEXT;
+ALTER TABLE message ADD COLUMN content_type TEXT;
