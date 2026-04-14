@@ -19,6 +19,7 @@ export type RealtimeMessageKind = (typeof WS_MESSAGE_KINDS)[number]
 export interface RealtimeMessage {
   id: string
   clientMsgId?: string
+  replyToId?: string
   chatId: string
   senderId: string
   encryptedPayload: string

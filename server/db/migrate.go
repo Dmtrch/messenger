@@ -89,6 +89,8 @@ var migrations = []Migration{
 	}},
 	// Migration 14: привязка медиафайла к сообщению для корректного удаления.
 	{ID: 14, SQL: `ALTER TABLE media_objects ADD COLUMN client_msg_id TEXT`},
+	// Migration 15: ссылка на цитируемое сообщение (MSG-9 Reply).
+	{ID: 15, SQL: `ALTER TABLE messages ADD COLUMN reply_to_id TEXT`},
 }
 
 // RunMigrations создаёт таблицу schema_migrations и применяет все

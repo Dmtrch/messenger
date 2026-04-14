@@ -129,6 +129,31 @@
 /* Пометка "изменено" */
 .edited { font-size: 0.6875rem; color: var(--text-secondary); }
 
+/* Баннер ответа на сообщение */
+.replyBanner {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.4rem 1rem; font-size: 0.8125rem;
+  background: var(--bg-secondary); border-top: 1px solid var(--accent);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.replyText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.replyBanner button { color: var(--text-secondary); margin-left: 0.5rem; flex-shrink: 0; }
+
+/* Цитата внутри пузыря */
+.replyQuote {
+  background: rgba(0,0,0,0.06);
+  border-left: 3px solid var(--accent);
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  margin-bottom: 0.3rem;
+}
+.replyQuoteText {
+  font-size: 0.8125rem; color: var(--text-secondary);
+  display: block; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* Контекстное меню */
 .menuBackdrop {
   position: fixed; inset: 0; z-index: 100;
@@ -181,3 +206,22 @@
   opacity: 1;
   background: rgba(0,0,0,0.05);
 }
+
+/* Системное сообщение (например, предупреждение о смене Identity Key) */
+.systemMsg {
+  text-align: center;
+  color: var(--c-text-muted, #888);
+  font-size: 0.75rem;
+  padding: 4px 12px;
+  margin: 4px 0;
+}
+
+.safetyBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 4px;
+  opacity: 0.7;
+}
+.safetyBtn:hover { opacity: 1; }

@@ -56,6 +56,7 @@ type MessageDTO struct {
 	Timestamp        int64  `json:"timestamp"`
 	Delivered        bool   `json:"delivered"`
 	Read             bool   `json:"read"`
+	ReplyToID        string `json:"replyToId,omitempty"`
 }
 
 // GET /api/chats — список чатов текущего пользователя
@@ -228,6 +229,7 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 			Timestamp:        m.CreatedAt,
 			Delivered:        m.DeliveredAt.Valid,
 			Read:             m.ReadAt.Valid,
+			ReplyToID:        m.ReplyToID,
 		})
 	}
 	reply(w, 200, map[string]any{"messages": result, "nextCursor": nextCursorID(msgs)})

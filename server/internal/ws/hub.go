@@ -242,6 +242,7 @@ type inMsg struct {
 	Recipients  []recipient `json:"recipients"` // per-user encrypted payload
 	SenderKeyID int64       `json:"senderKeyId"`
 	ClientMsgID string      `json:"clientMsgId"`
+	ReplyToID   string      `json:"replyToId,omitempty"`
 
 	// type:"read"
 	MessageID string `json:"messageId"`
@@ -335,6 +336,7 @@ func (h *Hub) handleMessage(c *client, msg inMsg) {
 			DestinationDeviceID: r.DeviceID,
 			Ciphertext:          r.Ciphertext,
 			SenderKeyID:         msg.SenderKeyID,
+			ReplyToID:           msg.ReplyToID,
 			CreatedAt:           now,
 		}); err != nil {
 			log.Printf("save message: %v", err)
@@ -358,6 +360,7 @@ func (h *Hub) handleMessage(c *client, msg inMsg) {
 			"ciphertext":     r.Ciphertext,
 			"senderKeyId":    msg.SenderKeyID,
 			"timestamp":      now,
+			"replyToId":      msg.ReplyToID,
 		})
 		// Если задан deviceId получателя — доставляем только на это устройство
 		if r.DeviceID != "" {

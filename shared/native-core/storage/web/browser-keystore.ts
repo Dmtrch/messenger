@@ -192,3 +192,12 @@ export const loadPushSubscription = defaultBrowserCryptoStore.loadPushSubscripti
 export const savePreKeyReplenishTime = defaultBrowserCryptoStore.savePreKeyReplenishTime.bind(defaultBrowserCryptoStore)
 export const isPreKeyReplenishOnCooldown =
   defaultBrowserCryptoStore.isPreKeyReplenishOnCooldown.bind(defaultBrowserCryptoStore)
+
+// Хранение и получение известного публичного Identity Key удалённого пользователя
+export async function saveKnownPeerIK(userId: string, ikPublic: string, store = defaultStore): Promise<void> {
+  await set(`known_ik:${userId}`, ikPublic, store)
+}
+
+export async function loadKnownPeerIK(userId: string, store = defaultStore): Promise<string | undefined> {
+  return get<string>(`known_ik:${userId}`, store)
+}
