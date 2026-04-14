@@ -34,6 +34,8 @@ class ChatWindowViewModel(
                     id = row.id, clientMsgId = row.client_msg_id, chatId = row.chat_id,
                     senderId = row.sender_id, plaintext = row.plaintext,
                     timestamp = row.timestamp, status = row.status, isDeleted = row.is_deleted != 0L,
+                    mediaId = row.media_id, mediaKey = row.media_key,
+                    originalName = row.original_name, contentType = row.content_type,
                 )
             }
             val existing = chatStore.messages.value[chatId] ?: emptyList()

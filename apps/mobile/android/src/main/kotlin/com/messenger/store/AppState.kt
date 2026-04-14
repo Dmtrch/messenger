@@ -19,6 +19,10 @@ data class MessageItem(
     val timestamp: Long,
     val status: String,
     val isDeleted: Boolean,
+    val mediaId: String? = null,
+    val mediaKey: String? = null,
+    val originalName: String? = null,
+    val contentType: String? = null,
 )
 
 data class AuthState(
