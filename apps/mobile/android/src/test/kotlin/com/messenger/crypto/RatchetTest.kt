@@ -1,8 +1,8 @@
 // apps/mobile/android/src/test/kotlin/com/messenger/crypto/RatchetTest.kt
 package com.messenger.crypto
 
-import com.goterl.lazysodium.LazySodiumJava
-import com.goterl.lazysodium.SodiumJava
+import com.goterl.lazysodium.LazySodiumAndroid
+import com.goterl.lazysodium.SodiumAndroid
 import kotlinx.serialization.json.*
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -10,7 +10,7 @@ import java.io.File
 import java.util.Base64
 
 class RatchetTest {
-    private val sodium = LazySodiumJava(SodiumJava())
+    private val sodium = LazySodiumAndroid(SodiumAndroid())
     private val b64Dec = Base64.getDecoder()
     private val b64Enc = Base64.getEncoder()
 
