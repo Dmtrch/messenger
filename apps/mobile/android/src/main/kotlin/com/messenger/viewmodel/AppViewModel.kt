@@ -41,7 +41,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setServerUrl(url: String) {
         ServerConfig.serverUrl = url
-        apiClient = ApiClient(baseUrl = url, tokenStore = tokenStore)
+        apiClient = ApiClient(baseUrl = url, tokenStore = tokenStore, sodium = sodium)
     }
 
     suspend fun login(username: String, password: String): Result<Unit> {

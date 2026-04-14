@@ -1,6 +1,8 @@
 // apps/mobile/android/src/main/kotlin/com/messenger/service/ApiClient.kt
 package com.messenger.service
 
+import com.goterl.lazysodium.LazySodium
+import com.goterl.lazysodium.interfaces.SecretBox
 import io.ktor.client.*
 import io.ktor.client.call.body
 import io.ktor.client.engine.HttpClientEngine
@@ -10,10 +12,12 @@ import io.ktor.client.plugins.auth.providers.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.client.request.*
+import io.ktor.client.request.forms.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.util.Base64
 
 @Serializable data class LoginRequest(val username: String, val password: String)
 @Serializable data class LoginResponse(val accessToken: String, val refreshToken: String)
@@ -37,15 +41,21 @@ import kotlinx.serialization.json.Json
     val signedPreKeySignature: String,
     val oneTimePreKeys: List<String>,
 )
+@Serializable data class MediaUploadResponse(val mediaId: String)
+data class MediaUploadResult(val mediaId: String, val mediaKey: String)
 
 private val applicationJson = ContentType.Application.Json.toString()
+private const val MAX_UPLOAD_BYTES = 10 * 1024 * 1024  // 10 МБ
 
 class ApiClient(
     val baseUrl: String,
     engine: HttpClientEngine? = null,
     private val tokenStore: TokenStoreInterface,
+    private val sodium: LazySodium,
 ) {
     private val jsonConfig = Json { ignoreUnknownKeys = true }
+    private val b64enc = Base64.getEncoder()
+    private val b64dec = Base64.getDecoder()
 
     val http: HttpClient = run {
         val cfg: HttpClientConfig<*>.() -> Unit = {
@@ -99,6 +109,61 @@ class ApiClient(
             setBody(req)
         }
         if (!resp.status.isSuccess()) error("registerKeys failed: ${resp.status}")
+    }
+
+    /**
+     * Шифрует bytes на клиенте (XSalsa20-Poly1305) и загружает на сервер.
+     * Возвращает mediaId и base64-кодированный mediaKey.
+     */
+    suspend fun uploadEncryptedMedia(
+        bytes: ByteArray,
+        filename: String,
+        contentType: String,
+        chatId: String,
+        msgId: String,
+    ): MediaUploadResult {
+        if (bytes.size > MAX_UPLOAD_BYTES) error("Файл слишком большой (макс. 10 МБ)")
+
+        val key = sodium.randomBytesBuf(SecretBox.KEYBYTES)
+        val nonce = sodium.randomBytesBuf(SecretBox.NONCEBYTES)
+        val cipher = ByteArray(bytes.size + SecretBox.MACBYTES)
+        check(sodium.cryptoSecretBoxEasy(cipher, bytes, bytes.size.toLong(), nonce, key)) {
+            "Ошибка шифрования"
+        }
+        val combined: ByteArray = nonce + cipher
+
+        val response: MediaUploadResponse = http.post("$baseUrl/api/media/upload") {
+            setBody(MultiPartFormDataContent(formData {
+                append("chat_id", chatId)
+                append("msg_id", msgId)
+                append("file", combined, Headers.build {
+                    append(HttpHeaders.ContentType, "application/octet-stream")
+                    append(HttpHeaders.ContentDisposition, "filename=encrypted")
+                })
+            }))
+        }.body()
+
+        return MediaUploadResult(
+            mediaId = response.mediaId,
+            mediaKey = b64enc.encodeToString(key),
+        )
+    }
+
+    /**
+     * Скачивает зашифрованный blob и расшифровывает его.
+     * Формат: nonce(24 байта) + ciphertext.
+     */
+    suspend fun fetchDecryptedMedia(mediaId: String, mediaKeyBase64: String): ByteArray {
+        val key = b64dec.decode(mediaKeyBase64)
+        val combined: ByteArray = http.get("$baseUrl/api/media/$mediaId").body()
+        check(combined.size > SecretBox.NONCEBYTES) { "Слишком короткий ответ сервера" }
+        val nonce = combined.copyOfRange(0, SecretBox.NONCEBYTES)
+        val cipher = combined.copyOfRange(SecretBox.NONCEBYTES, combined.size)
+        val plain = ByteArray(cipher.size - SecretBox.MACBYTES)
+        check(sodium.cryptoSecretBoxOpenEasy(plain, cipher, cipher.size.toLong(), nonce, key)) {
+            "Ошибка расшифровки медиа"
+        }
+        return plain
     }
 
     fun wsUrl(token: String): String {
