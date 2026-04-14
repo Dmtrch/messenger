@@ -3,21 +3,9 @@ package com.messenger.crypto
 
 import android.content.Context
 import android.util.Base64
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 
 class KeyStorage(context: Context) : AutoCloseable {
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
-
-    private val prefs = EncryptedSharedPreferences.create(
-        context,
-        "messenger_crypto_keys",
-        masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    private val prefs = context.getSharedPreferences("messenger_crypto_keys", Context.MODE_PRIVATE)
 
     fun saveKey(alias: String, keyBytes: ByteArray) {
         prefs.edit()

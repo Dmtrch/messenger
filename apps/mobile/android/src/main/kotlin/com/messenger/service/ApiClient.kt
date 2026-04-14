@@ -47,28 +47,31 @@ class ApiClient(
 ) {
     private val jsonConfig = Json { ignoreUnknownKeys = true }
 
-    val http: HttpClient = HttpClient(engine ?: OkHttp) {
-        install(ContentNegotiation) { json(jsonConfig) }
-        install(WebSockets)
-        install(Auth) {
-            bearer {
-                loadTokens {
-                    val acc = tokenStore.accessToken
-                    val ref = tokenStore.refreshToken
-                    if (acc.isNotEmpty()) BearerTokens(acc, ref) else null
-                }
-                refreshTokens {
-                    val resp: RefreshResponse = client.post("$baseUrl/api/auth/refresh") {
-                        markAsRefreshTokenRequest()
-                        headers { append(HttpHeaders.ContentType, applicationJson) }
-                        setBody(mapOf("refreshToken" to tokenStore.refreshToken))
-                    }.body()
-                    tokenStore.save(resp.accessToken, resp.refreshToken)
-                    BearerTokens(resp.accessToken, resp.refreshToken)
+    val http: HttpClient = run {
+        val cfg: HttpClientConfig<*>.() -> Unit = {
+            install(ContentNegotiation) { json(jsonConfig) }
+            install(WebSockets)
+            install(Auth) {
+                bearer {
+                    loadTokens {
+                        val acc = tokenStore.accessToken
+                        val ref = tokenStore.refreshToken
+                        if (acc.isNotEmpty()) BearerTokens(acc, ref) else null
+                    }
+                    refreshTokens {
+                        val resp: RefreshResponse = client.post("$baseUrl/api/auth/refresh") {
+                            markAsRefreshTokenRequest()
+                            headers { append(HttpHeaders.ContentType, applicationJson) }
+                            setBody(mapOf("refreshToken" to tokenStore.refreshToken))
+                        }.body()
+                        tokenStore.save(resp.accessToken, resp.refreshToken)
+                        BearerTokens(resp.accessToken, resp.refreshToken)
+                    }
                 }
             }
         }
-        expectSuccess = false
+        if (engine != null) HttpClient(engine).config(cfg)
+        else HttpClient(OkHttp, cfg)
     }
 
     suspend fun login(username: String, password: String): LoginResponse {

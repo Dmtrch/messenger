@@ -7,7 +7,7 @@
     <application
         android:name=".MessengerApp"
         android:label="Messenger"
-        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar"
+        android:theme="@android:style/Theme.NoTitleBar"
         android:allowBackup="true">
 
         <activity

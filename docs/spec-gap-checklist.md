@@ -78,13 +78,13 @@
 - [x] `sendMessage` — DB persist + WS dispatch + outbox fallback при offline
 - [x] Нативные дистрибутивы: `.dmg` (macOS), `.msi` (Windows), `.deb` (Linux)
 
-### 11C-2 Android ⬜ Не начат
+### 11C-2 Android ✅ MVP выполнен
 
-- [ ] Gradle scaffold + Compose Activity + Manifest
-- [ ] Crypto адаптеры (lazysodium-android)
-- [ ] ApiClient + MessengerWS (Ktor Android engine)
-- [ ] SQLDelight или Room база данных
-- [ ] UI экраны (Jetpack Compose)
+- [x] Gradle scaffold + Compose Activity + Manifest
+- [x] Crypto адаптеры (lazysodium-android)
+- [x] ApiClient + MessengerWS (Ktor Android engine)
+- [x] SQLDelight или Room база данных
+- [x] UI экраны (Jetpack Compose)
 - [ ] Push notifications (FCM)
 
 ### 11C-3 iOS ⬜ Не начат

@@ -9,6 +9,7 @@ import com.messenger.ui.screens.*
 import com.messenger.viewmodel.AppViewModel
 import com.messenger.viewmodel.ChatListViewModel
 import com.messenger.viewmodel.ChatWindowViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 
 sealed class Screen {
