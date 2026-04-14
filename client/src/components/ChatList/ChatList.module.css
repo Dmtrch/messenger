@@ -19,16 +19,25 @@
 }
 .item:active { background: var(--bg-secondary); }
 
+.avatarWrap { position: relative; flex-shrink: 0; }
+
 .avatar {
   width: 3rem; height: 3rem;
   border-radius: 50%;
   background: var(--accent);
-  flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
   font-size: 1.25rem; font-weight: 600; color: #fff;
 }
 .avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+.onlineDot {
+  position: absolute; bottom: 1px; right: 1px;
+  width: 0.75rem; height: 0.75rem;
+  border-radius: 50%;
+  background: #22c55e;
+  border: 2px solid var(--bg-primary, #fff);
+}
 
 .content { flex: 1; min-width: 0; }
 

@@ -7,6 +7,7 @@ interface ChatState {
   chats: Chat[]
   messages: Record<string, Message[]>
   typingUsers: Record<string, string[]>  // chatId → userId[]
+  presenceMap: Record<string, boolean>   // userId → isOnline
   setChats: (chats: Chat[]) => void
   upsertChat: (chat: Chat) => void
   addMessage: (msg: Message, currentUserId?: string) => void
@@ -15,6 +16,7 @@ interface ChatState {
   deleteMessage: (chatId: string, msgId: string) => void
   editMessage: (chatId: string, clientMsgId: string, newText: string) => void
   setTyping: (chatId: string, userId: string, isTyping: boolean) => void
+  setPresence: (userId: string, online: boolean) => void
   markRead: (chatId: string) => void
   reset: () => void
 }
@@ -23,6 +25,7 @@ export const useChatStore = create<ChatState>((set) => ({
   chats: [],
   messages: {},
   typingUsers: {},
+  presenceMap: {},
 
   setChats: (chats) => {
     set({ chats })
@@ -132,6 +135,9 @@ export const useChatStore = create<ChatState>((set) => ({
       return { typingUsers: { ...s.typingUsers, [chatId]: next } }
     }),
 
+  setPresence: (userId, online) =>
+    set((s) => ({ presenceMap: { ...s.presenceMap, [userId]: online } })),
+
   markRead: (chatId) =>
     set((s) => ({
       chats: s.chats.map((c) =>
@@ -140,5 +146,5 @@ export const useChatStore = create<ChatState>((set) => ({
     })),
 
   // Сброс состояния при смене сервера
-  reset: () => set({ chats: [], messages: {} }),
+  reset: () => set({ chats: [], messages: {}, presenceMap: {} }),
 }))

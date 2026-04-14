@@ -15,6 +15,7 @@ export interface MessengerWSOrchestratorDeps {
   deleteMessage(chatId: string, msgId: string): void
   editMessage(chatId: string, clientMsgId: string, newText: string): void
   markRead(chatId: string): void
+  setPresence(userId: string, online: boolean): void
   setSend(fn: ((frame: WSSendFrame) => boolean) | null): void
   logout(): void
   clearAccessToken(): void
@@ -164,6 +165,7 @@ export function createMessengerWSOrchestrator(deps: MessengerWSOrchestratorDeps)
           break
 
         case 'presence':
+          deps.setPresence(frame.userId, frame.status === 'online')
           break
 
         case 'skdm':

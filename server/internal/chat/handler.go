@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -21,8 +23,9 @@ type Broadcaster interface {
 }
 
 type Handler struct {
-	DB  *sql.DB
-	Hub Broadcaster
+	DB       *sql.DB
+	Hub      Broadcaster
+	MediaDir string // для удаления файлов при удалении сообщения
 }
 
 type ChatDTO struct {
@@ -302,6 +305,16 @@ func (h *Handler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 	if err := db.DeleteMessages(h.DB, clientMsgID, userID); err != nil {
 		httpErr(w, "server error", 500)
 		return
+	}
+
+	// Удаляем связанные медиафайлы (если загружались с msg_id)
+	if h.MediaDir != "" {
+		if filenames, err := db.DeleteMediaByMsgID(h.DB, clientMsgID); err == nil {
+			for _, name := range filenames {
+				path := filepath.Join(h.MediaDir, filepath.Clean(name))
+				os.Remove(path) //nolint:errcheck
+			}
+		}
 	}
 
 	// Уведомляем всех участников чата
