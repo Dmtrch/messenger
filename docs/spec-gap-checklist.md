@@ -112,8 +112,8 @@
 - [x] **5A Сервер (Go):** `logger/logger.go` (slog JSON → logs/errors.log, lumberjack ротация), `middleware/logging.go` (RequestLogger access-лог, Recoverer panic → structured error)
 - [x] **5B Веб-клиент (PWA):** `client/src/lib/logger.ts` (error/warn/info, IndexedDB хранение, батч-отправка), `window.onerror`/`onunhandledrejection` в `main.tsx`, `POST /api/client-errors` на сервере
 - [x] **5C Android:** `ErrorLogger.kt` синглтон (JSON в filesDir/logs/errors.log, ротация 5МБ, UncaughtExceptionHandler, flushToServer при старте), подключён в `MessengerApp.onCreate`
-- [ ] **5D Desktop:** `AppErrorLogger.kt` + logback, UncaughtExceptionHandler
-- [ ] **5E iOS:** `AppErrorLogger.swift` + OSLog, NSSetUncaughtExceptionHandler
+- [x] **5D Desktop:** `AppErrorLogger.kt` (kotlinx.serialization.json, без новых зависимостей), `~/.messenger/logs/errors.log`, UncaughtExceptionHandler, flushToServer при старте
+- [x] **5E iOS:** `AppErrorLogger.swift` (os.Logger, Documents/logs/errors.log, ротация 5МБ, NSSetUncaughtExceptionHandler, flushToServer), инициализация в `MessengerApp.init()`
 
 ## Звонки (этап 9)
 

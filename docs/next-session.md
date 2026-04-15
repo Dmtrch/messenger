@@ -151,11 +151,18 @@ Priority 3 — **ЗАВЕРШЕНО** (CALLS-B: все 4 задачи выпол
 
 ---
 
-### Приоритет 5 — Логирование ошибок
+### Приоритет 5 — Логирование ошибок ✅ ЗАВЕРШЕНО
 
 **Задача: централизованное логирование ошибок с сохранением в директорию для последующего анализа и фиксации багов**
 
 Охват: сервер (Go), веб-клиент (PWA), нативные приложения (Desktop, Android, iOS).
+
+**Реализовано:**
+- ✅ 5A — Go server: `log/slog` + `lumberjack`, RequestLogger/Recoverer middleware, `logs/errors.log`
+- ✅ 5B — Web PWA: `logger.ts` + IndexedDB + `/api/client-errors` endpoint, global onerror/onunhandledrejection
+- ✅ 5C — Android: `ErrorLogger.kt` singleton, JSON lines, crash handler, flush при старте
+- ✅ 5D — Desktop: `AppErrorLogger.kt` (kotlinx.serialization.json), `~/.messenger/logs`, crash handler
+- ✅ 5E — iOS: `AppErrorLogger.swift`, os.Logger, Documents/logs/errors.log, NSSetUncaughtExceptionHandler
 
 #### Сервер (Go)
 
