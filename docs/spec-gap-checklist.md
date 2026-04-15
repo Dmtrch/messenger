@@ -104,7 +104,16 @@
 - [x] `CallOverlay` — входящий/исходящий/активный звонок поверх NavigationStack
 - [x] `SessionManager.swift` — полный X3DH + Double Ratchet совместимый с web-клиентом; wire format base64(JSON), HMAC-SHA256 chain advance, BLAKE2b KDF, group SenderKey + SKDM
 - [x] Push notifications (APNs) — `AppDelegate` (#if canImport(UIKit)), `UNUserNotificationCenterDelegate`, `onAPNsTokenReceived` → `POST /api/push/native/register`
-- [x] `MessengerCrypto` SPM target — crypto-only target, компилируется на macOS; `swift test` 6/6
+- [x] `MessengerCrypto` SPM target — crypto-only target, компилируется на macOS; `swift test` 8/8
+- [x] WebRTC CALLS-B — `iOSWebRtcController` (PeerConnectionFactory, real SDP/ICE), `RTCMTLVideoView` видеопотоки, `VideoContainerView`, `bindVideoRenderers`; `#if canImport(WebRTC)` guard; `swift test` 8/8
+
+## Приоритет 5 — Логирование ошибок
+
+- [x] **5A Сервер (Go):** `logger/logger.go` (slog JSON → logs/errors.log, lumberjack ротация), `middleware/logging.go` (RequestLogger access-лог, Recoverer panic → structured error)
+- [x] **5B Веб-клиент (PWA):** `client/src/lib/logger.ts` (error/warn/info, IndexedDB хранение, батч-отправка), `window.onerror`/`onunhandledrejection` в `main.tsx`, `POST /api/client-errors` на сервере
+- [x] **5C Android:** `ErrorLogger.kt` синглтон (JSON в filesDir/logs/errors.log, ротация 5МБ, UncaughtExceptionHandler, flushToServer при старте), подключён в `MessengerApp.onCreate`
+- [ ] **5D Desktop:** `AppErrorLogger.kt` + logback, UncaughtExceptionHandler
+- [ ] **5E iOS:** `AppErrorLogger.swift` + OSLog, NSSetUncaughtExceptionHandler
 
 ## Звонки (этап 9)
 

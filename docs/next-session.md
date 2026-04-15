@@ -107,14 +107,14 @@ Priority 3 — **ЗАВЕРШЕНО** (CALLS-B: все 4 задачи выпол
 - ✅ Push notifications (FCM) — сервер + Android `MessengerFirebaseService` + token registration
 - ✅ `swift test` — все 6 crypto тестов зелёные
 
-**Не реализовано (следующая сессия):**
-- WebRTC/видеозвонки на iOS
+**Реализовано в текущей сессии:**
+- ✅ WebRTC/видеозвонки на iOS — `iOSWebRtcController`, real SDP/ICE, `RTCMTLVideoView`
 
 ## Что уже завершено и не трогать повторно
 
 - `apps/mobile/android/` — полный MVP + file transfer + call signaling (Step A+B) + FCM push, `assembleDebug` + `testDebugUnitTest` зелёные
 - `apps/desktop/` — полный MVP + file transfer + call signaling (Step A), `./gradlew build` зелёный
-- `apps/mobile/ios/` — MVP + APNs push завершён: полный E2E crypto, REST/WS, GRDB v2, все экраны, APNs push; `swift test` 6/6 зелёных; WebRTC/video не реализован
+- `apps/mobile/ios/` — MVP + APNs push + WebRTC CALLS-B завершён: полный E2E crypto, REST/WS, GRDB v2, все экраны, APNs push, `iOSWebRtcController` + RTCMTLVideoView; `swift test` 8/8 зелёных
 - `shared/native-core/` — runtime modules, web adapters, call stack
 - `client/` web PWA — все фичи до этапа 12 включительно
 - `server/` Go backend — все миграции #1–16 (включая `native_push_tokens`)

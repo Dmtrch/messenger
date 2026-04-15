@@ -368,7 +368,7 @@
 - WebRTC Step B: `AndroidWebRtcController` (PeerConnectionFactory, real offer/answer/ICE), flat signaling contract, `AndroidVideoRendererBinding`, `SurfaceViewRenderer` video UI
 - `./gradlew testDebugUnitTest` → BUILD SUCCESSFUL; `./gradlew assembleDebug` → BUILD SUCCESSFUL
 
-### Этап E — iOS ✅ MVP + Push Закрыт
+### Этап E — iOS ✅ MVP + Push + WebRTC CALLS-B Закрыт
 
 **Реализовано (`apps/mobile/ios/`):**
 
@@ -378,12 +378,10 @@
 - Сервисы: `ApiClient.swift` (URLSession actor, multipart, auto-refresh, registerNativePushToken), `WSOrchestrator.swift` (WebSocket + exponential backoff), `TokenStore.swift`
 - UI: `ServerSetupScreen`, `AuthScreen`, `ChatListScreen`, `ChatWindowScreen` (MessageBubble, FileCard, TypingIndicator), `ProfileScreen`
 - `AppViewModel.swift` — связывает все слои, WS reconnect, registerKeys, call signaling, `onAPNsTokenReceived`
-- `CallOverlay` — входящий/исходящий/активный звонок поверх NavigationStack (stub SDP)
+- `CallOverlay` — входящий/исходящий/активный звонок поверх NavigationStack; RTCMTLVideoView remote fullscreen + local inset
 - APNs push: `AppDelegate` в `App.swift` (`#if canImport(UIKit)`), `UNUserNotificationCenterDelegate`, `onAPNsTokenReceived` → `POST /api/push/native/register`
-- `swift test` → 6/6 тестов зелёных (X3DHTests×2, RatchetTests×4)
-
-**Не реализовано (следующая сессия):**
-- WebRTC/видеозвонки на iOS
+- WebRTC CALLS-B: `iOSWebRtcController.swift` (PeerConnectionFactory, real SDP offer/answer, ICE drain, `bindRenderers`), `VideoContainerView` (RTCMTLVideoView), `pendingIncomingOfferSdp`, `fetchRtcIceServers`, `#if canImport(WebRTC)` guard для `swift test`
+- `swift test` → 8/8 тестов зелёных (X3DHTests×2, RatchetTests×4, SenderKeyTests×2)
 
 **Обязательное требование для всех:** cursor-based догрузка старой истории с сервера.
 
@@ -444,6 +442,36 @@
 
 ---
 
+## Этап 13. Централизованное логирование ошибок 🟡 В работе
+
+### Цель этапа
+
+Добавить структурированное логирование ошибок с файловым хранением и отправкой на сервер для последующего анализа и фиксации багов.
+
+### Задачи
+
+**5A — Сервер (Go) ✅ Закрыт**
+- `server/internal/logger/logger.go`: slog JSON handler → `logs/errors.log` + stderr, lumberjack ротация (50 МБ)
+- `server/internal/middleware/logging.go`: `RequestLogger` (access-лог в `logs/access.log`), `Recoverer` (panic → structured error + HTTP 500)
+- `logs/` добавлена в `.gitignore`
+
+**5B — Веб-клиент (PWA) ✅ Закрыт**
+- `client/src/lib/logger.ts`: error/warn/info, timestamp + userId + route, IndexedDB (last 200), батч-отправка каждые 30с или при 10 записях
+- `main.tsx`: `window.onerror` + `window.onunhandledrejection`
+- `POST /api/client-errors` (публичный): принимает батч, пишет через slog
+
+**5C — Android ✅ Закрыт**
+- `ErrorLogger.kt`: JSON-лог в `filesDir/logs/errors.log`, ротация при 5 МБ, `UncaughtExceptionHandler`, `flushToServer()` при старте
+- `MessengerApp.onCreate`: `ErrorLogger.init(this)` + `flushToServer(serverUrl)`
+
+**5D — Desktop (Kotlin) ⬜ Следующий**
+- `AppErrorLogger.kt` + logback, `Thread.setDefaultUncaughtExceptionHandler`
+- Файл: `~/.messenger/logs/errors.log`, ротация `SizeAndTimeBasedRollingPolicy`
+
+**5E — iOS ⬜ Следующий**
+- `AppErrorLogger.swift` + OSLog, `NSSetUncaughtExceptionHandler`
+- Файл: `Documents/logs/errors.log`, `flushToServer()` при старте
+
 ## Рекомендуемый порядок выполнения
 
 1. Этап 1
@@ -458,6 +486,7 @@
 10. Этап 10
 11. Этап 11 (A → B → C → D → E)
 12. Этап 12
+13. Этап 13 (5A → 5B → 5C → 5D → 5E)
 
 ## Критерий завершения
 

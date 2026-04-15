@@ -81,7 +81,7 @@ Self-hosted мессенджер с E2E-шифрованием, серверно
 
 - `Desktop` ✅ **MVP завершён** — Kotlin Compose Desktop, file transfer, WebRTC Step A (stub SDP);
 - `Android` ✅ **Полный MVP завершён** — Kotlin + Jetpack Compose, file transfer (XSalsa20), WebRTC Step A + Step B (реальный SDP/ICE, video UI с `SurfaceViewRenderer`), push (FCM);
-- `iOS` ✅ **MVP + Push завершён** — SwiftUI + swift-sodium 0.9.1 + GRDB.swift 6.27.0; полный E2E crypto (X3DH, Double Ratchet, SenderKey, SessionManager), REST + WebSocket (URLSession), SQLite v2, все экраны, APNs push; `swift test` → 6/6 зелёных;
+- `iOS` ✅ **MVP + Push + WebRTC CALLS-B завершён** — SwiftUI + swift-sodium 0.9.1 + GRDB.swift 6.27.0; полный E2E crypto (X3DH, Double Ratchet, SenderKey, SessionManager), REST + WebSocket (URLSession), SQLite v2, все экраны, APNs push; `iOSWebRtcController` + RTCMTLVideoView; `swift test` → 8/8 зелёных;
 - shared остаются только protocol/domain/core контракты и E2E-модель.
 
 `client/` остаётся web-каналом, но не становится базой для новых приложений.
@@ -491,7 +491,7 @@ messenger/
 | Web PWA | ✅ | ✅ (`RTCPeerConnection`) | ✅ (`<video>` элементы) |
 | Desktop (Kotlin) | ✅ | stub | stub (intentional) |
 | Android (Kotlin) | ✅ | ✅ (`AndroidWebRtcController`) | ✅ (`SurfaceViewRenderer`) |
-| iOS (SwiftUI) | ⬜ | ⬜ | ⬜ |
+| iOS (SwiftUI) | ✅ | ✅ (`iOSWebRtcController`) | ✅ (`RTCMTLVideoView`) |
 
 ### WS-события сигнализации ✅ Реализованы (этап 9)
 

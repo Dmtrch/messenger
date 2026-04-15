@@ -94,7 +94,7 @@ messenger/
 - `shared/domain/` — language-neutral contract layer;
 - `shared/native-core/` — реализованный runtime-пакет, source-of-truth для web и native клиентов;
 - `apps/mobile/android/` — ✅ полный MVP: file transfer (XSalsa20/Coil), WebRTC Step A+B (реальный SDP/ICE, video UI), FCM push;
-- `apps/mobile/ios/` — ✅ MVP + APNs push завершён: полный E2E crypto, REST/WS (URLSession), SQLite GRDB v2, все экраны, APNs push; только WebRTC/video не реализован.
+- `apps/mobile/ios/` — ✅ MVP + APNs push + WebRTC CALLS-B завершён: полный E2E crypto, REST/WS (URLSession), SQLite GRDB v2, все экраны, APNs push, `iOSWebRtcController` + RTCMTLVideoView; `swift test` 8/8.
 
 ### Структура `apps/desktop/` (реализовано)
 
@@ -180,7 +180,7 @@ apps/mobile/ios/
 
 Запуск тестов:
 ```bash
-cd apps/mobile/ios && swift test   # 6/6 тестов зелёные
+cd apps/mobile/ios && swift test   # 8/8 тестов зелёные
 # Полное приложение: открыть в Xcode → создать iOS App target → добавить Sources/Messenger/
 ```
 
@@ -240,7 +240,7 @@ cd apps/mobile/ios && swift test   # 6/6 тестов зелёные
 
 - `Desktop`: `Kotlin + Compose Multiplatform Desktop` ✅ **MVP + file transfer + WebRTC Step A** (`apps/desktop/`)
 - `Android`: `Kotlin + Compose` ✅ **Полный MVP завершён** (`apps/mobile/android/`) — file transfer (XSalsa20, Coil EncryptedMediaFetcher) + WebRTC Step A (сигнализация, CallOverlay) + WebRTC Step B (реальный SDP/ICE: `AndroidWebRtcController`, `SurfaceViewRenderer` video UI)
-- `iOS`: `SwiftUI` + swift-sodium + GRDB ✅ **MVP + APNs завершён** (`apps/mobile/ios/`) — WebRTC/video не реализован
+- `iOS`: `SwiftUI` + swift-sodium + GRDB ✅ **MVP + APNs + WebRTC CALLS-B завершён** (`apps/mobile/ios/`) — `iOSWebRtcController`, RTCMTLVideoView; `swift test` 8/8
 - локальная БД: `SQLite` (SQLDelight 2.x на desktop, SQLDelight 2.x на Android v2 schema, GRDB на iOS)
 - crypto: `libsodium` family — `lazysodium-java 5.1.4` на JVM/Desktop, `lazysodium-android 5.1.0` (JNI) на Android, `swift-sodium` на iOS
 - cursor-based pagination обязательна для всех клиентов
@@ -1820,11 +1820,10 @@ Frontend (Vitest): `ratchet.test.ts` (11 тестов: round-trip, out-of-order,
 Нативные клиенты:
 
 - **Desktop** (`apps/desktop/`) ✅ — MVP + file transfer (XSalsa20) + WebRTC Step A (stub SDP);
-- **Android** (`apps/mobile/android/`) ✅ — полный MVP + file transfer + WebRTC Step A+B (реальный SDP/ICE, `AndroidWebRtcController`, video UI с `SurfaceViewRenderer`);
-- **iOS** (`apps/mobile/ios/`) ⬜ — следующий приоритет: SwiftUI + swift-sodium + GRDB.
+- **Android** (`apps/mobile/android/`) ✅ — полный MVP + file transfer + WebRTC Step A+B (реальный SDP/ICE, `AndroidWebRtcController`, video UI с `SurfaceViewRenderer`) + FCM push + `ErrorLogger`;
+- **iOS** (`apps/mobile/ios/`) ✅ — полный MVP + APNs push + WebRTC CALLS-B (`iOSWebRtcController`, RTCMTLVideoView); `swift test` 8/8.
 
 Оставшиеся открытые зоны:
 
-- iOS клиент (не начат);
-- Push notifications на Android (FCM) и iOS (APNs);
+- Логирование ошибок: Desktop (5D) и iOS (5E) — `AppErrorLogger` ещё не реализован;
 - групповые звонки (требуют SFU/LiveKit — отдельный сервис).
