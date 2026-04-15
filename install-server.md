@@ -13,6 +13,10 @@
 Рабочая папка — текущий каталог, в котором находится этот файл.
 В папке `server/` лежит Go-исходник сервера.
 
+**Первым делом определи ОС:**
+- Если Windows — выполняй только раздел [Windows](#windows-установка).
+- Если Linux или macOS — выполняй основные шаги 1–13.
+
 Выполни все шаги по порядку. После каждого шага убедись, что он завершился успешно, прежде чем переходить к следующему.
 Не спрашивай подтверждения между шагами — выполни весь процесс автономно от начала до конца.
 В конце выведи итоговую сводку с URL сервера и учётными данными администратора.
@@ -340,3 +344,290 @@ sudo setcap cap_net_bind_service=+ep server/bin/server
 **Внешний запрос не проходит, внутренний работает** — проверь firewall (шаг 5) и правила безопасности у хостинг-провайдера (Security Groups, Network ACL).
 
 **Сервер не стартует после перезагрузки** — убедись, что `systemctl enable messenger` выполнен.
+
+---
+
+## Windows — установка
+
+> Этот раздел выполняется **вместо** шагов 1–13, если ОС — Windows.
+> Все команды выполняются в **PowerShell от имени администратора**.
+> Открой: Пуск → PowerShell → правая кнопка → «Запуск от имени администратора».
+
+---
+
+### W-1. Определить окружение
+
+```powershell
+$env:OS
+[System.Environment]::OSVersion.VersionString
+[System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture
+$env:USERNAME
+$PWD.Path
+```
+
+Запомни полный путь к текущей папке — он понадобится в шаге W-6.
+
+---
+
+### W-2. Проверить и установить Go 1.22+
+
+```powershell
+go version
+```
+
+Если Go не установлен или версия ниже 1.22:
+
+```powershell
+# Скачать MSI-установщик Go 1.22 для Windows amd64
+$goVersion = "1.22.5"
+$goArch = if ([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -eq "Arm64") { "arm64" } else { "amd64" }
+$url = "https://go.dev/dl/go$goVersion.windows-$goArch.msi"
+Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\go-installer.msi"
+Start-Process msiexec.exe -Wait -ArgumentList "/i $env:TEMP\go-installer.msi /quiet"
+$env:PATH = "C:\Program Files\Go\bin;" + $env:PATH
+```
+
+Проверь: `go version` должен показать 1.22+.
+
+---
+
+### W-3. Определить публичный IP-адрес
+
+```powershell
+$publicIP = (Invoke-WebRequest -Uri "https://ifconfig.me" -UseBasicParsing).Content.Trim()
+Write-Host "Публичный IP: $publicIP"
+```
+
+Если первый запрос не прошёл, попробуй:
+```powershell
+$publicIP = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing).Content.Trim()
+```
+
+---
+
+### W-4. Выбрать порт
+
+По умолчанию — порт **8080**. Проверь, свободен ли он:
+
+```powershell
+$port = 8080
+$occupied = netstat -ano | Select-String ":$port "
+if ($occupied) {
+    Write-Host "Порт $port занят, пробую 8443..."
+    $port = 8443
+}
+Write-Host "Выбран порт: $port"
+```
+
+---
+
+### W-5. Открыть порт в Windows Firewall
+
+```powershell
+New-NetFirewallRule `
+  -DisplayName "Messenger Server" `
+  -Direction Inbound `
+  -Protocol TCP `
+  -LocalPort $port `
+  -Action Allow `
+  -Profile Any
+Write-Host "Правило firewall создано для порта $port"
+```
+
+Проверь, что правило добавлено:
+```powershell
+Get-NetFirewallRule -DisplayName "Messenger Server"
+```
+
+---
+
+### W-6. Создать config.yaml и директории
+
+Сгенерируй JWT_SECRET:
+```powershell
+$jwtSecret = [System.Web.Security.Membership]::GeneratePassword(32, 4)
+# Если нет System.Web, используй альтернативу:
+$jwtSecret = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 32 | ForEach-Object { [char]$_ })
+Write-Host "JWT_SECRET: $jwtSecret"
+```
+
+Придумай пароль администратора и подставь его ниже.
+
+Создай директорию для медиафайлов:
+```powershell
+New-Item -ItemType Directory -Force -Path "server\media"
+```
+
+Создай файл `server\config.yaml`:
+```powershell
+$adminPassword = "ЗАМЕНИ_НА_СВОЙ_ПАРОЛЬ"   # <-- вставь реальный пароль
+
+$config = @"
+port: "$port"
+db_path: "./messenger.db"
+media_dir: "./media"
+jwt_secret: "$jwtSecret"
+allowed_origin: "http://${publicIP}:${port}"
+behind_proxy: false
+stun_url: "stun:stun.l.google.com:19302"
+turn_url: ""
+turn_secret: ""
+server_name: "Messenger"
+server_description: "Самохостируемый мессенджер"
+registration_mode: "open"
+admin_username: "admin"
+admin_password: "$adminPassword"
+vapid_public_key: ""
+vapid_private_key: ""
+"@
+
+Set-Content -Path "server\config.yaml" -Value $config -Encoding UTF8
+Write-Host "config.yaml создан"
+```
+
+---
+
+### W-7. Собрать бинарник
+
+```powershell
+Push-Location server
+go mod download
+New-Item -ItemType Directory -Force -Path "bin"
+go build -o bin\server.exe .\cmd\server
+Pop-Location
+```
+
+Убедись, что файл создан:
+```powershell
+Test-Path "server\bin\server.exe"
+```
+
+---
+
+### W-8. Настроить автозапуск — Windows Service через NSSM
+
+NSSM ("Non-Sucking Service Manager") — простейший способ запустить любой исполняемый файл как Windows Service.
+
+**Установить NSSM:**
+```powershell
+# Скачать NSSM
+Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile "$env:TEMP\nssm.zip"
+Expand-Archive -Path "$env:TEMP\nssm.zip" -DestinationPath "$env:TEMP\nssm" -Force
+
+# Определить архитектуру и скопировать нужный бинарник
+$arch = if ([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -eq "Arm64") { "arm64" } else { "win64" }
+Copy-Item "$env:TEMP\nssm\nssm-2.24\$arch\nssm.exe" "C:\Windows\System32\nssm.exe"
+Write-Host "NSSM установлен"
+```
+
+**Зарегистрировать сервис:**
+```powershell
+$repoPath = $PWD.Path   # путь к корню репозитория
+
+nssm install MessengerServer "$repoPath\server\bin\server.exe"
+nssm set MessengerServer AppDirectory "$repoPath\server"
+nssm set MessengerServer DisplayName "Messenger Server"
+nssm set MessengerServer Description "Self-hosted E2E encrypted messenger"
+nssm set MessengerServer Start SERVICE_AUTO_START
+nssm set MessengerServer AppStdout "$repoPath\server\messenger.log"
+nssm set MessengerServer AppStderr "$repoPath\server\messenger-error.log"
+nssm set MessengerServer AppRotateFiles 1
+nssm set MessengerServer AppRotateBytes 10485760
+
+nssm start MessengerServer
+Write-Host "Сервис MessengerServer запущен"
+```
+
+---
+
+### W-9. Проверить запуск
+
+```powershell
+# Статус сервиса
+Get-Service -Name MessengerServer
+
+# Последние строки лога
+Start-Sleep -Seconds 3
+Get-Content "server\messenger.log" -Tail 20
+```
+
+Убедись, что в логе есть строка `listening on :<ПОРТ>` и нет `FATAL`.
+
+---
+
+### W-10. Проверить доступность
+
+Изнутри:
+```powershell
+Invoke-WebRequest -Uri "http://localhost:$port/api/server/info" -UseBasicParsing | Select-Object -ExpandProperty Content
+```
+
+Снаружи:
+```powershell
+Invoke-WebRequest -Uri "http://${publicIP}:${port}/api/server/info" -UseBasicParsing | Select-Object -ExpandProperty Content
+```
+
+Ожидаемый ответ — JSON с `server_name` и `registration_mode`.
+
+Если внешний запрос не проходит:
+1. Убедись, что правило firewall создано (шаг W-5).
+2. Проверь, не блокирует ли роутер порт (нужен port forwarding, если сервер за NAT).
+3. Если используется хостинг-провайдер — проверь Security Groups / Network ACL.
+
+---
+
+### W-11. Итоговая сводка (Windows)
+
+После успешной проверки выведи пользователю:
+
+```
+╔══════════════════════════════════════════════════╗
+║        СЕРВЕР MESSENGER ЗАПУЩЕН (Windows)        ║
+╠══════════════════════════════════════════════════╣
+║ URL сервера:  http://<IP>:<ПОРТ>                 ║
+║ Панель admin: http://<IP>:<ПОРТ>  (роль admin)   ║
+╠══════════════════════════════════════════════════╣
+║ Логин администратора:  admin                     ║
+║ Пароль администратора: <ПАРОЛЬ>                  ║
+╠══════════════════════════════════════════════════╣
+║ Режим регистрации:  open                         ║
+║ Конфигурация:  server\config.yaml                ║
+║ Лог сервера:   server\messenger.log              ║
+╠══════════════════════════════════════════════════╣
+║ Управление сервисом (PowerShell admin):          ║
+║   Start-Service MessengerServer                  ║
+║   Stop-Service  MessengerServer                  ║
+║   Restart-Service MessengerServer                ║
+║   Get-Content server\messenger.log -Tail 50 -Wait║
+╚══════════════════════════════════════════════════╝
+
+Как подключиться из приложения:
+  1. Открой Messenger (web, desktop или mobile)
+  2. На экране настройки сервера введи: http://<IP>:<ПОРТ>
+  3. Зарегистрируйся или войди под учётными данными admin
+```
+
+---
+
+### Устранение проблем на Windows
+
+**`go : The term 'go' is not recognized`** — Go не в PATH. Закрой и снова открой PowerShell как администратор, или выполни:
+```powershell
+$env:PATH = "C:\Program Files\Go\bin;" + $env:PATH
+```
+
+**`нет доступа` при создании сервиса** — PowerShell запущен не от администратора. Перезапусти.
+
+**Сервис падает сразу** — проверь лог:
+```powershell
+Get-Content "server\messenger-error.log" -Tail 30
+```
+Чаще всего причина: не найден `config.yaml` или пустой `jwt_secret`.
+
+**Внешний IP недоступен, локальный работает** — сервер за роутером с NAT. Нужно настроить **проброс порта (port forwarding)** на роутере: внешний порт `<ПОРТ>` → локальный IP машины → порт `<ПОРТ>`. Локальный IP получи командой: `(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" })[0].IPAddress`
+
+**Удалить сервис** (если нужно переустановить):
+```powershell
+nssm stop MessengerServer
+nssm remove MessengerServer confirm
+```
