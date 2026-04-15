@@ -82,7 +82,17 @@ func main() {
 		}
 	}
 
+	nativePushCfg := push.NativePushConfig{
+		FCMLegacyKey: cfg.FCMLegacyKey,
+		APNsKeyPath:  cfg.APNsKeyPath,
+		APNsKeyID:    cfg.APNsKeyID,
+		APNsTeamID:   cfg.APNsTeamID,
+		APNsBundleID: cfg.APNsBundleID,
+		APNsSandbox:  cfg.APNsSandbox,
+	}
+
 	hub := ws.NewHub(cfg.JWTSecret, database, cfg.VAPIDPrivate, cfg.VAPIDPublic, cfg.AllowedOrigin)
+	hub.SetNativePushConfig(nativePushCfg)
 
 	authHandler := &auth.Handler{
 		DB:               database,
@@ -95,7 +105,12 @@ func main() {
 	media.StartOrphanCleaner(database, cfg.MediaDir)
 	usersHandler := &users.Handler{DB: database}
 	keysHandler := &keys.Handler{DB: database}
-	pushHandler := &push.Handler{DB: database, VAPIDPublic: cfg.VAPIDPublic, VAPIDPrivate: cfg.VAPIDPrivate}
+	pushHandler := &push.Handler{
+		DB:           database,
+		VAPIDPublic:  cfg.VAPIDPublic,
+		VAPIDPrivate: cfg.VAPIDPrivate,
+		NativeCfg:    nativePushCfg,
+	}
 	serverinfoHandler := &serverinfo.Handler{
 		Name:             cfg.ServerName,
 		Description:      cfg.ServerDescription,
@@ -141,6 +156,7 @@ func main() {
 			r.Post("/keys/register", keysHandler.RegisterDevice)
 
 			r.Post("/push/subscribe", pushHandler.Subscribe)
+				r.Post("/push/native/register", pushHandler.RegisterNativeToken)
 
 			r.Post("/media/upload", mediaHandler.Upload)
 			r.Get("/media/{id}", mediaHandler.Serve)

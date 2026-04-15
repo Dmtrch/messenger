@@ -93,7 +93,8 @@ messenger/
 - `shared/protocol/` — formal schemas (REST, WebSocket, message envelope);
 - `shared/domain/` — language-neutral contract layer;
 - `shared/native-core/` — реализованный runtime-пакет, source-of-truth для web и native клиентов;
-- `apps/mobile/android/` и `apps/mobile/ios/` — только `README.md`, реализация не начата.
+- `apps/mobile/android/` — ✅ полный MVP: file transfer (XSalsa20/Coil), WebRTC Step A+B (реальный SDP/ICE, video UI), FCM push;
+- `apps/mobile/ios/` — ✅ MVP + APNs push завершён: полный E2E crypto, REST/WS (URLSession), SQLite GRDB v2, все экраны, APNs push; только WebRTC/video не реализован.
 
 ### Структура `apps/desktop/` (реализовано)
 
@@ -139,6 +140,49 @@ apps/desktop/
 - macOS: `./gradlew packageDmg`
 - Windows: `./gradlew packageMsi`
 - Linux: `./gradlew packageDeb`
+
+### Структура `apps/mobile/ios/` (реализовано)
+
+```text
+apps/mobile/ios/
+├── Package.swift                  # SPM: swift-sodium 0.9.1, GRDB.swift 6.27.0; MessengerCrypto + Messenger targets
+├── Sources/
+│   ├── MessengerCrypto/           # Крипто-ядро — компилируется на macOS (swift test)
+│   │   ├── X3DH.swift             # X3DH initiator (Clibsodium direct scalarmult)
+│   │   ├── Ratchet.swift          # Double Ratchet encrypt/decrypt
+│   │   └── SenderKey.swift        # Группы: SenderKey encrypt/decrypt
+│   └── Messenger/                 # Полный app-стек (открывается через Xcode)
+│       ├── App.swift              # NavigationStack + CallOverlay + AppDelegate (#if canImport(UIKit))
+│       ├── crypto/
+│       │   ├── X3DH.swift
+│       │   ├── Ratchet.swift
+│       │   ├── SenderKey.swift
+│       │   ├── KeyStorage.swift   # Keychain / UserDefaults, getOrCreateDeviceId
+│       │   └── SessionManager.swift # Полный X3DH + Double Ratchet, wire format base64(JSON)
+│       ├── db/
+│       │   ├── DatabaseManager.swift # GRDB schema v2 (4 media-колонки), versioned migrations
+│       │   └── ChatStore.swift    # @MainActor ObservableObject, чаты и сообщения
+│       ├── service/
+│       │   ├── ApiClient.swift    # URLSession actor, multipart, auto-refresh; registerNativePushToken
+│       │   ├── WSOrchestrator.swift # WebSocket + exponential backoff
+│       │   └── TokenStore.swift   # Хранение JWT
+│       ├── viewmodel/
+│       │   └── AppViewModel.swift # Связывает все слои, call signaling, onAPNsTokenReceived
+│       └── ui/screens/
+│           ├── ServerSetupScreen.swift
+│           ├── AuthScreen.swift
+│           ├── ChatListScreen.swift
+│           ├── ChatWindowScreen.swift  # MessageBubble, FileCard, TypingIndicator
+│           └── ProfileScreen.swift
+└── Tests/MessengerTests/
+    └── CryptoTests.swift          # 6 тестов: X3DH (2), Ratchet (4) — зелёные
+```
+
+Запуск тестов:
+```bash
+cd apps/mobile/ios && swift test   # 6/6 тестов зелёные
+# Полное приложение: открыть в Xcode → создать iOS App target → добавить Sources/Messenger/
+```
 
 ## 4. Технологический стек
 
@@ -194,11 +238,11 @@ apps/desktop/
 
 Архитектурные решения зафиксированы:
 
-- `Desktop`: `Kotlin + Compose Multiplatform Desktop` ✅ **MVP реализован** (`apps/desktop/`)
-- `Android`: `Kotlin + Compose` ⬜ не начат (`apps/mobile/android/` — только README)
-- `iOS`: `SwiftUI` поверх shared core ⬜ не начат (`apps/mobile/ios/` — только README)
-- локальная БД: `SQLite` (SQLDelight 2.x на desktop, Room или SQLDelight на Android, GRDB на iOS)
-- crypto: `libsodium` family — `lazysodium-java` на JVM, `swift-sodium` на iOS
+- `Desktop`: `Kotlin + Compose Multiplatform Desktop` ✅ **MVP + file transfer + WebRTC Step A** (`apps/desktop/`)
+- `Android`: `Kotlin + Compose` ✅ **Полный MVP завершён** (`apps/mobile/android/`) — file transfer (XSalsa20, Coil EncryptedMediaFetcher) + WebRTC Step A (сигнализация, CallOverlay) + WebRTC Step B (реальный SDP/ICE: `AndroidWebRtcController`, `SurfaceViewRenderer` video UI)
+- `iOS`: `SwiftUI` + swift-sodium + GRDB ✅ **MVP + APNs завершён** (`apps/mobile/ios/`) — WebRTC/video не реализован
+- локальная БД: `SQLite` (SQLDelight 2.x на desktop, SQLDelight 2.x на Android v2 schema, GRDB на iOS)
+- crypto: `libsodium` family — `lazysodium-java 5.1.4` на JVM/Desktop, `lazysodium-android 5.1.0` (JNI) на Android, `swift-sodium` на iOS
 - cursor-based pagination обязательна для всех клиентов
 
 Дополнительно уже реализован не только контрактный, но и runtime-слой Shared Core:
@@ -304,8 +348,8 @@ apps/desktop/
 
 Следующие шаги для native track:
 
-- **Stage 11C-2**: реализовать Android-клиент (`apps/mobile/android/`) — Jetpack Compose, Ktor Android engine, lazysodium-android;
-- **Stage 11C-3**: реализовать iOS-клиент (`apps/mobile/ios/`) — SwiftUI, URLSession, swift-sodium, GRDB.
+- **Stage 11C-2**: ✅ Android завершён — Jetpack Compose, Ktor Android engine, lazysodium-android, SQLDelight v2, file transfer, WebRTC Step A+B;
+- **Stage 11C-3**: ⬜ iOS — SwiftUI, URLSession/URLSessionWebSocketTask, swift-sodium, GRDB.
 
 ## 6. Backend: точка входа и конфигурация
 
@@ -1757,32 +1801,30 @@ Frontend (Vitest): `ratchet.test.ts` (11 тестов: round-trip, out-of-order,
 
 ## 30. Итог
 
-Проект уже представляет собой рабочий MVP self-hosted мессенджера с:
+Проект представляет собой рабочий self-hosted мессенджер с нативными клиентами:
 
-- JWT-аутентификацией;
-- SQLite persistence;
-- real-time доставкой через WebSocket;
-- PWA-клиентом;
-- локальным клиентским E2E-слоем;
-- поддержкой медиа, редактирования и удаления сообщений;
-- Web Push уведомлениями.
+- JWT-аутентификация, SQLite persistence, real-time WebSocket, PWA;
+- локальный E2E-слой (X3DH + Double Ratchet + Sender Keys);
+- медиа, редактирование/удаление сообщений, Web Push;
+- multi-server support, admin panel (roles, invites, approval mode).
 
-Этапы 1–8 плана `v1-gap-remediation.md` закрыты. Реализованы:
+Все этапы 1–12 плана `v1-gap-remediation.md` закрыты, включая:
 
-- security headers, rate limiting, bcrypt=12, SameSite=Strict, WS origin allowlist;
-- mediaId, JWT-защищённый медиадоступ, client-side encrypted media at rest (MIME скрыт, всегда `application/octet-stream`);
-- device entity, POST /api/keys/register (идемпотентный по IK pubkey);
-- server-driven unreadCount/updatedAt, opaque cursor pagination, read receipt broadcast;
-- skipped message keys (TTL 7 дней), prekey_low lifecycle (backoff 5 мин), Sender Keys для групп;
-- IndexedDB persistence истории и чатов, offline outbox с auto-resend, OfflineIndicator;
-- Sender Key ротация при изменении состава группы (`invalidateGroupSenderKey`);
-- backend тесты (5 пакетов, Go), frontend тесты (26 тестов, Vitest);
-- конфигурационный файл сервера (`config.yaml` + env-overrides, `gopkg.in/yaml.v3`);
-- смена пароля с инвалидацией всех сессий (`POST /api/auth/change-password`);
-- `initRatchet` следует Signal spec: Alice делает DH+KDF для sendChainKey, Bob ждёт первого входящего сообщения.
+- security headers, rate limiting, bcrypt=12, SameSite=Strict;
+- skipped message keys, Sender Key ротация, encrypted media at rest;
+- IndexedDB offline outbox, cursor pagination, read receipts;
+- полноценная multi-device модель (GET bundle per device, WS hub по device_id, fan-out шифрование);
+- WebRTC звонки 1-на-1 (STUN, TURN через `/api/calls/ice-servers`);
+- `shared/native-core` runtime-пакет, browser и native adapters.
 
-Незакрытые зоны:
+Нативные клиенты:
 
-- полноценный multi-device (GET bundle всех устройств, per-device ratchet на клиенте, WS hub по device_id).
+- **Desktop** (`apps/desktop/`) ✅ — MVP + file transfer (XSalsa20) + WebRTC Step A (stub SDP);
+- **Android** (`apps/mobile/android/`) ✅ — полный MVP + file transfer + WebRTC Step A+B (реальный SDP/ICE, `AndroidWebRtcController`, video UI с `SurfaceViewRenderer`);
+- **iOS** (`apps/mobile/ios/`) ⬜ — следующий приоритет: SwiftUI + swift-sodium + GRDB.
 
-С точки зрения разработки проект уже имеет хорошую основу: структура понятна, модули отделены, а ключевые пользовательские сценарии покрыты кодом.
+Оставшиеся открытые зоны:
+
+- iOS клиент (не начат);
+- Push notifications на Android (FCM) и iOS (APNs);
+- групповые звонки (требуют SFU/LiveKit — отдельный сервис).

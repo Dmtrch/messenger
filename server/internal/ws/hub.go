@@ -31,6 +31,7 @@ type Hub struct {
 	db            *sql.DB
 	vapidPrivate  string
 	vapidPublic   string
+	nativePush    push.NativePushConfig
 	allowedOrigin string // пустая строка = любой origin (dev-режим)
 	calls         map[string]*callSession // callID → активная сессия звонка
 	callsMu       sync.Mutex
@@ -58,6 +59,11 @@ func NewHub(jwtSecret string, database *sql.DB, vapidPrivate, vapidPublic, allow
 		vapidPublic:   vapidPublic,
 		allowedOrigin: allowedOrigin,
 	}
+}
+
+// SetNativePushConfig задаёт учётные данные для FCM / APNs после создания Hub.
+func (h *Hub) SetNativePushConfig(cfg push.NativePushConfig) {
+	h.nativePush = cfg
 }
 
 // checkOrigin проверяет Origin при WS-апгрейде.
@@ -372,12 +378,13 @@ func (h *Hub) handleMessage(c *client, msg inMsg) {
 		if h.IsOnline(r.UserID) {
 			db.MarkDelivered(h.db, msgID, now)
 		} else if r.UserID != c.userID {
-			// Получатель offline — отправляем push-уведомление
+			// Получатель offline — отправляем push-уведомление (web + native)
 			pushPayload, _ := json.Marshal(map[string]any{
 				"type":   "message",
 				"chatId": msg.ChatID,
 			})
 			go push.SendNotification(h.db, h.vapidPrivate, h.vapidPublic, r.UserID, pushPayload)
+			go push.SendNativeNotification(h.db, h.nativePush, r.UserID, "New message", "You have a new message")
 		}
 	}
 

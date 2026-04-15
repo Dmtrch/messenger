@@ -1,9 +1,13 @@
 package ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
 import config.ServerConfig
 import kotlinx.coroutines.launch
+import store.CallStatus
 import ui.screens.*
 import viewmodel.AppViewModel
 import viewmodel.ChatListViewModel
@@ -22,6 +26,7 @@ fun App() {
     val vm = remember { AppViewModel() }
     val authState by vm.authState.collectAsState()
     val chats by vm.chatStore.chats.collectAsState()
+    val callState by vm.chatStore.call.collectAsState()
     val scope = rememberCoroutineScope()
 
     var screen by remember {
@@ -31,6 +36,7 @@ fun App() {
     }
 
     MaterialTheme {
+        Box(modifier = Modifier.fillMaxSize()) {
         when (val s = screen) {
             Screen.ServerSetup -> ServerSetupScreen(
                 onServerSet = { url -> vm.setServerUrl(url); screen = Screen.Auth },
@@ -67,6 +73,8 @@ fun App() {
                 }
                 val messages by cwVm.messages.collectAsState()
                 val typingUsers by cwVm.typingUsers.collectAsState()
+                val chat = chats.find { it.id == chatId }
+                val remoteUserId = chat?.members?.firstOrNull { it != authState.userId } ?: ""
                 ChatWindowScreen(
                     chatName = chatName,
                     messages = messages,
@@ -74,6 +82,11 @@ fun App() {
                     currentUserId = authState.userId,
                     onBack = { screen = Screen.ChatList },
                     onSend = { text -> vm.sendMessage(chatId, text) },
+                    onSendFile = { file -> cwVm.sendFile(file) },
+                    onFetchMedia = { mediaId, mediaKey -> cwVm.fetchMediaBytes(mediaId, mediaKey) },
+                    onCall = if (!chat?.isGroup!! && remoteUserId.isNotEmpty()) {
+                        { vm.initiateCall(chatId, remoteUserId, false) }
+                    } else null,
                 )
             }
             Screen.Profile -> ProfileScreen(
@@ -84,5 +97,18 @@ fun App() {
                 onChangeServer = { screen = Screen.ServerSetup },
             )
         }
+        // Оверлей звонка поверх всех экранов
+        if (callState.status != CallStatus.IDLE) {
+            val callChatName = chats.find { it.id == callState.chatId }?.name
+                ?: callState.remoteUserId
+            CallOverlay(
+                call = callState,
+                callerName = callChatName,
+                onAccept = { vm.acceptCall() },
+                onReject = { vm.rejectCall() },
+                onHangUp = { vm.hangUp() },
+            )
+        }
+        } // Box
     }
 }

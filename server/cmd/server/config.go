@@ -30,6 +30,13 @@ type Config struct {
 	RegistrationMode  string `yaml:"registration_mode"`
 	AdminUsername     string `yaml:"admin_username"`
 	AdminPassword     string `yaml:"admin_password"`
+	// Native push notifications
+	FCMLegacyKey  string `yaml:"fcm_legacy_key"`  // Firebase Server Key
+	APNsKeyPath   string `yaml:"apns_key_path"`   // путь к .p8 файлу
+	APNsKeyID     string `yaml:"apns_key_id"`
+	APNsTeamID    string `yaml:"apns_team_id"`
+	APNsBundleID  string `yaml:"apns_bundle_id"`
+	APNsSandbox   bool   `yaml:"apns_sandbox"`
 }
 
 // defaults — базовые значения, применяемые до yaml и env.
@@ -116,6 +123,24 @@ func loadConfig(path string) (Config, error) {
 	}
 	if v := os.Getenv("ADMIN_PASSWORD"); v != "" {
 		cfg.AdminPassword = v
+	}
+	if v := os.Getenv("FCM_LEGACY_KEY"); v != "" {
+		cfg.FCMLegacyKey = v
+	}
+	if v := os.Getenv("APNS_KEY_PATH"); v != "" {
+		cfg.APNsKeyPath = v
+	}
+	if v := os.Getenv("APNS_KEY_ID"); v != "" {
+		cfg.APNsKeyID = v
+	}
+	if v := os.Getenv("APNS_TEAM_ID"); v != "" {
+		cfg.APNsTeamID = v
+	}
+	if v := os.Getenv("APNS_BUNDLE_ID"); v != "" {
+		cfg.APNsBundleID = v
+	}
+	if v := os.Getenv("APNS_SANDBOX"); v != "" {
+		cfg.APNsSandbox = v == "true"
 	}
 
 	return cfg, nil

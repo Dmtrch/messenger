@@ -17,6 +17,7 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.put
 import java.util.Base64
 
 @Serializable data class LoginRequest(val username: String, val password: String)
@@ -27,7 +28,14 @@ import java.util.Base64
     val name: String,
     val isGroup: Boolean,
     val updatedAt: Long,
+    val members: List<String> = emptyList(),
 )
+@Serializable data class IceServerDto(
+    val urls: String,
+    val username: String? = null,
+    val credential: String? = null,
+)
+@Serializable data class IceServersResponse(val iceServers: List<IceServerDto>)
 @Serializable data class SendMessageRequest(
     val chatId: String,
     val clientMsgId: String,
@@ -103,12 +111,28 @@ class ApiClient(
     suspend fun getChats(): List<ChatSummaryDto> =
         http.get("$baseUrl/api/chats").body()
 
+    suspend fun getIceServers(): IceServersResponse =
+        http.get("$baseUrl/api/calls/ice-servers").body()
+
     suspend fun registerKeys(req: RegisterKeysRequest) {
         val resp = http.post("$baseUrl/api/keys/register") {
             headers { append(HttpHeaders.ContentType, applicationJson) }
             setBody(req)
         }
         if (!resp.status.isSuccess()) error("registerKeys failed: ${resp.status}")
+    }
+
+    /** Регистрирует нативный push-токен (FCM / APNs) на сервере. */
+    suspend fun registerNativePushToken(platform: String, token: String, deviceId: String) {
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("platform", platform)
+            put("token", token)
+            put("deviceId", deviceId)
+        }
+        http.post("$baseUrl/api/push/native/register") {
+            headers { append(HttpHeaders.ContentType, applicationJson) }
+            setBody(body.toString())
+        }
     }
 
     /**

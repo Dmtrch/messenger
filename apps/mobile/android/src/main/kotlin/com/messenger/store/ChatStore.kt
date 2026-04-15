@@ -15,6 +15,9 @@ class ChatStore {
     private val _typing = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
     val typing: StateFlow<Map<String, Set<String>>> = _typing.asStateFlow()
 
+    private val _call = MutableStateFlow(CallState())
+    val call: StateFlow<CallState> = _call.asStateFlow()
+
     fun setChats(list: List<ChatItem>) { _chats.value = list }
 
     fun isGroup(chatId: String): Boolean =
@@ -83,4 +86,31 @@ class ChatStore {
         current[chatId] = ((current[chatId] ?: emptyList()) + item).sortedBy { it.timestamp }
         _messages.value = current
     }
+
+    fun onCallOffer(callId: String, chatId: String, fromUserId: String, isVideo: Boolean = false) {
+        _call.value = CallState(CallStatus.RINGING_IN, callId, chatId, fromUserId, isVideo)
+    }
+
+    fun onCallAnswer(callId: String) {
+        val cur = _call.value
+        if (cur.callId == callId) _call.value = cur.copy(status = CallStatus.ACTIVE)
+    }
+
+    fun onCallEnd(callId: String) {
+        if (_call.value.callId == callId) _call.value = CallState()
+    }
+
+    fun setOutgoingCall(callId: String, chatId: String, targetId: String, isVideo: Boolean) {
+        _call.value = CallState(CallStatus.RINGING_OUT, callId, chatId, targetId, isVideo)
+    }
+
+    fun markLocalVideoReady(callId: String) {
+        if (_call.value.callId == callId) _call.value = _call.value.copy(hasLocalVideo = true)
+    }
+
+    fun markRemoteVideoReady(callId: String) {
+        if (_call.value.callId == callId) _call.value = _call.value.copy(hasRemoteVideo = true)
+    }
+
+    fun clearCall() { _call.value = CallState() }
 }

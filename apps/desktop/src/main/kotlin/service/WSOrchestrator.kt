@@ -21,13 +21,17 @@ class WSOrchestrator(
     fun onFrame(frame: JsonElement) {
         val obj = frame.jsonObject
         when (obj["type"]?.jsonPrimitive?.content) {
-            "message" -> handleMessage(obj)
-            "ack" -> handleAck(obj)
-            "typing" -> handleTyping(obj)
-            "read" -> handleRead(obj)
-            "message_deleted" -> handleDeleted(obj)
-            "message_edited" -> handleEdited(obj)
-            else -> { /* неизвестный фрейм — игнорируем */ }
+            "message"          -> handleMessage(obj)
+            "ack"              -> handleAck(obj)
+            "typing"           -> handleTyping(obj)
+            "read"             -> handleRead(obj)
+            "message_deleted"  -> handleDeleted(obj)
+            "message_edited"   -> handleEdited(obj)
+            "call_offer"       -> handleCallOffer(obj)
+            "call_answer"      -> handleCallAnswer(obj)
+            "call_end",
+            "call_reject"      -> handleCallEnd(obj)
+            else               -> { /* игнорируем */ }
         }
     }
 
@@ -75,6 +79,10 @@ class WSOrchestrator(
             timestamp = timestamp,
             status = "delivered",
             is_deleted = 0L,
+            media_id = null,
+            media_key = null,
+            original_name = null,
+            content_type = null,
         )
         chatStore.onMessageReceived(chatId, clientMsgId, String(plaintext), senderId, timestamp)
     }
@@ -104,6 +112,24 @@ class WSOrchestrator(
         val clientMsgId = obj["clientMsgId"]?.jsonPrimitive?.content ?: return
         DatabaseProvider.database.messengerQueries.softDeleteMessage(client_msg_id = clientMsgId)
         chatStore.onMessageDeleted(clientMsgId)
+    }
+
+    private fun handleCallOffer(obj: JsonObject) {
+        val callId   = obj["callId"]?.jsonPrimitive?.content ?: return
+        val chatId   = obj["chatId"]?.jsonPrimitive?.content ?: return
+        val senderId = obj["senderDeviceId"]?.jsonPrimitive?.content
+            ?: obj["senderId"]?.jsonPrimitive?.content ?: return
+        chatStore.onCallOffer(callId, chatId, senderId)
+    }
+
+    private fun handleCallAnswer(obj: JsonObject) {
+        val callId = obj["callId"]?.jsonPrimitive?.content ?: return
+        chatStore.onCallAnswer(callId)
+    }
+
+    private fun handleCallEnd(obj: JsonObject) {
+        val callId = obj["callId"]?.jsonPrimitive?.content ?: return
+        chatStore.onCallEnd(callId)
     }
 
     private fun handleEdited(obj: JsonObject) {

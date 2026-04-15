@@ -11,8 +11,12 @@ import kotlinx.coroutines.flow.StateFlow
 import service.ApiClient
 import service.MessengerWS
 import service.WSOrchestrator
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import store.AuthState
 import store.AuthStore
+import store.CallStatus
 import store.ChatStore
 
 class AppViewModel {
@@ -97,6 +101,10 @@ class AppViewModel {
             timestamp = timestamp,
             status = "sending",
             is_deleted = 0L,
+            media_id = null,
+            media_key = null,
+            original_name = null,
+            content_type = null,
         )
         chatStore.onMessageReceived(chatId, clientMsgId, plaintext, userId, timestamp)
 
@@ -123,6 +131,51 @@ class AppViewModel {
         }
     }
 
+    fun initiateCall(chatId: String, targetId: String, isVideo: Boolean) {
+        val callId = java.util.UUID.randomUUID().toString()
+        chatStore.setOutgoingCall(callId, chatId, targetId, isVideo)
+        sendCallFrame(buildJsonObject {
+            put("type", "call_offer")
+            put("callId", callId)
+            put("chatId", chatId)
+            put("targetId", targetId)
+            put("sdp", "stub-sdp") // Step B: real SDP from WebRTC
+        }.toString())
+    }
+
+    fun acceptCall() {
+        val call = chatStore.call.value
+        if (call.status != CallStatus.RINGING_IN) return
+        chatStore.onCallAnswer(call.callId)
+        sendCallFrame(buildJsonObject {
+            put("type", "call_answer")
+            put("callId", call.callId)
+            put("sdp", "stub-sdp")
+        }.toString())
+    }
+
+    fun rejectCall() {
+        val call = chatStore.call.value
+        chatStore.clearCall()
+        sendCallFrame(buildJsonObject {
+            put("type", "call_reject")
+            put("callId", call.callId)
+        }.toString())
+    }
+
+    fun hangUp() {
+        val call = chatStore.call.value
+        chatStore.clearCall()
+        sendCallFrame(buildJsonObject {
+            put("type", "call_end")
+            put("callId", call.callId)
+        }.toString())
+    }
+
+    private fun sendCallFrame(frame: String) {
+        wsSend?.invoke(frame)
+    }
+
     private suspend fun loadChats() {
         val client = apiClient ?: return
         try {
@@ -134,6 +187,7 @@ class AppViewModel {
                     isGroup = dto.isGroup,
                     lastMessage = null,
                     updatedAt = dto.updatedAt,
+                    members = dto.members,
                 )
             })
         } catch (_: Exception) { /* offline — DB покажет кэш */ }

@@ -91,6 +91,15 @@ var migrations = []Migration{
 	{ID: 14, SQL: `ALTER TABLE media_objects ADD COLUMN client_msg_id TEXT`},
 	// Migration 15: ссылка на цитируемое сообщение (MSG-9 Reply).
 	{ID: 15, SQL: `ALTER TABLE messages ADD COLUMN reply_to_id TEXT`},
+	// Migration 16: нативные push-токены (FCM / APNs).
+	{ID: 16, SQL: `CREATE TABLE IF NOT EXISTS native_push_tokens (
+		user_id    TEXT    NOT NULL,
+		device_id  TEXT    NOT NULL,
+		platform   TEXT    NOT NULL,
+		token      TEXT    NOT NULL,
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY (user_id, device_id)
+	)`},
 }
 
 // RunMigrations создаёт таблицу schema_migrations и применяет все

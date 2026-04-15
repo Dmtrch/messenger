@@ -722,6 +722,45 @@ func GetPushSubs(db *sql.DB, userID string) ([]PushSub, error) {
 	return subs, rows.Err()
 }
 
+// ─── Native push tokens ──────────────────────────────────────────────────────
+
+type NativePushToken struct {
+	UserID    string
+	DeviceID  string
+	Platform  string // "fcm" | "apns"
+	Token     string
+	UpdatedAt int64
+}
+
+func UpsertNativePushToken(db *sql.DB, t NativePushToken) error {
+	_, err := db.Exec(`
+		INSERT INTO native_push_tokens (user_id, device_id, platform, token, updated_at)
+		VALUES (?,?,?,?,?)
+		ON CONFLICT(user_id, device_id) DO UPDATE SET platform=excluded.platform, token=excluded.token, updated_at=excluded.updated_at`,
+		t.UserID, t.DeviceID, t.Platform, t.Token, t.UpdatedAt,
+	)
+	return err
+}
+
+func GetNativePushTokensByUserID(db *sql.DB, userID string) ([]NativePushToken, error) {
+	rows, err := db.Query(
+		`SELECT user_id, device_id, platform, token FROM native_push_tokens WHERE user_id=?`, userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tokens []NativePushToken
+	for rows.Next() {
+		var t NativePushToken
+		if err := rows.Scan(&t.UserID, &t.DeviceID, &t.Platform, &t.Token); err != nil {
+			return nil, err
+		}
+		tokens = append(tokens, t)
+	}
+	return tokens, rows.Err()
+}
+
 // ─── Media objects ────────────────────────────────────────────────────────────
 
 type MediaObject struct {

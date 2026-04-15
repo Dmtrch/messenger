@@ -78,23 +78,33 @@
 - [x] `sendMessage` — DB persist + WS dispatch + outbox fallback при offline
 - [x] Нативные дистрибутивы: `.dmg` (macOS), `.msi` (Windows), `.deb` (Linux)
 
-### 11C-2 Android ✅ MVP выполнен
+### 11C-2 Android ✅ Закрыт
 
 - [x] Gradle scaffold + Compose Activity + Manifest
 - [x] Crypto адаптеры (lazysodium-android)
 - [x] ApiClient + MessengerWS (Ktor Android engine)
-- [x] SQLDelight или Room база данных
+- [x] SQLDelight база данных (schema v2: 4 media-колонки)
 - [x] UI экраны (Jetpack Compose)
-- [ ] Push notifications (FCM)
+- [x] E2E передача файлов (XSalsa20, Coil EncryptedMediaFetcher, inline images, FileCard)
+- [x] WebRTC Step A — сигнализация + CallOverlay (IDLE→RINGING_IN/OUT→ACTIVE→IDLE)
+- [x] WebRTC Step B — реальный SDP/ICE: `AndroidWebRtcController`, `PeerConnectionFactory`, real offer/answer
+- [x] WebRTC Step B — flat WS signaling contract, типизированные `CallOfferSignal`/`CallAnswerSignal`/`IceCandidateSignal`
+- [x] WebRTC Step B — `CallState` flags (`hasLocalVideo`, `hasRemoteVideo`), `AndroidVideoRendererBinding`
+- [x] WebRTC Step B — video UI: `SurfaceViewRenderer` remote fullscreen + local inset в `CallOverlay`
+- [x] Push notifications (FCM) — `MessengerFirebaseService.kt`, `ApiClient.registerNativePushToken`, migration #16 `native_push_tokens`
 
-### 11C-3 iOS ⬜ Не начат
+### 11C-3 iOS ✅ MVP Закрыт
 
-- [ ] Swift Package Manager scaffold + SwiftUI App entry point
-- [ ] Crypto адаптеры (swift-sodium)
-- [ ] URLSession / URLSessionWebSocketTask transport
-- [ ] SQLite (GRDB или SQLite.swift)
-- [ ] SwiftUI экраны
-- [ ] Push notifications (APNs)
+- [x] Swift Package Manager scaffold + SwiftUI App entry point (`Package.swift`, `App.swift`)
+- [x] Crypto адаптеры (swift-sodium): `X3DH.swift`, `Ratchet.swift`, `SenderKey.swift`, `KeyStorage.swift` + unit tests
+- [x] URLSession transport: `ApiClient.swift` (REST + multipart + auto-refresh), `WSOrchestrator.swift` (WebSocket + exponential backoff)
+- [x] SQLite (GRDB): `DatabaseManager.swift` (schema v2, versioned migrations), `ChatStore.swift`
+- [x] SwiftUI экраны: `ServerSetupScreen`, `AuthScreen`, `ChatListScreen`, `ChatWindowScreen`, `ProfileScreen`
+- [x] `AppViewModel.swift` — связывает все слои, WS reconnect, registerKeys, call signaling
+- [x] `CallOverlay` — входящий/исходящий/активный звонок поверх NavigationStack
+- [x] `SessionManager.swift` — полный X3DH + Double Ratchet совместимый с web-клиентом; wire format base64(JSON), HMAC-SHA256 chain advance, BLAKE2b KDF, group SenderKey + SKDM
+- [x] Push notifications (APNs) — `AppDelegate` (#if canImport(UIKit)), `UNUserNotificationCenterDelegate`, `onAPNsTokenReceived` → `POST /api/push/native/register`
+- [x] `MessengerCrypto` SPM target — crypto-only target, компилируется на macOS; `swift test` 6/6
 
 ## Звонки (этап 9)
 

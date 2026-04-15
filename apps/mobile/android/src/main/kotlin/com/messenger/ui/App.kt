@@ -2,9 +2,14 @@
 package com.messenger.ui
 
 import android.app.Application
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
 import com.messenger.config.ServerConfig
+import com.messenger.service.call.AndroidVideoRendererBinding
+import com.messenger.store.CallStatus
 import com.messenger.ui.screens.*
 import com.messenger.viewmodel.AppViewModel
 import com.messenger.viewmodel.ChatListViewModel
@@ -27,7 +32,9 @@ fun App(application: Application) {
     )
     val authState by vm.authState.collectAsState()
     val chats by vm.chatStore.chats.collectAsState()
+    val callState by vm.chatStore.call.collectAsState()
     val scope = rememberCoroutineScope()
+    val rendererBinding = remember { AndroidVideoRendererBinding() }
 
     var screen by remember {
         mutableStateOf<Screen>(
@@ -36,6 +43,7 @@ fun App(application: Application) {
     }
 
     MaterialTheme {
+        Box(Modifier.fillMaxSize()) {
         when (val s = screen) {
             Screen.ServerSetup -> ServerSetupScreen(
                 onServerSet = { url -> vm.setServerUrl(url); screen = Screen.Auth },
@@ -61,7 +69,9 @@ fun App(application: Application) {
             }
             is Screen.ChatWindow -> {
                 val chatId = s.chatId
-                val chatName = chats.find { it.id == chatId }?.name ?: chatId
+                val chat = chats.find { it.id == chatId }
+                val chatName = chat?.name ?: chatId
+                val remoteUserId = chat?.members?.firstOrNull { it != authState.userId }
                 val client = vm.apiClient!!
                 val imageLoader = remember(client) {
                     coil.ImageLoader.Builder(application)
@@ -97,6 +107,9 @@ fun App(application: Application) {
                     onDownloadFile = { mediaId, mediaKey, name ->
                         cwVm.saveToDownloads(application, mediaId, mediaKey, name)
                     },
+                    onCall = if (remoteUserId != null) {
+                        { vm.initiateCall(chatId, remoteUserId, isVideo = false) }
+                    } else null,
                 )
             }
             Screen.Profile -> ProfileScreen(
@@ -107,5 +120,16 @@ fun App(application: Application) {
                 onChangeServer = { screen = Screen.ServerSetup },
             )
         }
+        if (callState.status != CallStatus.IDLE) {
+            CallOverlay(
+                callState = callState,
+                onAccept = { vm.acceptCall() },
+                onReject = { vm.rejectCall() },
+                onHangUp = { vm.hangUp() },
+                rendererBinding = if (callState.isVideo) rendererBinding else null,
+                onBindRenderers = { vm.bindVideoRenderers(rendererBinding) },
+            )
+        }
+        } // Box
     }
 }

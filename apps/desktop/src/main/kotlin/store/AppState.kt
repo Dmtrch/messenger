@@ -7,6 +7,17 @@ data class ChatItem(
     val lastMessage: String?,
     val updatedAt: Long,
     val unreadCount: Int = 0,
+    val members: List<String> = emptyList(),
+)
+
+enum class CallStatus { IDLE, RINGING_IN, RINGING_OUT, ACTIVE }
+
+data class CallState(
+    val status: CallStatus = CallStatus.IDLE,
+    val callId: String = "",
+    val chatId: String = "",
+    val remoteUserId: String = "",
+    val isVideo: Boolean = false,
 )
 
 data class MessageItem(
@@ -18,6 +29,10 @@ data class MessageItem(
     val timestamp: Long,
     val status: String,
     val isDeleted: Boolean,
+    val mediaId: String? = null,
+    val mediaKey: String? = null,
+    val originalName: String? = null,
+    val contentType: String? = null,
 )
 
 data class AuthState(

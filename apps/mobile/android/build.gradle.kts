@@ -52,6 +52,12 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("org.webrtc:google-webrtc:1.0.32006")
+    // FCM — для push-уведомлений. Требует google-services.json в корне модуля.
+    // Без него Firebase инициализируется gracefully (не крашит). Плагин google-services
+    // добавить вручную когда будет готов google-services.json:
+    //   plugins { id("com.google.gms.google-services") }
+    implementation("com.google.firebase:firebase-messaging:24.0.0")
     // TODO: re-enable when Google Maven is accessible (googleapis CDN 404 in this dev environment)
     // implementation(libs.security.crypto)
     implementation(libs.lifecycle.viewmodel)
@@ -61,6 +67,7 @@ dependencies {
     testImplementation(libs.coroutines.test)
     testImplementation(libs.ktor.client.mock)
     testImplementation(libs.lazysodium.java)
+    testImplementation("app.cash.sqldelight:sqlite-driver:2.0.2")
 }
 
 sqldelight {

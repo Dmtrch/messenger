@@ -1,16 +1,33 @@
 # План на следующую сессию
 
-Актуально на: 2026-04-14
+Актуально на: 2026-04-15
 Ветка: `main`
 
 ## Текущий статус
 
-Priority 3 — **в работе** (Android file transfer завершён).
+Priority 3 — **ЗАВЕРШЕНО** (CALLS-B: все 4 задачи выполнены, `assembleDebug` + `testDebugUnitTest` зелёные).
 
 **В текущей сессии выполнено:**
 - ✅ MEDIA-8: E2E передача файлов Android — XSalsa20 через lazysodium, Coil EncryptedMediaFetcher, inline изображения, карточка скачивания, DB schema v2
   - `./gradlew test` → BUILD SUCCESSFUL (7 тестов)
   - `./gradlew assembleDebug` → BUILD SUCCESSFUL
+- ✅ MEDIA-9: E2E передача файлов Desktop — XSalsa20 через lazysodium-java, AWT FileDialog, inline image (SkiaImage), FileCard + download dialog, DB миграция v1→v2
+  - `./gradlew build` → BUILD SUCCESSFUL
+- ✅ CALLS-A: WebRTC Step A (Signaling + UI) — Desktop + Android
+  - WS-сигнализация: `call_offer`, `call_answer`, `call_end`, `call_reject` (stub SDP)
+  - `CallOverlay.kt` (Desktop + Android): IncomingCall / OutgoingCall / ActiveCall
+  - Кнопка 📞 в TopAppBar, `CallState` machine (`IDLE→RINGING_IN/OUT→ACTIVE→IDLE`)
+  - `GET /api/calls/ice-servers` в `ApiClient.kt`
+  - `./gradlew assembleDebug` → BUILD SUCCESSFUL (Android)
+- ✅ CALLS-B / Task 1: Android signaling contracts зафиксированы
+- ✅ CALLS-B / Task 2: AndroidWebRtcController + real SDP/ICE wiring
+- ✅ CALLS-B / Task 3: CallState flags (hasLocalVideo/hasRemoteVideo) + AndroidVideoRendererBinding
+- ✅ CALLS-B / Task 4: Video UI — SurfaceViewRenderer в CallOverlay (remote fullscreen + local inset)
+  - Android переведён на flat WS contract для `call_offer`, `call_answer`, `ice_candidate`
+  - `WSOrchestrator` парсит `sdp`, `isVideo`, ICE-поля через типизированные signaling models
+  - `AppViewModel` больше не держит `stub-sdp` в контрактных test paths; исходящий `call_offer` включает `isVideo`
+  - Добавлены guards против фантомного call state без транспорта
+  - Локальная проверка: `cd apps/mobile/android && ./gradlew testDebugUnitTest --tests com.messenger.viewmodel.AppViewModelCallSignalingTest --tests com.messenger.service.WSOrchestratorCallSignalingTest` → BUILD SUCCESSFUL
 
 **Ранее завершено:**
 - ✅ MSG-9: Reply (DB migration #15, WS, REST, shared/native-core, UI)
@@ -25,28 +42,82 @@ Priority 3 — **в работе** (Android file transfer завершён).
 
 **Передача файлов Android** ✅ ЗАВЕРШЕНО
 
-**Передача файлов Desktop** (`apps/desktop/`) — **следующий шаг**
-- По аналогии с Android: кнопка 📎 в chat окне, шифрование через JVM-crypto (XSalsa20), multipart upload, inline preview + download card
-- Спецификация и план: создать по аналогии с `docs/superpowers/specs/2026-04-14-android-file-transfer-design.md`
+**Передача файлов Desktop** ✅ ЗАВЕРШЕНО
+- Кнопка 📎 (AWT FileDialog), XSalsa20 через lazysodium-java, multipart upload, inline image + FileCard + download dialog
+- DB миграция schema v1→v2 (4 media-колонки), `PRAGMA user_version` в DatabaseProvider
 
-**Звонки WebRTC** (`apps/desktop/`, `apps/mobile/android/`)
-- Добавить кнопку вызова в chat окно
-- Интегрировать WebRTC: Google WebRTC для Android, JNA-обёртка для Desktop
-- Подключить `/api/calls/ice-servers` в `ApiClient.kt` (Android) / аналог Desktop
+**Звонки WebRTC Step A** ✅ ЗАВЕРШЕНО (Desktop + Android)
+- WS-сигнализация, `CallOverlay`, кнопка вызова, stub SDP
+- Desktop: `CallOverlay.kt`, `App.kt`, `ChatWindowScreen.kt`, `AppViewModel.kt`, `WSOrchestrator.kt`
+- Android: аналогичный набор файлов
+
+**Звонки WebRTC Step B** — **в работе**
+
+**Task 1: signaling contracts** ✅ ЗАВЕРШЕНО
+- Flat WS contract для Android (`call_offer`, `call_answer`, `ice_candidate`)
+- Типизированные signaling models + callbacks в `WSOrchestrator`
+- Контрактные Android unit tests на offer/answer/isVideo/ICE и guard'ы без транспорта
+
+**Task 2: real Android WebRTC controller + SDP/ICE wiring** ✅ ЗАВЕРШЕНО
+- `AndroidWebRtcController.kt` — `PeerConnectionFactory`, `createOffer/Answer`, ICE
+- `AppViewModel` — `pendingIncomingOffers`, controller bridge, signaling callbacks
+- `WSOrchestrator` — `onCallOffer/Answer/IceCandidate` callbacks
+- `build.gradle.kts` — `org.webrtc:google-webrtc:1.0.32006`
+
+**Task 3: state flags + renderer binding** ✅ ЗАВЕРШЕНО
+- `CallState` — `hasLocalVideo`, `hasRemoteVideo`, `errorText`
+- `ChatStore` — `markLocalVideoReady()`, `markRemoteVideoReady()`
+- `AndroidVideoRendererBinding.kt` — holder `EglBase + renderer refs + release()`
+- `AndroidWebRtcController` — `onLocalVideoReady`/`onRemoteVideoReady` callbacks, `bindRenderers()`
+- `AppViewModel` — передаёт callbacks в controller
+- `ChatStoreCallStateTest.kt` — 5 тестов, зелёные
+
+**Task 4: video UI (`SurfaceViewRenderer`)** ✅ ЗАВЕРШЕНО
+- `CallOverlay.kt` — `AndroidView(SurfaceViewRenderer)` remote fullscreen + local inset 120×180dp
+- `App.kt` — `remember { AndroidVideoRendererBinding() }`, передаётся при `isVideo`
+- `AppViewModel.bindVideoRenderers()` — вызывается из overlay после первого фрейма
+- `assembleDebug` + `testDebugUnitTest` → BUILD SUCCESSFUL
 
 ---
 
-### Приоритет 4 — iOS** (SwiftUI + Swift Concurrency)
-- libsodium через Swift Package Manager (swift-sodium)
-- SQLite через GRDB или SQLite.swift
+### Приоритет 4 — iOS ✅ MVP Закрыт
+
+**Выполнено в текущей сессии:**
+- Package.swift (swift-sodium 0.9.1, GRDB.swift 6.27.0, Clibsodium)
+- `crypto/`: X3DH.swift, Ratchet.swift, SenderKey.swift, KeyStorage.swift + CryptoTests
+- `db/DatabaseManager.swift` — GRDB schema v2 (4 media-колонки), versioned DatabaseMigrator
+- `service/`: ApiClient.swift (URLSession actor, auto-refresh), WSOrchestrator.swift (WebSocket + backoff), TokenStore.swift
+- `store/ChatStore.swift` — @MainActor ObservableObject, полный набор методов
+- `viewmodel/AppViewModel.swift` — связывает все слои, call signaling, outbox fallback
+- `ui/screens/`: ServerSetupScreen, AuthScreen, ChatListScreen, ChatWindowScreen (MessageBubble, FileCard, TypingIndicator), ProfileScreen
+- `App.swift` — NavigationStack, CallOverlay, AppRoute
+
+**Структура:** 20 файлов в `apps/mobile/ios/Sources/Messenger/` + тест
+
+**Для запуска:**
+```bash
+# Открыть в Xcode: File → Open → apps/mobile/ios/
+# Создать iOS App target → добавить Sources/Messenger/ → добавить @main к MessengerApp
+# swift test  — тестирует крипто без Xcode
+```
+
+**Реализовано в этой сессии:**
+- ✅ Полный E2E crypto flow (`SessionManager.swift` — Double Ratchet + X3DH web-compatible)
+- ✅ Push notifications (APNs) — сервер + iOS AppDelegate + token registration
+- ✅ Push notifications (FCM) — сервер + Android `MessengerFirebaseService` + token registration
+- ✅ `swift test` — все 6 crypto тестов зелёные
+
+**Не реализовано (следующая сессия):**
+- WebRTC/видеозвонки на iOS
 
 ## Что уже завершено и не трогать повторно
 
-- `apps/mobile/android/` — полный MVP + file transfer, все тесты зелёные, APK собирается
-- `apps/desktop/` — полный MVP, все тесты зелёные
+- `apps/mobile/android/` — полный MVP + file transfer + call signaling (Step A+B) + FCM push, `assembleDebug` + `testDebugUnitTest` зелёные
+- `apps/desktop/` — полный MVP + file transfer + call signaling (Step A), `./gradlew build` зелёный
+- `apps/mobile/ios/` — MVP + APNs push завершён: полный E2E crypto, REST/WS, GRDB v2, все экраны, APNs push; `swift test` 6/6 зелёных; WebRTC/video не реализован
 - `shared/native-core/` — runtime modules, web adapters, call stack
 - `client/` web PWA — все фичи до этапа 12 включительно
-- `server/` Go backend — все миграции #1–15
+- `server/` Go backend — все миграции #1–16 (включая `native_push_tokens`)
 
 ## Ключевые решения Android (справка)
 
@@ -56,19 +127,33 @@ Priority 3 — **в работе** (Android file transfer завершён).
 - `ChatListViewModel` / `ChatWindowViewModel` инстанциируются через `remember {}` (не `viewModel()`)
 - DB schema v2: 4 nullable media-колонки в `message`, миграция `1.sqm`
 - Coil `EncryptedMediaFetcher` — кастомный fetcher, расшифровывает медиа на лету через `ApiClient.fetchDecryptedMedia`
+- CALLS-B Task 1: Android call signaling канонизирован как flat WS payload, синхронизирован с Desktop/server
+- Для Task 2 pending incoming `offerSdp` хранить вне `CallState`, не смешивать UI state и signaling payload
+
+## Ключевые решения Desktop (справка)
+
+- `lazysodium-java:5.1.4` (JNA) — тот же API, что на Android; `LazySodiumJava(SodiumJava())` внутри `ApiClient`
+- DB миграция через `PRAGMA user_version`: 0 → create schema + v2; 1 → ALTER TABLE x4 + v2; ≥2 → ничего
+- Нет Coil: изображения грузятся через `LaunchedEffect` + `SkiaImage.makeFromEncoded(bytes).toComposeImageBitmap()`
+- File picker: `java.awt.FileDialog` на `Dispatchers.Main` (AWT EDT)
+- `onFetchMedia` и `onSendFile` пробрасываются через `App.kt → ChatWindowScreen → MessageBubble/FileCard`
+- `Icons.Default.AttachFile` нет в базовом наборе — используется `Icons.Default.Add`
 
 ## Ключевые документы
 
 - `docs/superpowers/specs/native-client-architecture.md`
 - `docs/superpowers/specs/native-client-compatibility-matrix.md`
 - `docs/superpowers/specs/2026-04-14-android-file-transfer-design.md`
+- `docs/superpowers/specs/2026-04-15-android-webrtc-step-b-design.md`
+- `docs/superpowers/plans/2026-04-15-android-webrtc-step-b.md`
 - `docs/architecture.md`
 - `docs/technical-documentation.md`
 
 ## Обязательная проверка после следующего шага
 
-1. `cd apps/mobile/android && ./gradlew test`
-2. `cd apps/mobile/android && ./gradlew assembleDebug`
-3. `cd client && npm run type-check`
-4. `cd client && npm run lint`
-5. При изменениях в crypto — сверка с `shared/test-vectors/*.json`
+1. `cd apps/desktop && ./gradlew build`
+2. `cd apps/mobile/android && ./gradlew test`
+3. `cd apps/mobile/android && ./gradlew assembleDebug`
+4. `cd client && npm run type-check`
+5. `cd client && npm run lint`
+6. При изменениях в crypto — сверка с `shared/test-vectors/*.json`

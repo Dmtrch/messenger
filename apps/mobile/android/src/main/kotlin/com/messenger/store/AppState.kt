@@ -8,6 +8,20 @@ data class ChatItem(
     val lastMessage: String?,
     val updatedAt: Long,
     val unreadCount: Int = 0,
+    val members: List<String> = emptyList(),
+)
+
+enum class CallStatus { IDLE, RINGING_IN, RINGING_OUT, ACTIVE }
+
+data class CallState(
+    val status: CallStatus = CallStatus.IDLE,
+    val callId: String = "",
+    val chatId: String = "",
+    val remoteUserId: String = "",
+    val isVideo: Boolean = false,
+    val hasLocalVideo: Boolean = false,
+    val hasRemoteVideo: Boolean = false,
+    val errorText: String? = null,
 )
 
 data class MessageItem(

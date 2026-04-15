@@ -77,14 +77,14 @@ Self-hosted мессенджер с E2E-шифрованием, серверно
 
 ### Расширение архитектуры для native track
 
-С текущего состояния проект имеет один реальный клиентский runtime: `client/` как React PWA. Для нативных клиентов принят отдельный архитектурный трек:
+Проект имеет несколько клиентских рантаймов с общим backend и E2E-моделью:
 
-- `Desktop`: отдельный desktop-native runtime, не оболочка над PWA;
-- `Android`: отдельный mobile-native runtime;
-- `iOS`: отдельный native UI слой на `SwiftUI`;
+- `Desktop` ✅ **MVP завершён** — Kotlin Compose Desktop, file transfer, WebRTC Step A (stub SDP);
+- `Android` ✅ **Полный MVP завершён** — Kotlin + Jetpack Compose, file transfer (XSalsa20), WebRTC Step A + Step B (реальный SDP/ICE, video UI с `SurfaceViewRenderer`), push (FCM);
+- `iOS` ✅ **MVP + Push завершён** — SwiftUI + swift-sodium 0.9.1 + GRDB.swift 6.27.0; полный E2E crypto (X3DH, Double Ratchet, SenderKey, SessionManager), REST + WebSocket (URLSession), SQLite v2, все экраны, APNs push; `swift test` → 6/6 зелёных;
 - shared остаются только protocol/domain/core контракты и E2E-модель.
 
-Иными словами, `client/` остаётся web-каналом, но не становится базой для новых приложений.
+`client/` остаётся web-каналом, но не становится базой для новых приложений.
 
 ### Текущее состояние Shared Core
 
@@ -483,6 +483,15 @@ messenger/
 [Клиент A] ◄─────────── WebRTC P2P медиапоток ───────────────→ [Клиент B]
                (при невозможности P2P — через TURN-релей)
 ```
+
+### Статус реализации по платформам
+
+| Платформа | Сигнализация | SDP/ICE | Video UI |
+|---|---|---|---|
+| Web PWA | ✅ | ✅ (`RTCPeerConnection`) | ✅ (`<video>` элементы) |
+| Desktop (Kotlin) | ✅ | stub | stub (intentional) |
+| Android (Kotlin) | ✅ | ✅ (`AndroidWebRtcController`) | ✅ (`SurfaceViewRenderer`) |
+| iOS (SwiftUI) | ⬜ | ⬜ | ⬜ |
 
 ### WS-события сигнализации ✅ Реализованы (этап 9)
 

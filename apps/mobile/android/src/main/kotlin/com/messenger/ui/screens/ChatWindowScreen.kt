@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,6 +37,7 @@ fun ChatWindowScreen(
     onSendFile: (Uri) -> Unit,
     onClearUploadError: () -> Unit,
     onDownloadFile: suspend (mediaId: String, mediaKey: String, originalName: String) -> Unit = { _, _, _ -> },
+    onCall: (() -> Unit)? = null,
 ) {
     var text by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -63,6 +65,13 @@ fun ChatWindowScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад")
+                    }
+                },
+                actions = {
+                    if (onCall != null) {
+                        IconButton(onClick = onCall) {
+                            Icon(Icons.Default.Call, contentDescription = "Позвонить")
+                        }
                     }
                 },
             )

@@ -351,9 +351,39 @@
 - `sendMessage` — DB persist + WS dispatch + outbox offline fallback + `@Volatile` для thread safety
 - Нативные дистрибутивы: `.dmg` (macOS), `.msi` (Windows), `.deb` (Linux)
 
-### Этапы D / E — Android → iOS
+### Этап D — Android ✅ Закрыт
 
-**Последовательность:** Android вторым, iOS последним.
+**Реализовано (`apps/mobile/android/`):**
+
+- Gradle scaffold + Compose Activity + Manifest + lazysodium-android 5.1.0 (JNI)
+- Крипто: `X3DH.kt`, `Ratchet.kt`, `SenderKey.kt`, `KeyStorage.kt` (SharedPreferences) — верифицированы против `shared/test-vectors/*.json`
+- БД: SQLDelight schema v2 (message + 4 nullable media-колонки) + `DatabaseProvider` + миграция `1.sqm`
+- Сервисы: `ApiClient` (Ktor Android engine, Auth bearer, auto-refresh), `TokenStore`, `MessengerWS` (exponential backoff), `WSOrchestrator`
+- Stores: `AuthStore`, `ChatStore` (StateFlow)
+- ViewModels: `AppViewModel`, `ChatListViewModel`, `ChatWindowViewModel`
+- UI: `ServerSetupScreen`, `AuthScreen`, `ChatListScreen`, `ChatWindowScreen`, `ProfileScreen`
+- `sendMessage` — DB persist + WS dispatch + outbox offline fallback
+- E2E передача файлов: кнопка 📎, XSalsa20 через lazysodium, multipart upload, Coil `EncryptedMediaFetcher`, inline images + FileCard + download
+- WebRTC Step A: WS-сигнализация, `CallOverlay` (IncomingCall/OutgoingCall/ActiveCall), `CallState` machine
+- WebRTC Step B: `AndroidWebRtcController` (PeerConnectionFactory, real offer/answer/ICE), flat signaling contract, `AndroidVideoRendererBinding`, `SurfaceViewRenderer` video UI
+- `./gradlew testDebugUnitTest` → BUILD SUCCESSFUL; `./gradlew assembleDebug` → BUILD SUCCESSFUL
+
+### Этап E — iOS ✅ MVP + Push Закрыт
+
+**Реализовано (`apps/mobile/ios/`):**
+
+- Swift Package Manager scaffold: `Package.swift` (swift-sodium 0.9.1, GRDB.swift 6.27.0), `MessengerCrypto` target (macOS-совместимый) + `Messenger` target (Xcode)
+- Крипто: `X3DH.swift` (Clibsodium direct scalarmult), `Ratchet.swift`, `SenderKey.swift`, `KeyStorage.swift` + `SessionManager.swift` (полный X3DH + Double Ratchet, wire format base64(JSON), HMAC-SHA256 chain advance, BLAKE2b KDF, group SenderKey + SKDM)
+- БД: `DatabaseManager.swift` (GRDB schema v2, 4 media-колонки, versioned migrations), `ChatStore.swift`
+- Сервисы: `ApiClient.swift` (URLSession actor, multipart, auto-refresh, registerNativePushToken), `WSOrchestrator.swift` (WebSocket + exponential backoff), `TokenStore.swift`
+- UI: `ServerSetupScreen`, `AuthScreen`, `ChatListScreen`, `ChatWindowScreen` (MessageBubble, FileCard, TypingIndicator), `ProfileScreen`
+- `AppViewModel.swift` — связывает все слои, WS reconnect, registerKeys, call signaling, `onAPNsTokenReceived`
+- `CallOverlay` — входящий/исходящий/активный звонок поверх NavigationStack (stub SDP)
+- APNs push: `AppDelegate` в `App.swift` (`#if canImport(UIKit)`), `UNUserNotificationCenterDelegate`, `onAPNsTokenReceived` → `POST /api/push/native/register`
+- `swift test` → 6/6 тестов зелёных (X3DHTests×2, RatchetTests×4)
+
+**Не реализовано (следующая сессия):**
+- WebRTC/видеозвонки на iOS
 
 **Обязательное требование для всех:** cursor-based догрузка старой истории с сервера.
 
