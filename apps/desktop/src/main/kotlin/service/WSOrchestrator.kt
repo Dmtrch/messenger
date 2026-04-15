@@ -4,6 +4,9 @@ import crypto.Ratchet
 import crypto.SenderKey
 import db.DatabaseProvider
 import kotlinx.serialization.json.*
+import service.call.CallAnswerSignal
+import service.call.CallOfferSignal
+import service.call.IceCandidateSignal
 import store.ChatStore
 
 /**
@@ -15,6 +18,9 @@ class WSOrchestrator(
     private val senderKey: SenderKey,
     private val chatStore: ChatStore,
     private val currentUserId: String,
+    private val onCallOffer: (CallOfferSignal) -> Unit = {},
+    private val onCallAnswer: (CallAnswerSignal) -> Unit = {},
+    private val onIceCandidate: (IceCandidateSignal) -> Unit = {},
 ) {
     private val b64Dec = java.util.Base64.getDecoder()
 
@@ -29,6 +35,7 @@ class WSOrchestrator(
             "message_edited"   -> handleEdited(obj)
             "call_offer"       -> handleCallOffer(obj)
             "call_answer"      -> handleCallAnswer(obj)
+            "ice_candidate"    -> handleIceCandidate(obj)
             "call_end",
             "call_reject"      -> handleCallEnd(obj)
             else               -> { /* игнорируем */ }
@@ -119,12 +126,27 @@ class WSOrchestrator(
         val chatId   = obj["chatId"]?.jsonPrimitive?.content ?: return
         val senderId = obj["senderDeviceId"]?.jsonPrimitive?.content
             ?: obj["senderId"]?.jsonPrimitive?.content ?: return
-        chatStore.onCallOffer(callId, chatId, senderId)
+        val sdp      = obj["sdp"]?.jsonPrimitive?.content ?: return
+        val isVideo  = obj["isVideo"]?.jsonPrimitive?.booleanOrNull ?: false
+        chatStore.onCallOffer(callId, chatId, senderId, isVideo)
+        onCallOffer(CallOfferSignal(callId = callId, chatId = chatId, fromUserId = senderId,
+            sdp = sdp, isVideo = isVideo))
     }
 
     private fun handleCallAnswer(obj: JsonObject) {
         val callId = obj["callId"]?.jsonPrimitive?.content ?: return
+        val sdp    = obj["sdp"]?.jsonPrimitive?.content ?: return
         chatStore.onCallAnswer(callId)
+        onCallAnswer(CallAnswerSignal(callId = callId, sdp = sdp))
+    }
+
+    private fun handleIceCandidate(obj: JsonObject) {
+        val callId       = obj["callId"]?.jsonPrimitive?.content ?: return
+        val sdpMid       = obj["sdpMid"]?.jsonPrimitive?.content ?: return
+        val sdpMLineIndex = obj["sdpMLineIndex"]?.jsonPrimitive?.intOrNull ?: return
+        val candidate    = obj["candidate"]?.jsonPrimitive?.content ?: return
+        onIceCandidate(IceCandidateSignal(callId = callId, sdpMid = sdpMid,
+            sdpMLineIndex = sdpMLineIndex, candidate = candidate))
     }
 
     private fun handleCallEnd(obj: JsonObject) {

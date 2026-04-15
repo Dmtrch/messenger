@@ -18,6 +18,8 @@ data class CallState(
     val chatId: String = "",
     val remoteUserId: String = "",
     val isVideo: Boolean = false,
+    val hasLocalVideo: Boolean = false,
+    val hasRemoteVideo: Boolean = false,
 )
 
 data class MessageItem(

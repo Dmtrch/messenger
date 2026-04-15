@@ -86,8 +86,16 @@ class ChatStore {
         _messages.value = current
     }
 
-    fun onCallOffer(callId: String, chatId: String, fromUserId: String) {
-        _call.value = CallState(CallStatus.RINGING_IN, callId, chatId, fromUserId)
+    fun onCallOffer(callId: String, chatId: String, fromUserId: String, isVideo: Boolean = false) {
+        _call.value = CallState(CallStatus.RINGING_IN, callId, chatId, fromUserId, isVideo)
+    }
+
+    fun markLocalVideoReady(callId: String) {
+        if (_call.value.callId == callId) _call.value = _call.value.copy(hasLocalVideo = true)
+    }
+
+    fun markRemoteVideoReady(callId: String) {
+        if (_call.value.callId == callId) _call.value = _call.value.copy(hasRemoteVideo = true)
     }
 
     fun onCallAnswer(callId: String) {
