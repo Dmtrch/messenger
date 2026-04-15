@@ -11,6 +11,10 @@ import kotlinx.coroutines.flow.StateFlow
 import service.ApiClient
 import service.MessengerWS
 import service.WSOrchestrator
+import service.call.CallOfferSignal
+import service.call.CallAnswerSignal
+import service.call.DesktopWebRtcController
+import service.call.IceCandidateSignal
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -34,6 +38,13 @@ class AppViewModel {
     var apiClient: ApiClient? = null
     private var ws: MessengerWS? = null
     @Volatile private var wsSend: ((String) -> Unit)? = null
+
+    // WebRTC — инициализируется лениво при первом звонке
+    var webRtcController: DesktopWebRtcController? = null
+        private set
+
+    // SDP входящего оффера (до принятия звонка)
+    private var pendingIncomingOfferSdp: String? = null
 
     fun setServerUrl(url: String) {
         ServerConfig.serverUrl = url
@@ -60,6 +71,20 @@ class AppViewModel {
         authStore.logout()
     }
 
+    private fun makeController(): DesktopWebRtcController {
+        val ctrl = DesktopWebRtcController(
+            onIceCandidate    = { signal -> sendIceCandidate(signal) },
+            onLocalVideoReady = { callId -> chatStore.markLocalVideoReady(callId) },
+            onRemoteVideoReady = { callId -> chatStore.markRemoteVideoReady(callId) },
+        )
+        webRtcController = ctrl
+        return ctrl
+    }
+
+    private suspend fun fetchIceServers() =
+        runCatching { apiClient?.getIceServers()?.iceServers ?: emptyList() }
+            .getOrDefault(emptyList())
+
     private fun startWS(token: String) {
         val client = apiClient ?: return
         val orchestrator = WSOrchestrator(
@@ -67,6 +92,11 @@ class AppViewModel {
             senderKey = senderKey,
             chatStore = chatStore,
             currentUserId = authStore.state.value.userId,
+            onCallOffer  = { signal -> handleIncomingOffer(signal) },
+            onCallAnswer = { signal -> handleRemoteAnswer(signal) },
+            onIceCandidate = { signal ->
+                webRtcController?.addRemoteIceCandidate(signal)
+            },
         )
         val wsInstance = MessengerWS(
             http = client.http,
@@ -134,28 +164,46 @@ class AppViewModel {
     fun initiateCall(chatId: String, targetId: String, isVideo: Boolean) {
         val callId = java.util.UUID.randomUUID().toString()
         chatStore.setOutgoingCall(callId, chatId, targetId, isVideo)
-        sendCallFrame(buildJsonObject {
-            put("type", "call_offer")
-            put("callId", callId)
-            put("chatId", chatId)
-            put("targetId", targetId)
-            put("sdp", "stub-sdp") // Step B: real SDP from WebRTC
-        }.toString())
+        scope.launch {
+            val iceServers = fetchIceServers()
+            val ctrl = makeController()
+            val sdp = runCatching {
+                ctrl.startOutgoing(callId, isVideo, iceServers)
+            }.getOrElse { "stub-sdp" }
+            sendCallFrame(buildJsonObject {
+                put("type", "call_offer")
+                put("callId", callId)
+                put("chatId", chatId)
+                put("targetId", targetId)
+                put("sdp", sdp)
+                put("isVideo", isVideo)
+            }.toString())
+        }
     }
 
     fun acceptCall() {
         val call = chatStore.call.value
         if (call.status != CallStatus.RINGING_IN) return
+        val offerSdp = pendingIncomingOfferSdp ?: return
         chatStore.onCallAnswer(call.callId)
-        sendCallFrame(buildJsonObject {
-            put("type", "call_answer")
-            put("callId", call.callId)
-            put("sdp", "stub-sdp")
-        }.toString())
+        scope.launch {
+            val iceServers = fetchIceServers()
+            val ctrl = makeController()
+            val answerSdp = runCatching {
+                ctrl.acceptIncoming(call.callId, offerSdp, call.isVideo, iceServers)
+            }.getOrElse { "stub-sdp" }
+            pendingIncomingOfferSdp = null
+            sendCallFrame(buildJsonObject {
+                put("type", "call_answer")
+                put("callId", call.callId)
+                put("sdp", answerSdp)
+            }.toString())
+        }
     }
 
     fun rejectCall() {
         val call = chatStore.call.value
+        pendingIncomingOfferSdp = null
         chatStore.clearCall()
         sendCallFrame(buildJsonObject {
             put("type", "call_reject")
@@ -165,10 +213,29 @@ class AppViewModel {
 
     fun hangUp() {
         val call = chatStore.call.value
+        webRtcController?.endCall(call.callId)
         chatStore.clearCall()
         sendCallFrame(buildJsonObject {
             put("type", "call_end")
             put("callId", call.callId)
+        }.toString())
+    }
+
+    private fun handleIncomingOffer(signal: CallOfferSignal) {
+        pendingIncomingOfferSdp = signal.sdp
+    }
+
+    private fun handleRemoteAnswer(signal: CallAnswerSignal) {
+        webRtcController?.applyAnswer(signal.callId, signal.sdp)
+    }
+
+    private fun sendIceCandidate(signal: IceCandidateSignal) {
+        sendCallFrame(buildJsonObject {
+            put("type", "ice_candidate")
+            put("callId", signal.callId)
+            put("sdpMid", signal.sdpMid)
+            put("sdpMLineIndex", signal.sdpMLineIndex)
+            put("candidate", signal.candidate)
         }.toString())
     }
 

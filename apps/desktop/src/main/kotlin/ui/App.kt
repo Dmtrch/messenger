@@ -102,11 +102,13 @@ fun App() {
             val callChatName = chats.find { it.id == callState.chatId }?.name
                 ?: callState.remoteUserId
             CallOverlay(
-                call = callState,
-                callerName = callChatName,
-                onAccept = { vm.acceptCall() },
-                onReject = { vm.rejectCall() },
-                onHangUp = { vm.hangUp() },
+                call        = callState,
+                callerName  = callChatName,
+                onAccept    = { vm.acceptCall() },
+                onReject    = { vm.rejectCall() },
+                onHangUp    = { vm.hangUp() },
+                localFrame  = vm.webRtcController?.localFrame,
+                remoteFrame = vm.webRtcController?.remoteFrame,
             )
         }
         } // Box
