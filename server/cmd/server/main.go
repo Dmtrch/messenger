@@ -16,6 +16,7 @@ import (
 	"github.com/messenger/server/internal/auth"
 	"github.com/messenger/server/internal/chat"
 	"github.com/messenger/server/internal/keys"
+	"github.com/messenger/server/internal/clienterrors"
 	"github.com/messenger/server/internal/logger"
 	"github.com/messenger/server/internal/media"
 	secmw "github.com/messenger/server/internal/middleware"
@@ -131,8 +132,11 @@ func main() {
 	r.Use(chimw.Timeout(30 * time.Second))
 	r.Use(secmw.SecurityHeaders(isHTTPS || cfg.BehindProxy))
 
+	clientErrorsHandler := &clienterrors.Handler{}
+
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/server/info", serverinfoHandler.ServeHTTP)
+		r.Post("/client-errors", clientErrorsHandler.ServeHTTP)
 
 		r.With(authLimiter.Middleware()).Post("/auth/register", authHandler.Register)
 		r.With(authLimiter.Middleware()).Post("/auth/login", authHandler.Login)
