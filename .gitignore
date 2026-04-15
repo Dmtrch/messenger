@@ -30,6 +30,15 @@ frontend/.vite/
 docker-compose.override.yml
 docker/volumes/
 
+# Swift / SPM
+swift-generated-sources/
+apps/mobile/ios/.build/
+
+# Android build artifacts
+apps/mobile/android/.gradle/
+apps/mobile/android/build/
+apps/mobile/android/*.hprof
+
 # macOS
 .DS_Store
 
