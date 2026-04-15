@@ -149,6 +149,58 @@ Priority 3 — **ЗАВЕРШЕНО** (CALLS-B: все 4 задачи выпол
 - `docs/architecture.md`
 - `docs/technical-documentation.md`
 
+---
+
+### Приоритет 5 — Логирование ошибок
+
+**Задача: централизованное логирование ошибок с сохранением в директорию для последующего анализа и фиксации багов**
+
+Охват: сервер (Go), веб-клиент (PWA), нативные приложения (Desktop, Android, iOS).
+
+#### Сервер (Go)
+
+- Структурированные JSON-логи ошибок через `slog` (stdlib Go 1.21+) или `zap`
+- Сохранение в файл `logs/errors.log` с ротацией (по размеру/дате) — через `lumberjack`
+- Каждая запись: timestamp, level, request_id, user_id (если авторизован), endpoint, error, stack trace
+- Middleware для перехвата паник в chi-роутере → запись в лог + HTTP 500
+- Отдельный файл `logs/access.log` для HTTP-запросов (метод, путь, статус, latency)
+
+#### Веб-клиент (PWA)
+
+- Глобальный обработчик `window.onerror` + `window.onunhandledrejection` → запись в IndexedDB (`error_log`)
+- Утилита `logger.ts`: уровни `error/warn/info`, автоматически добавляет timestamp, user_id из Zustand store, текущий route
+- Хранение последних N записей в IndexedDB, периодическая отправка на `POST /api/client-errors` (батчами)
+- Новый серверный endpoint `/api/client-errors` — принимает, валидирует и записывает в `logs/client-errors.log`
+
+#### Desktop (Kotlin / Compose Multiplatform)
+
+- Логирование через `java.util.logging` или `kotlin-logging` + `logback`
+- Файл: `~/.messenger/logs/errors.log` (macOS/Linux) / `%APPDATA%\Messenger\logs\errors.log` (Windows), ротация `lumberjack`-аналогом (`SizeAndTimeBasedRollingPolicy`)
+- Перехват необработанных исключений через `Thread.setDefaultUncaughtExceptionHandler`
+- Структура: timestamp, platform=desktop, os, version, user_id, message, stacktrace
+
+#### Android
+
+- Логирование через `android.util.Log` обёрнутый в `ErrorLogger.kt` синглтон
+- Файл в `context.filesDir/logs/errors.log`, ротация вручную при превышении 5 МБ
+- Перехват крашей через `Thread.setDefaultUncaughtExceptionHandler` (пишет в файл перед завершением)
+- При следующем старте приложения — отправка накопленных логов на `/api/client-errors`
+
+#### iOS (SwiftUI)
+
+- `Logger` из `OSLog` (apple unified logging) + дублирование в файл `Documents/logs/errors.log`
+- `AppErrorLogger.swift` — синглтон, обёртка над `os.Logger` + `FileHandle`
+- Перехват `NSSetUncaughtExceptionHandler` и `signal(SIGABRT/SIGILL/SIGSEGV, ...)` → запись перед крашем
+- При старте: отправка накопленных логов на `/api/client-errors`
+
+#### Общее
+
+- Новая DB-миграция: таблица `client_error_logs` (id, timestamp, platform, user_id, message, meta JSON)
+- Новый endpoint `GET /api/admin/error-logs` — для просмотра клиентских ошибок из панели администратора
+- Директория `logs/` добавляется в `.gitignore`
+
+---
+
 ## Обязательная проверка после следующего шага
 
 1. `cd apps/desktop && ./gradlew build`
