@@ -16,6 +16,7 @@ import (
 	"github.com/messenger/server/internal/auth"
 	"github.com/messenger/server/internal/chat"
 	"github.com/messenger/server/internal/keys"
+	"github.com/messenger/server/internal/logger"
 	"github.com/messenger/server/internal/media"
 	secmw "github.com/messenger/server/internal/middleware"
 	"github.com/messenger/server/internal/push"
@@ -29,6 +30,10 @@ import (
 var staticFiles embed.FS
 
 func main() {
+	if err := logger.Init("logs"); err != nil {
+		log.Printf("WARNING: could not init file logger: %v", err)
+	}
+
 	cfg, err := loadConfig("config.yaml")
 	if err != nil {
 		log.Fatalf("load config: %v", err)
@@ -121,8 +126,8 @@ func main() {
 	authLimiter := secmw.NewRateLimiter(20, time.Minute, cfg.BehindProxy)
 
 	r := chi.NewRouter()
-	r.Use(chimw.Logger)
-	r.Use(chimw.Recoverer)
+	r.Use(secmw.RequestLogger)
+	r.Use(secmw.Recoverer)
 	r.Use(chimw.Timeout(30 * time.Second))
 	r.Use(secmw.SecurityHeaders(isHTTPS || cfg.BehindProxy))
 
