@@ -36,6 +36,19 @@ dependencies {
     implementation(libs.coroutines.swing)
     implementation(libs.slf4j.simple)
 
+    // WebRTC JNI bindings for desktop (macOS/Linux/Windows)
+    implementation("dev.onvoid.webrtc:webrtc-java:0.8.0")
+    val os   = System.getProperty("os.name",  "").lowercase()
+    val arch = System.getProperty("os.arch",  "").lowercase()
+    val nativeClassifier = when {
+        os.contains("mac")  && arch.contains("aarch64") -> "macos-aarch64"
+        os.contains("mac")                              -> "macos-x86_64"
+        os.contains("linux")                            -> "linux-x86_64"
+        os.contains("win")                              -> "windows-x86_64"
+        else -> error("Unsupported platform for WebRTC: $os / $arch")
+    }
+    runtimeOnly("dev.onvoid.webrtc:webrtc-java:0.8.0:$nativeClassifier")
+
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.ktor.client.mock)
