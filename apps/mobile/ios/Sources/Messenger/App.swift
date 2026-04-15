@@ -7,6 +7,9 @@
 
 import SwiftUI
 import UserNotifications
+#if canImport(WebRTC)
+import WebRTC
+#endif
 
 // MARK: - AppDelegate (APNs)
 
@@ -101,6 +104,7 @@ struct RootView: View {
                     onReject:  { vm.rejectCall() },
                     onHangUp:  { vm.hangUp() }
                 )
+                .environmentObject(vm)
                 .transition(.move(edge: .bottom))
                 .animation(.spring(), value: vm.chatStore.callState.status)
             }
@@ -116,47 +120,91 @@ struct CallOverlay: View {
     let onReject: () -> Void
     let onHangUp: () -> Void
 
+    @EnvironmentObject var vm: AppViewModel
+
+    private var isActiveVideo: Bool {
+        callState.isVideo && callState.status == .active
+    }
+
     var body: some View {
-        VStack {
-            Spacer()
-            VStack(spacing: 24) {
-                // Статус звонка
-                Text(statusText)
-                    .font(.headline)
-                    .foregroundStyle(.white)
+        ZStack {
+            // Видеопотоки (только при активном видеозвонке)
+#if canImport(WebRTC)
+            if isActiveVideo {
+                // Удалённое видео — полноэкранный фон
+                VideoContainerView(view: vm.remoteVideoView)
+                    .ignoresSafeArea()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
 
-                Text(callState.remoteUserId)
-                    .font(.title2.bold())
-                    .foregroundStyle(.white)
-
-                if callState.isVideo {
-                    Image(systemName: "video.fill")
-                        .font(.largeTitle)
-                        .foregroundStyle(.white.opacity(0.8))
-                }
-
-                // Кнопки управления
-                HStack(spacing: 40) {
-                    if callState.status == .ringingIn {
-                        // Входящий: принять + отклонить
-                        CallButton(icon: "phone.fill", color: .green, label: "Принять",
-                                   action: onAccept)
-                        CallButton(icon: "phone.down.fill", color: .red, label: "Отклонить",
-                                   action: onReject)
-                    } else {
-                        // Исходящий / активный: завершить
-                        CallButton(icon: "phone.down.fill", color: .red, label: "Завершить",
-                                   action: onHangUp)
+                // Локальное видео — инсет 120×180pt, правый верхний угол
+                VStack {
+                    HStack {
+                        Spacer()
+                        VideoContainerView(view: vm.localVideoView)
+                            .frame(width: 120, height: 180)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.white.opacity(0.4), lineWidth: 1)
+                            )
+                            .shadow(radius: 4)
+                            .padding([.top, .trailing], 16)
                     }
+                    Spacer()
                 }
             }
-            .padding(32)
-            .background(
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color.black.opacity(0.85))
-            )
-            .padding()
+#endif
+
+            // Панель управления
+            VStack {
+                Spacer()
+                VStack(spacing: 24) {
+                    // Статус звонка
+                    Text(statusText)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+
+                    Text(callState.remoteUserId)
+                        .font(.title2.bold())
+                        .foregroundStyle(.white)
+
+                    if callState.isVideo && !isActiveVideo {
+                        Image(systemName: "video.fill")
+                            .font(.largeTitle)
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+
+                    // Кнопки управления
+                    HStack(spacing: 40) {
+                        if callState.status == .ringingIn {
+                            // Входящий: принять + отклонить
+                            CallButton(icon: "phone.fill", color: .green, label: "Принять",
+                                       action: onAccept)
+                            CallButton(icon: "phone.down.fill", color: .red, label: "Отклонить",
+                                       action: onReject)
+                        } else {
+                            // Исходящий / активный: завершить
+                            CallButton(icon: "phone.down.fill", color: .red, label: "Завершить",
+                                       action: onHangUp)
+                        }
+                    }
+                }
+                .padding(32)
+                .background(
+                    RoundedRectangle(cornerRadius: 24)
+                        .fill(Color.black.opacity(isActiveVideo ? 0.45 : 0.85))
+                )
+                .padding()
+            }
         }
+#if canImport(WebRTC)
+        .onChange(of: callState.status) { newStatus in
+            if newStatus == .active && callState.isVideo {
+                vm.bindVideoRenderers(local: vm.localVideoView, remote: vm.remoteVideoView)
+            }
+        }
+#endif
     }
 
     private var statusText: String {
@@ -168,6 +216,15 @@ struct CallOverlay: View {
         }
     }
 }
+
+#if canImport(WebRTC)
+/// UIViewRepresentable-обёртка для RTCMTLVideoView.
+private struct VideoContainerView: UIViewRepresentable {
+    let view: RTCMTLVideoView
+    func makeUIView(context: Context) -> RTCMTLVideoView { view }
+    func updateUIView(_ uiView: RTCMTLVideoView, context: Context) {}
+}
+#endif
 
 private struct CallButton: View {
     let icon:   String

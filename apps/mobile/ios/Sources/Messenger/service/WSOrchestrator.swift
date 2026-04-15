@@ -11,10 +11,10 @@ final class WSOrchestrator {
     private let currentUserId: String
 
     // Call callbacks
-    var onCallOffer:     ((String, String, String, Bool) -> Void)?  // callId, chatId, fromUserId, isVideo
-    var onCallAnswer:    ((String, String) -> Void)?                 // callId, sdp
-    var onIceCandidate:  ((String, String, String, Int) -> Void)?    // callId, candidate, sdpMid, sdpMLineIndex
-    var onCallEnd:       ((String) -> Void)?                         // callId
+    var onCallOffer:     ((String, String, String, Bool, String) -> Void)?  // callId, chatId, fromUserId, isVideo, sdp
+    var onCallAnswer:    ((String, String) -> Void)?                         // callId, sdp
+    var onIceCandidate:  ((String, String, String, Int) -> Void)?            // callId, candidate, sdpMid, sdpMLineIndex
+    var onCallEnd:       ((String) -> Void)?                                 // callId
 
     // Замыкание для отправки фрейма через WebSocket (устанавливает AppViewModel)
     var sendFrame: ((String) -> Void)?
@@ -128,8 +128,7 @@ final class WSOrchestrator {
               let sdp      = obj["sdp"]      as? String else { return }
         let isVideo = (obj["isVideo"] as? Bool) ?? false
         Task { @MainActor in self.chatStore.onCallOffer(callId: callId, chatId: chatId, fromUserId: senderId, isVideo: isVideo) }
-        onCallOffer?(callId, chatId, senderId, isVideo)
-        _ = sdp  // sdp passed to WebRTC controller via onCallOffer callback in AppViewModel
+        onCallOffer?(callId, chatId, senderId, isVideo, sdp)
     }
 
     private func handleCallAnswer(_ obj: [String: Any]) {

@@ -122,6 +122,9 @@ final class ChatStore: ObservableObject {
         if callState.callId == callId { callState = CallState() }
     }
 
+    func markLocalVideoReady()  { callState.hasLocalVideo  = true }
+    func markRemoteVideoReady() { callState.hasRemoteVideo = true }
+
     func clearCall() { callState = CallState() }
 
     func onRead(chatId: String, messageId: String) {

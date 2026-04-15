@@ -6,6 +6,10 @@ import SwiftUI
 import Combine
 import Sodium
 
+#if canImport(WebRTC)
+import WebRTC
+#endif
+
 @MainActor
 final class AppViewModel: ObservableObject {
 
@@ -29,6 +33,17 @@ final class AppViewModel: ObservableObject {
     private let tokenStore  = TokenStore()
     private let keyStorage  = KeyStorage()
     private let sodium      = Sodium()
+
+    // MARK: - WebRTC
+
+#if canImport(WebRTC)
+    private var webRtcController: iOSWebRtcController?
+    /// Постоянные MTL-views; пересоздаются при каждом новом звонке.
+    private(set) var localVideoView  = RTCMTLVideoView()
+    private(set) var remoteVideoView = RTCMTLVideoView()
+#endif
+    /// SDP входящего offer — хранится вне CallState, чтобы не мешать UI-состоянию.
+    private var pendingIncomingOfferSdp: String?
 
     // MARK: - Server setup
 
@@ -213,6 +228,23 @@ final class AppViewModel: ObservableObject {
                                   chatStore: chatStore, db: db!,
                                   currentUserId: authState.userId)
         orch.sendFrame = { [weak self] frame in self?.sendWSFrame(frame) }
+
+        // MARK: WebRTC callbacks
+#if canImport(WebRTC)
+        orch.onCallOffer = { [weak self] _, _, _, _, sdp in
+            // callId/chatId/fromUserId/isVideo уже обработаны → ChatStore.onCallOffer()
+            // сохраняем SDP отдельно для acceptCall()
+            self?.pendingIncomingOfferSdp = sdp
+        }
+        orch.onCallAnswer = { [weak self] _, sdp in
+            self?.webRtcController?.setRemoteAnswer(sdp: sdp)
+        }
+        orch.onIceCandidate = { [weak self] _, candidate, sdpMid, sdpMLineIndex in
+            self?.webRtcController?.addRemoteIceCandidate(
+                candidate: candidate, sdpMid: sdpMid, sdpMLineIndex: Int32(sdpMLineIndex))
+        }
+#endif
+
         wsOrchestrator = orch
 
         let task = URLSession.shared.webSocketTask(with: url)
@@ -254,6 +286,12 @@ final class AppViewModel: ObservableObject {
         wsTask?.send(.string(text)) { _ in }
     }
 
+    private func sendWSFrameDict(_ dict: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let text = String(data: data, encoding: .utf8) else { return }
+        sendWSFrame(text)
+    }
+
     private func disconnectWS() {
         wsTask?.cancel(with: .goingAway, reason: nil)
         wsTask = nil
@@ -291,42 +329,125 @@ final class AppViewModel: ObservableObject {
     // MARK: - Calls
 
     func initiateCall(chatId: String, isVideo: Bool) {
-        let callId = UUID().uuidString
+        let callId   = UUID().uuidString
         let targetId = chatStore.chats.first(where: { $0.id == chatId })?.members
                                       .first(where: { $0 != authState.userId }) ?? ""
-        chatStore.setOutgoingCall(callId: callId, chatId: chatId, targetId: targetId, isVideo: isVideo)
-        let frame: [String: Any] = [
-            "type": "call_offer", "callId": callId, "chatId": chatId,
-            "sdp": "stub-sdp", "isVideo": isVideo
-        ]
-        if let data = try? JSONSerialization.data(withJSONObject: frame),
-           let text = String(data: data, encoding: .utf8) { sendWSFrame(text) }
+        chatStore.setOutgoingCall(callId: callId, chatId: chatId,
+                                  targetId: targetId, isVideo: isVideo)
+#if canImport(WebRTC)
+        resetVideoViews()
+        let controller = makeController(callId: callId, chatId: chatId,
+                                        isVideo: isVideo, msgType: "call_offer")
+        webRtcController = controller
+        Task {
+            let servers = await fetchRtcIceServers()
+            controller.startCall(callId: callId, iceServers: servers, isVideo: isVideo)
+        }
+#else
+        sendWSFrameDict(["type": "call_offer", "callId": callId,
+                         "chatId": chatId, "sdp": "stub-sdp", "isVideo": isVideo])
+#endif
     }
 
     func acceptCall() {
         let cs = chatStore.callState
         guard cs.status == .ringingIn else { return }
-        let frame: [String: Any] = ["type": "call_answer", "callId": cs.callId, "sdp": "stub-sdp"]
-        if let data = try? JSONSerialization.data(withJSONObject: frame),
-           let text = String(data: data, encoding: .utf8) { sendWSFrame(text) }
+        // Переход в active сразу, как на Android
         chatStore.onCallAnswer(callId: cs.callId)
+#if canImport(WebRTC)
+        let offerSdp = pendingIncomingOfferSdp ?? ""
+        pendingIncomingOfferSdp = nil
+        resetVideoViews()
+        let controller = makeController(callId: cs.callId, chatId: cs.chatId,
+                                        isVideo: cs.isVideo, msgType: "call_answer")
+        webRtcController = controller
+        Task {
+            let servers = await fetchRtcIceServers()
+            controller.answerCall(callId: cs.callId, remoteSdp: offerSdp,
+                                  iceServers: servers, isVideo: cs.isVideo)
+        }
+#else
+        sendWSFrameDict(["type": "call_answer", "callId": cs.callId, "sdp": "stub-sdp"])
+#endif
     }
 
     func rejectCall() {
         let cs = chatStore.callState
-        let frame: [String: Any] = ["type": "call_reject", "callId": cs.callId]
-        if let data = try? JSONSerialization.data(withJSONObject: frame),
-           let text = String(data: data, encoding: .utf8) { sendWSFrame(text) }
+        sendWSFrameDict(["type": "call_reject", "callId": cs.callId])
+        pendingIncomingOfferSdp = nil
         chatStore.clearCall()
+#if canImport(WebRTC)
+        webRtcController?.release()
+        webRtcController = nil
+#endif
     }
 
     func hangUp() {
         let cs = chatStore.callState
-        let frame: [String: Any] = ["type": "call_end", "callId": cs.callId]
-        if let data = try? JSONSerialization.data(withJSONObject: frame),
-           let text = String(data: data, encoding: .utf8) { sendWSFrame(text) }
+        sendWSFrameDict(["type": "call_end", "callId": cs.callId])
         chatStore.clearCall()
+#if canImport(WebRTC)
+        webRtcController?.release()
+        webRtcController = nil
+#endif
     }
+
+    /// Привязать MTL-views к контроллеру (вызывается из CallOverlay при появлении).
+#if canImport(WebRTC)
+    func bindVideoRenderers(local: RTCVideoRenderer, remote: RTCVideoRenderer) {
+        webRtcController?.bindRenderers(local: local, remote: remote)
+    }
+#endif
+
+    // MARK: - WebRTC helpers
+
+#if canImport(WebRTC)
+    /// Создаёт controller и навешивает все callbacks.
+    /// msgType: "call_offer" — для caller, "call_answer" — для callee.
+    private func makeController(callId: String, chatId: String,
+                                 isVideo: Bool, msgType: String) -> iOSWebRtcController {
+        let c = iOSWebRtcController()
+
+        c.onLocalSdpReady = { [weak self] cId, sdp in
+            guard let self else { return }
+            var frame: [String: Any] = ["type": msgType, "callId": cId, "sdp": sdp]
+            if msgType == "call_offer" { frame["chatId"] = chatId; frame["isVideo"] = isVideo }
+            self.sendWSFrameDict(frame)
+        }
+
+        c.onIceCandidateReady = { [weak self] cId, candidate, sdpMid, sdpMLineIndex in
+            guard let self else { return }
+            self.sendWSFrameDict([
+                "type": "ice_candidate", "callId": cId,
+                "candidate": candidate, "sdpMid": sdpMid,
+                "sdpMLineIndex": sdpMLineIndex
+            ])
+        }
+
+        c.onLocalVideoReady  = { [weak self] in self?.chatStore.markLocalVideoReady() }
+        c.onRemoteVideoReady = { [weak self] in self?.chatStore.markRemoteVideoReady() }
+        c.onError            = { _ in /* TODO: expose error to UI */ }
+
+        return c
+    }
+
+    private func fetchRtcIceServers() async -> [RTCIceServer] {
+        guard let client = apiClient,
+              let resp   = try? await client.fetchIceServers() else {
+            return [RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"])]
+        }
+        return resp.iceServers.map {
+            RTCIceServer(urlStrings: [$0.urls],
+                         username: $0.username ?? "",
+                         credential: $0.credential ?? "")
+        }
+    }
+
+    private func resetVideoViews() {
+        localVideoView  = RTCMTLVideoView()
+        remoteVideoView = RTCMTLVideoView()
+    }
+#endif
 
     // MARK: - Init
 
