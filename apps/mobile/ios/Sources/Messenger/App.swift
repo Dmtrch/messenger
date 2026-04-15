@@ -54,6 +54,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 struct MessengerApp: App {
     @StateObject private var vm = AppViewModel()
 
+    init() {
+        AppErrorLogger.shared.initialize()
+        let serverUrl = UserDefaults.standard.string(forKey: "messenger.server.url") ?? ""
+        AppErrorLogger.shared.flushToServer(serverUrl: serverUrl)
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
