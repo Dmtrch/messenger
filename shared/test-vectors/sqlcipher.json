@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "suite": "sqlcipher",
+  "status": "seed",
+  "description": "Спецификация локального шифрования БД для нативных клиентов (P2-LOC-2). Здесь фиксируются ожидаемые параметры SQLCipher и то, как из аппаратного ключа (Keystore/Keychain/Secure Enclave) получается passphrase для БД. Бинарные эталоны будут приложены после первой нативной интеграции.",
+  "target_platforms": {
+    "android": {
+      "library": "net.zetetic:android-database-sqlcipher",
+      "key_source": "AndroidKeystore (AES-256 GCM-wrapped random DB key)",
+      "strongbox_preferred": true,
+      "biometric_binding": "BiometricPrompt + setUserAuthenticationRequired(true)"
+    },
+    "ios": {
+      "library": "SQLCipher (pod)",
+      "key_source": "Keychain item with kSecAttrAccessibleWhenUnlockedThisDeviceOnly",
+      "secure_enclave_preferred": true,
+      "biometric_binding": "kSecAccessControlBiometryCurrentSet"
+    },
+    "desktop": {
+      "library": "SQLDelight + sqlcipher JDBC driver",
+      "key_source_per_os": {
+        "macos": "Keychain (generic password item)",
+        "windows": "DPAPI (CryptProtectData)",
+        "linux": "libsecret (SecretSchema: messenger.dbkey)"
+      }
+    }
+  },
+  "sqlcipher_pragmas": [
+    "PRAGMA cipher_default_kdf_iter = 256000",
+    "PRAGMA cipher_default_page_size = 4096",
+    "PRAGMA cipher_default_plaintext_header_size = 0",
+    "PRAGMA cipher_default_hmac_algorithm = HMAC_SHA512",
+    "PRAGMA cipher_default_kdf_algorithm = PBKDF2_HMAC_SHA512"
+  ],
+  "key_derivation": {
+    "source": "32-byte random value generated once and wrapped by OS keystore",
+    "db_passphrase_format": "raw 64-hex-char string passed via PRAGMA key = \"x'<hex>'\";",
+    "rotation_policy": "rotate on remote wipe (P1-SEC-3) and on device re-pairing (P2-MD-3)"
+  },
+  "cases": [
+    {
+      "id": "sqlcipher-header-unreadable-without-key",
+      "description": "Без ключа файл БД должен выглядеть как случайные байты: первые 16 байт НЕ равны ASCII-сигнатуре SQLite `SQLite format 3\\0`.",
+      "input": {
+        "opened_without_key": true
+      },
+      "expected": {
+        "first_16_bytes_equals_sqlite_magic": false,
+        "pragma_integrity_check": "not_a_database"
+      }
+    },
+    {
+      "id": "sqlcipher-open-ok-with-correct-key",
+      "description": "С корректным ключом PRAGMA integrity_check возвращает `ok`.",
+      "expected": {
+        "pragma_integrity_check": "ok"
+      }
+    },
+    {
+      "id": "sqlcipher-wrong-key-denied",
+      "description": "С неверным ключом любой SELECT должен вернуть ошибку `file is not a database` (SQLITE_NOTADB).",
+      "expected": {
+        "error_code": "SQLITE_NOTADB"
+      }
+    },
+    {
+      "id": "sqlcipher-rotate-on-wipe",
+      "description": "После Remote Wipe (P1-SEC-3) старый ключ должен быть стёрт из keystore, а БД удалена и пересоздана с новым ключом.",
+      "expected": {
+        "old_key_absent_in_keystore": true,
+        "old_db_file_absent": true,
+        "new_db_opens_with_new_key": true
+      }
+    },
+    {
+      "id": "sqlcipher-zeroing-out",
+      "description": "При `secure_delete=true` удалённая строка не должна восстанавливаться через `PRAGMA writable_schema=ON; vacuum;` и hex-дамп.",
+      "input": {
+        "pragma_secure_delete": "ON",
+        "message_id": "msg-zeroing-001",
+        "content_fragment": "canary-value-that-must-not-survive"
+      },
+      "expected": {
+        "canary_present_in_file_after_delete_and_vacuum": false
+      }
+    }
+  ],
+  "pwa_counterpart": {
+    "description": "Для PWA (P2-LOC-1) аналог SQLCipher отсутствует; используем libsodium secretbox поверх idb-keyval. Смотри описание в shared/crypto-contracts/interfaces.md (будет обновлено в Фазе 2).",
+    "wrap_algorithm": "xchacha20poly1305 secretbox",
+    "master_key_derivation": "PBKDF2-SHA512(passphrase, 256000) or WebAuthn PRF extension if available"
+  }
+}

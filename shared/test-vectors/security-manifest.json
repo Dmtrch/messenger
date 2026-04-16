@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "description": "Security & privacy test vectors for Private Node Messenger (PRD alignment). Separate from manifest.json to keep the canonical crypto catalog stable.",
+  "vectors": [
+    {
+      "id": "invites",
+      "file": "invites.json",
+      "suite": "invites",
+      "status": "seed",
+      "related_plan_ids": ["P1-INV-1", "P1-INV-2", "P1-INV-3", "P1-INV-4", "P1-INV-5"]
+    },
+    {
+      "id": "argon2id",
+      "file": "argon2id.json",
+      "suite": "password",
+      "status": "seed",
+      "related_plan_ids": ["P1-PWD-1", "P1-PWD-2", "P1-PWD-3"]
+    },
+    {
+      "id": "sqlcipher",
+      "file": "sqlcipher.json",
+      "suite": "local-storage",
+      "status": "seed",
+      "related_plan_ids": ["P2-LOC-1", "P2-LOC-2", "P2-LOC-3"]
+    }
+  ]
+}

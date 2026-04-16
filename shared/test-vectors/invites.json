@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "suite": "invites",
+  "status": "seed",
+  "description": "Тест-векторы для задачи P1-INV (TTL=180с, revoke, reuse, журнал активаций). Эталонные коды и метки времени фиксированы, чтобы сервер и клиенты давали идентичное поведение при проверке.",
+  "reference_clock_utc": "2026-04-17T12:00:00Z",
+  "ttl_seconds_default": 180,
+  "cases": [
+    {
+      "id": "inv-valid-within-ttl",
+      "description": "Код выпущен 60 секунд назад, TTL=180с. Регистрация должна пройти.",
+      "input": {
+        "code": "TEST-VALID-001",
+        "issued_at_utc": "2026-04-17T11:59:00Z",
+        "ttl_seconds": 180,
+        "revoked_at_utc": null,
+        "used_by_user_id": null,
+        "client_ip": "203.0.113.10",
+        "client_user_agent": "Mozilla/5.0 (Linux; Android 14) PrivateNode/1.0"
+      },
+      "expected": {
+        "allow_register": true,
+        "http_status": 201,
+        "activation_log_row": {
+          "code": "TEST-VALID-001",
+          "ip": "203.0.113.10",
+          "user_agent": "Mozilla/5.0 (Linux; Android 14) PrivateNode/1.0"
+        }
+      }
+    },
+    {
+      "id": "inv-expired-by-ttl",
+      "description": "Код выпущен 181 секунду назад. Регистрация запрещена (HTTP 410 Gone).",
+      "input": {
+        "code": "TEST-EXPIRED-002",
+        "issued_at_utc": "2026-04-17T11:56:59Z",
+        "ttl_seconds": 180,
+        "revoked_at_utc": null
+      },
+      "expected": {
+        "allow_register": false,
+        "http_status": 410,
+        "error_code": "invite_expired"
+      }
+    },
+    {
+      "id": "inv-revoked",
+      "description": "Админ отозвал код до использования. Регистрация запрещена (HTTP 410).",
+      "input": {
+        "code": "TEST-REVOKED-003",
+        "issued_at_utc": "2026-04-17T11:59:30Z",
+        "ttl_seconds": 180,
+        "revoked_at_utc": "2026-04-17T11:59:45Z"
+      },
+      "expected": {
+        "allow_register": false,
+        "http_status": 410,
+        "error_code": "invite_revoked"
+      }
+    },
+    {
+      "id": "inv-single-use",
+      "description": "Код уже был использован. Повторное использование запрещено (HTTP 409).",
+      "input": {
+        "code": "TEST-USED-004",
+        "issued_at_utc": "2026-04-17T11:59:30Z",
+        "ttl_seconds": 180,
+        "revoked_at_utc": null,
+        "used_by_user_id": "user-42",
+        "used_at_utc": "2026-04-17T11:59:50Z"
+      },
+      "expected": {
+        "allow_register": false,
+        "http_status": 409,
+        "error_code": "invite_already_used"
+      }
+    },
+    {
+      "id": "inv-ttl-bounds-check",
+      "description": "Проверка whitelist TTL: [60, 600]. При 30 и 900 — HTTP 422.",
+      "input": [
+        { "ttl_seconds": 30, "expected_http_status": 422 },
+        { "ttl_seconds": 60, "expected_http_status": 201 },
+        { "ttl_seconds": 180, "expected_http_status": 201 },
+        { "ttl_seconds": 600, "expected_http_status": 201 },
+        { "ttl_seconds": 900, "expected_http_status": 422 }
+      ],
+      "expected": {
+        "rule": "ttl_seconds must satisfy 60 <= ttl <= 600; default 180"
+      }
+    },
+    {
+      "id": "inv-qr-payload-format",
+      "description": "QR-код должен содержать URL вида https://<origin>/auth?invite=<code>. Для тестов используется фиктивный origin.",
+      "input": {
+        "origin": "https://node.example.org",
+        "code": "TEST-QR-005"
+      },
+      "expected": {
+        "qr_payload": "https://node.example.org/auth?invite=TEST-QR-005",
+        "qr_error_correction": "M"
+      }
+    },
+    {
+      "id": "inv-activation-log-fields",
+      "description": "Журнал активаций обязан содержать строго набор полей. IP может быть записан как есть (при BEHIND_PROXY=false) или как первый X-Forwarded-For (при BEHIND_PROXY=true).",
+      "expected": {
+        "required_fields": [
+          "invite_id",
+          "user_id",
+          "ip",
+          "user_agent",
+          "activated_at_utc"
+        ],
+        "ip_source_rule": {
+          "behind_proxy_false": "conn.RemoteAddr",
+          "behind_proxy_true": "first trusted X-Forwarded-For hop"
+        }
+      }
+    }
+  ]
+}

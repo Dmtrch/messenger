@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "suite": "argon2id",
+  "status": "seed",
+  "description": "Тест-векторы для задачи P1-PWD (Argon2id вместо bcrypt). Параметры и формат PHC-string зафиксированы; эталонные хеши проставить после реализации серверного модуля `server/internal/password` и первой верификации на CI.",
+  "parameters": {
+    "type": "argon2id",
+    "version": 19,
+    "memory_kib": 65536,
+    "iterations": 3,
+    "parallelism": 4,
+    "salt_length_bytes": 16,
+    "hash_length_bytes": 32
+  },
+  "phc_string_format": "$argon2id$v=19$m=65536,t=3,p=4$<base64-salt>$<base64-hash>",
+  "cases": [
+    {
+      "id": "pwd-basic-ascii",
+      "description": "Обычный ASCII-пароль.",
+      "input": {
+        "password": "correct horse battery staple",
+        "salt_base64_nopad": "AAECAwQFBgcICQoLDA0ODw"
+      },
+      "expected": {
+        "phc_string": "TODO: fill after P1-PWD-1 lands",
+        "verify_ok": true
+      }
+    },
+    {
+      "id": "pwd-unicode-nfc",
+      "description": "Пароль с Unicode: после NFC-нормализации хеш должен совпадать.",
+      "input": {
+        "password_nfc": "пароль-é",
+        "password_nfd": "пароль-e\u0301",
+        "salt_base64_nopad": "EBESExQVFhcYGRobHB0eHw"
+      },
+      "expected": {
+        "normalize_before_hash": "NFC",
+        "phc_string": "TODO: fill after P1-PWD-1 lands",
+        "verify_ok": true
+      }
+    },
+    {
+      "id": "pwd-wrong-password",
+      "description": "Проверка должна провалиться для другого пароля и того же хеша.",
+      "input": {
+        "stored_phc_from_case_id": "pwd-basic-ascii",
+        "password_attempt": "wrong horse battery staple"
+      },
+      "expected": {
+        "verify_ok": false,
+        "constant_time_compare": true
+      }
+    },
+    {
+      "id": "pwd-lazy-upgrade-bcrypt",
+      "description": "Lazy-миграция: если в users.password_algo='bcrypt', успешный Login должен пересчитать хеш в Argon2id и обновить запись.",
+      "input": {
+        "stored_password_algo": "bcrypt",
+        "stored_bcrypt_hash": "$2a$12$abcdefghijklmnopqrstuv.FAKEHASHFORTESTSONLY1234567890",
+        "password_attempt": "hunter2-but-fake"
+      },
+      "expected": {
+        "verify_ok_by_bcrypt": true,
+        "post_login_state": {
+          "password_algo": "argon2id",
+          "phc_string_prefix": "$argon2id$v=19$m=65536,t=3,p=4$"
+        }
+      }
+    },
+    {
+      "id": "pwd-policy-length",
+      "description": "Минимальная длина пароля (без требования класс-символов). При нарушении — HTTP 422.",
+      "input": [
+        { "password": "short", "expected_http_status": 422 },
+        { "password": "12345678", "expected_http_status": 201 }
+      ],
+      "expected": {
+        "min_length": 8,
+        "rule": "Проверяется на регистрации и при смене пароля; при логине длина не проверяется (только verify)."
+      }
+    }
+  ]
+}
