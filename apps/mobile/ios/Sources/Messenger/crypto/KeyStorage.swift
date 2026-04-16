@@ -1,8 +1,7 @@
-// KeyStorage.swift — хранение криптографических ключей устройства.
-// Зеркало KeyStorage.kt (Desktop/Android).
-// TODO production: перенести все ключи в Keychain (SecItemAdd/SecItemCopyMatching).
+// KeyStorage.swift — хранение криптографических ключей устройства в Keychain.
 
 import Foundation
+import Security
 import Sodium
 
 /// Пара ключей Ed25519: publicKey (32 байта), secretKey (64 байта).
@@ -19,36 +18,27 @@ struct Curve25519KeyPair {
 
 final class KeyStorage {
     private let sodium = Sodium()
-    private let defaults = UserDefaults.standard
-    private enum Key {
-        static let identityKeyPub  = "messenger.keys.ik.pub"
-        static let identityKeySec  = "messenger.keys.ik.sec"
-        static let signedPreKeyPub = "messenger.keys.spk.pub"
-        static let signedPreKeySec = "messenger.keys.spk.sec"
-        static let spkSignature    = "messenger.keys.spk.sig"
-        static let oneTimePreKeys  = "messenger.keys.opk.list"
-        static let deviceId        = "messenger.device.id"
-    }
+    private let service = "com.messenger.keys"
 
     // MARK: - Identity Key (Ed25519)
 
     func getOrCreateIdentityKey() -> Ed25519KeyPair {
-        if let pub  = defaults.data(forKey: Key.identityKeyPub),
-           let sec  = defaults.data(forKey: Key.identityKeySec) {
+        if let pub = keychainGetData("ik_pub"),
+           let sec = keychainGetData("ik_sec") {
             return Ed25519KeyPair(publicKey: Bytes(pub), secretKey: Bytes(sec))
         }
         let kp = sodium.sign.keyPair()!
-        defaults.set(Data(kp.publicKey), forKey: Key.identityKeyPub)
-        defaults.set(Data(kp.secretKey), forKey: Key.identityKeySec)
+        keychainSetData(Data(kp.publicKey), for: "ik_pub")
+        keychainSetData(Data(kp.secretKey), for: "ik_sec")
         return Ed25519KeyPair(publicKey: kp.publicKey, secretKey: kp.secretKey)
     }
 
     // MARK: - Signed Pre-Key (Curve25519)
 
     func getOrCreateSignedPreKey() -> (keyPair: Curve25519KeyPair, signature: Bytes) {
-        if let pub = defaults.data(forKey: Key.signedPreKeyPub),
-           let sec = defaults.data(forKey: Key.signedPreKeySec),
-           let sig = defaults.data(forKey: Key.spkSignature) {
+        if let pub = keychainGetData("spk_pub"),
+           let sec = keychainGetData("spk_sec"),
+           let sig = keychainGetData("spk_sig") {
             return (
                 Curve25519KeyPair(publicKey: Bytes(pub), secretKey: Bytes(sec)),
                 Bytes(sig)
@@ -57,15 +47,26 @@ final class KeyStorage {
         let kp = sodium.box.keyPair()!
         let ikSec = getOrCreateIdentityKey().secretKey
         let signature = sodium.sign.sign(message: kp.publicKey, secretKey: ikSec)!
-        defaults.set(Data(kp.publicKey), forKey: Key.signedPreKeyPub)
-        defaults.set(Data(kp.secretKey), forKey: Key.signedPreKeySec)
-        defaults.set(Data(signature),   forKey: Key.spkSignature)
+        keychainSetData(Data(kp.publicKey), for: "spk_pub")
+        keychainSetData(Data(kp.secretKey), for: "spk_sec")
+        keychainSetData(Data(signature),    for: "spk_sig")
         return (Curve25519KeyPair(publicKey: kp.publicKey, secretKey: kp.secretKey), signature)
+    }
+
+    // MARK: - SPK ID
+
+    func getOrCreateSpkId() -> Int {
+        if let data = keychainGetData("spk_id"), data.count == 8 {
+            return Int(bitPattern: UInt(bigEndian: data.withUnsafeBytes { $0.load(as: UInt.self) }))
+        }
+        let id = Int.random(in: 1...Int.max)
+        var value = UInt(bitPattern: id).bigEndian
+        keychainSetData(Data(bytes: &value, count: 8), for: "spk_id")
+        return id
     }
 
     // MARK: - One-Time Pre-Keys (Curve25519)
 
-    /// Генерирует batch из n OPK и сохраняет в UserDefaults.
     func generateOneTimePreKeys(count: Int) -> [Curve25519KeyPair] {
         var existing = loadOneTimePreKeys()
         var newKeys: [Curve25519KeyPair] = []
@@ -88,13 +89,14 @@ final class KeyStorage {
     }
 
     private func loadOneTimePreKeys() -> [Curve25519KeyPair] {
-        guard let data = defaults.data(forKey: Key.oneTimePreKeys),
+        guard let data = keychainGetData("opk_list"),
               let list = try? JSONDecoder().decode([[String: String]].self, from: data) else {
             return []
         }
         return list.compactMap { dict in
             guard let pubB64 = dict["pub"], let secB64 = dict["sec"],
-                  let pub = Data(base64Encoded: pubB64), let sec = Data(base64Encoded: secB64) else { return nil }
+                  let pub = Data(base64Encoded: pubB64),
+                  let sec = Data(base64Encoded: secB64) else { return nil }
             return Curve25519KeyPair(publicKey: Bytes(pub), secretKey: Bytes(sec))
         }
     }
@@ -105,24 +107,66 @@ final class KeyStorage {
              "sec": Data(kp.secretKey).base64EncodedString()]
         }
         if let data = try? JSONEncoder().encode(list) {
-            defaults.set(data, forKey: Key.oneTimePreKeys)
+            keychainSetData(data, for: "opk_list")
         }
     }
 
     // MARK: - Device ID
 
     func getOrCreateDeviceId() -> String {
-        if let id = defaults.string(forKey: Key.deviceId) { return id }
+        if let data = keychainGetData("device_id"),
+           let id = String(data: data, encoding: .utf8) { return id }
         let id = UUID().uuidString
-        defaults.set(id, forKey: Key.deviceId)
+        keychainSetData(Data(id.utf8), for: "device_id")
         return id
     }
 
-    // MARK: - Ratchet sessions → delegated to DatabaseManager
+    // MARK: - Clear all
 
     func clearAll() {
-        [Key.identityKeyPub, Key.identityKeySec,
-         Key.signedPreKeyPub, Key.signedPreKeySec, Key.spkSignature,
-         Key.oneTimePreKeys, Key.deviceId].forEach { defaults.removeObject(forKey: $0) }
+        ["ik_pub", "ik_sec", "spk_pub", "spk_sec", "spk_sig", "spk_id",
+         "opk_list", "device_id"].forEach { keychainDelete($0) }
+    }
+
+    // MARK: - Keychain helpers
+
+    private func keychainSetData(_ data: Data, for key: String) {
+        let query: CFDictionary = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: key,
+        ] as CFDictionary
+        let attrs: CFDictionary = [kSecValueData: data] as CFDictionary
+        if SecItemUpdate(query, attrs) == errSecItemNotFound {
+            let add: CFDictionary = [
+                kSecClass:       kSecClassGenericPassword,
+                kSecAttrService: service,
+                kSecAttrAccount: key,
+                kSecValueData:   data,
+            ] as CFDictionary
+            SecItemAdd(add, nil)
+        }
+    }
+
+    private func keychainGetData(_ key: String) -> Data? {
+        let query: CFDictionary = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: key,
+            kSecReturnData:  true,
+            kSecMatchLimit:  kSecMatchLimitOne,
+        ] as CFDictionary
+        var result: AnyObject?
+        guard SecItemCopyMatching(query, &result) == errSecSuccess else { return nil }
+        return result as? Data
+    }
+
+    private func keychainDelete(_ key: String) {
+        let query: CFDictionary = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: key,
+        ] as CFDictionary
+        SecItemDelete(query)
     }
 }

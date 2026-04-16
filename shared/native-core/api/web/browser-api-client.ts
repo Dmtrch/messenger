@@ -27,19 +27,15 @@ export interface AuthRegisterRes {
 
 export interface AuthLoginReq {
   username: string
-  challenge: string
-  signature: string
+  password: string
 }
 
 export interface AuthLoginRes {
   accessToken: string
-  user: {
-    id: string
-    username: string
-    displayName: string
-    avatarPath?: string
-    ikPublic: string
-  }
+  userId: string
+  username: string
+  displayName: string
+  role?: string
 }
 
 export interface DeviceBundle {

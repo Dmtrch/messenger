@@ -1,33 +1,69 @@
-// TokenStore.swift — хранение JWT-токенов.
-// Использует UserDefaults (токены короткоживущие).
-// TODO production: перейти на Keychain для refresh token.
+// TokenStore.swift — хранение JWT-токенов в Keychain (SecItemAdd/SecItemCopyMatching).
 
 import Foundation
+import Security
 
 protocol TokenStoreProtocol {
     var accessToken: String { get }
-    var refreshToken: String { get }
-    func save(accessToken: String, refreshToken: String)
+    func save(accessToken: String)
     func clear()
 }
 
 final class TokenStore: TokenStoreProtocol {
-    private let defaults = UserDefaults.standard
-    private enum Key {
-        static let access  = "messenger.token.access"
-        static let refresh = "messenger.token.refresh"
-    }
+    private let service = "com.messenger.app"
+    private let accessKey = "access_token"
 
-    var accessToken: String  { defaults.string(forKey: Key.access)  ?? "" }
-    var refreshToken: String { defaults.string(forKey: Key.refresh) ?? "" }
+    var accessToken: String { keychainGet(accessKey) ?? "" }
 
-    func save(accessToken: String, refreshToken: String) {
-        defaults.set(accessToken,  forKey: Key.access)
-        defaults.set(refreshToken, forKey: Key.refresh)
+    func save(accessToken: String) {
+        keychainSet(accessKey, value: accessToken)
     }
 
     func clear() {
-        defaults.removeObject(forKey: Key.access)
-        defaults.removeObject(forKey: Key.refresh)
+        keychainDelete(accessKey)
+    }
+
+    // MARK: - Keychain helpers
+
+    private func keychainSet(_ key: String, value: String) {
+        guard let data = value.data(using: .utf8) else { return }
+        let query: CFDictionary = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: key,
+        ] as CFDictionary
+        let attrs: CFDictionary = [kSecValueData: data] as CFDictionary
+        if SecItemUpdate(query, attrs) == errSecItemNotFound {
+            let add: CFDictionary = [
+                kSecClass:       kSecClassGenericPassword,
+                kSecAttrService: service,
+                kSecAttrAccount: key,
+                kSecValueData:   data,
+            ] as CFDictionary
+            SecItemAdd(add, nil)
+        }
+    }
+
+    private func keychainGet(_ key: String) -> String? {
+        let query: CFDictionary = [
+            kSecClass:            kSecClassGenericPassword,
+            kSecAttrService:      service,
+            kSecAttrAccount:      key,
+            kSecReturnData:       true,
+            kSecMatchLimit:       kSecMatchLimitOne,
+        ] as CFDictionary
+        var result: AnyObject?
+        guard SecItemCopyMatching(query, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func keychainDelete(_ key: String) {
+        let query: CFDictionary = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: key,
+        ] as CFDictionary
+        SecItemDelete(query)
     }
 }

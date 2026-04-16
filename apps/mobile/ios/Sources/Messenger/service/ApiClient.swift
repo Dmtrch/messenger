@@ -7,8 +7,14 @@ import Sodium
 // MARK: - DTO types
 
 struct LoginRequest: Encodable { let username: String; let password: String }
-struct LoginResponse: Decodable { let accessToken: String; let refreshToken: String }
-struct RefreshResponse: Decodable { let accessToken: String; let refreshToken: String }
+struct LoginResponse: Decodable {
+    let accessToken: String
+    let userId: String
+    let username: String
+    let displayName: String?
+    let role: String?
+}
+struct RefreshResponse: Decodable { let accessToken: String }
 
 struct ChatSummaryDto: Decodable {
     let id: String
@@ -43,10 +49,12 @@ struct RecipientDto: Encodable {
 }
 
 struct RegisterKeysRequest: Encodable {
-    let identityKey: String
-    let signedPreKey: String
-    let signedPreKeySignature: String
-    let oneTimePreKeys: [String]
+    let deviceName: String
+    let ikPublic: String
+    let spkId: Int
+    let spkPublic: String
+    let spkSignature: String
+    let opkPublics: [String]
 }
 
 struct DeviceBundle: Decodable {
@@ -90,7 +98,11 @@ actor ApiClient {
         self.baseURL    = baseURL
         self.tokenStore = tokenStore
         self.sodium     = sodium
-        self.session    = URLSession(configuration: .default)
+        let config = URLSessionConfiguration.default
+        config.httpCookieStorage = HTTPCookieStorage.shared
+        config.httpCookieAcceptPolicy = .always
+        config.httpShouldSetCookies = true
+        self.session = URLSession(configuration: config)
     }
 
     // MARK: - Auth
@@ -99,7 +111,7 @@ actor ApiClient {
         let resp: LoginResponse = try await post("/api/auth/login",
                                                   body: LoginRequest(username: username, password: password),
                                                   authenticated: false)
-        tokenStore.save(accessToken: resp.accessToken, refreshToken: resp.refreshToken)
+        tokenStore.save(accessToken: resp.accessToken)
         return resp
     }
 
@@ -124,12 +136,6 @@ actor ApiClient {
 
     func getKeyBundle(userId: String) async throws -> PreKeyBundleResponse {
         try await get("/api/keys/\(userId)")
-    }
-
-    // MARK: - Send message (REST)
-
-    func sendMessage(_ req: SendMessageRequest) async throws {
-        _ = try await post("/api/messages", body: req, authenticated: true) as EmptyBody?
     }
 
     // MARK: - Native push token
@@ -252,13 +258,11 @@ actor ApiClient {
     }
 
     private func refreshAccessToken() async throws {
-        var req = try buildRequest("/api/auth/refresh", method: "POST", authenticated: false)
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try encoder.encode(["refreshToken": tokenStore.refreshToken])
+        let req = try buildRequest("/api/auth/refresh", method: "POST", authenticated: false)
         let (data, response) = try await session.data(for: req)
         try validate(response)
         let resp = try decoder.decode(RefreshResponse.self, from: data)
-        tokenStore.save(accessToken: resp.accessToken, refreshToken: resp.refreshToken)
+        tokenStore.save(accessToken: resp.accessToken)
     }
 
     private func validate(_ response: URLResponse) throws {

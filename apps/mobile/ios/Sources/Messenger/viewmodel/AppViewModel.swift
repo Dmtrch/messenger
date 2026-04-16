@@ -76,8 +76,10 @@ final class AppViewModel: ObservableObject {
     func login(username: String, password: String) async throws {
         guard let client = apiClient else { return }
         let resp = try await client.login(username: username, password: password)
-        authState = AuthState(isAuthenticated: true, userId: "",
-                              username: username, accessToken: resp.accessToken)
+        UserDefaults.standard.set(resp.userId,   forKey: "messenger.userId")
+        UserDefaults.standard.set(resp.username, forKey: "messenger.username")
+        authState = AuthState(isAuthenticated: true, userId: resp.userId,
+                              username: resp.username, accessToken: resp.accessToken)
         await setupWS()
         await registerKeysIfNeeded()
         try await loadChats()
@@ -95,7 +97,8 @@ final class AppViewModel: ObservableObject {
         do {
             await setupWS()
             try await loadChats()
-            authState = AuthState(isAuthenticated: true, userId: "",
+            authState = AuthState(isAuthenticated: true,
+                                  userId:   UserDefaults.standard.string(forKey: "messenger.userId")   ?? "",
                                   username: UserDefaults.standard.string(forKey: "messenger.username") ?? "",
                                   accessToken: tokenStore.accessToken)
         } catch {
@@ -160,13 +163,13 @@ final class AppViewModel: ObservableObject {
                             bundle: device, plaintext: skdmJson)
                         recipients.append(RecipientDto(userId: memberId, deviceId: device.deviceId,
                                                        ciphertext: ciphertext))
-                        // SKDM отправляем отдельным сообщением перед основным
+                        // SKDM отправляем по WS перед основным сообщением
                         let skdmReq = SendMessageRequest(
                             chatId: chatId, clientMsgId: UUID().uuidString, senderKeyId: 0,
                             recipients: [RecipientDto(userId: memberId, deviceId: device.deviceId,
                                                       ciphertext: skdmCipher)]
                         )
-                        try? await client.sendMessage(skdmReq)
+                        sendMessageViaWS(skdmReq)
                     }
                 }
             } else {
@@ -186,7 +189,7 @@ final class AppViewModel: ObservableObject {
 
             let req = SendMessageRequest(chatId: chatId, clientMsgId: clientMsgId,
                                           senderKeyId: 0, recipients: recipients)
-            try await client.sendMessage(req)
+            sendMessageViaWS(req)
             try? db.updateMessageStatus(clientMsgId: clientMsgId, status: "sent")
             chatStore.onMessageStatusUpdate(clientMsgId: clientMsgId, status: "sent")
         } catch {
@@ -282,6 +285,22 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    /// Сериализует SendMessageRequest в WS-фрейм `{ type, chatId, clientMsgId, senderKeyId, recipients }`.
+    private func sendMessageViaWS(_ req: SendMessageRequest) {
+        struct WsFrame: Encodable {
+            let type = "message"
+            let chatId: String
+            let clientMsgId: String
+            let senderKeyId: Int
+            let recipients: [RecipientDto]
+        }
+        let frame = WsFrame(chatId: req.chatId, clientMsgId: req.clientMsgId,
+                            senderKeyId: req.senderKeyId, recipients: req.recipients)
+        guard let data = try? JSONEncoder().encode(frame),
+              let text = String(data: data, encoding: .utf8) else { return }
+        sendWSFrame(text)
+    }
+
     private func sendWSFrame(_ text: String) {
         wsTask?.send(.string(text)) { _ in }
     }
@@ -313,15 +332,19 @@ final class AppViewModel: ObservableObject {
 
     private func registerKeysIfNeeded() async {
         guard let client = apiClient else { return }
-        let ik        = keyStorage.getOrCreateIdentityKey()
-        let (spk, sig) = keyStorage.getOrCreateSignedPreKey()
-        let opks      = keyStorage.generateOneTimePreKeys(count: 10)
+        let ik              = keyStorage.getOrCreateIdentityKey()
+        let (spk, sig)      = keyStorage.getOrCreateSignedPreKey()
+        let spkId           = keyStorage.getOrCreateSpkId()
+        let opks            = keyStorage.generateOneTimePreKeys(count: 10)
+        let deviceId        = keyStorage.getOrCreateDeviceId()
 
         let req = RegisterKeysRequest(
-            identityKey:           Data(ik.publicKey).base64EncodedString(),
-            signedPreKey:          Data(spk.publicKey).base64EncodedString(),
-            signedPreKeySignature: Data(sig).base64EncodedString(),
-            oneTimePreKeys:        opks.map { Data($0.publicKey).base64EncodedString() }
+            deviceName:  deviceId,
+            ikPublic:    Data(ik.publicKey).base64EncodedString(),
+            spkId:       spkId,
+            spkPublic:   Data(spk.publicKey).base64EncodedString(),
+            spkSignature: Data(sig).base64EncodedString(),
+            opkPublics:  opks.map { Data($0.publicKey).base64EncodedString() }
         )
         try? await client.registerKeys(req)
     }

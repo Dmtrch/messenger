@@ -45,6 +45,14 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	chatID := r.FormValue("chat_id")
 	clientMsgID := r.FormValue("msg_id")
 
+	if chatID != "" {
+		member, err := db.IsConversationMember(h.DB, chatID, uploaderID)
+		if err != nil || !member {
+			httpErr(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	}
+
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		httpErr(w, "file field required", http.StatusBadRequest)

@@ -35,6 +35,7 @@ func createUser(t *testing.T, database *sql.DB, id, username string) db.User {
 		Username:     username,
 		DisplayName:  username,
 		PasswordHash: "$2a$12$testhash",
+		Role:         "user",
 		CreatedAt:    time.Now().UnixMilli(),
 	}
 	if err := db.CreateUser(database, user); err != nil {

@@ -18,9 +18,14 @@ type Handler struct {
 }
 
 // GET /api/keys/:userId — ключевые пакеты для всех устройств (X3DH multi-device).
+// Политика discoverability: любой аутентифицированный пользователь сервера может получить
+// prekey bundle другого пользователя — это необходимо для X3DH до создания чата.
+// OPK расходуется только когда запрашивает не сам владелец ключей.
 // Возвращает: { "devices": [ { deviceId, ikPublic, spkId, spkPublic, spkSignature, opkId?, opkPublic? }, ... ] }
 func (h *Handler) GetBundle(w http.ResponseWriter, r *http.Request) {
+	callerID := auth.UserIDFromCtx(r)
 	targetID := chi.URLParam(r, "userId")
+	isSelf := callerID == targetID
 
 	keys, err := db.GetIdentityKeysByUserID(h.DB, targetID)
 	if err != nil {
@@ -44,10 +49,16 @@ func (h *Handler) GetBundle(w http.ResponseWriter, r *http.Request) {
 
 	devices := make([]deviceBundle, 0, len(keys))
 	for _, ik := range keys {
-		opkID, opkPub, err := db.PopPreKey(h.DB, targetID, ik.DeviceID)
-		if err != nil {
-			httpErr(w, "server error", 500)
-			return
+		var opkID int64
+		var opkPub []byte
+		if !isSelf {
+			// OPK расходуется только при запросе другим пользователем для X3DH
+			var err error
+			opkID, opkPub, err = db.PopPreKey(h.DB, targetID, ik.DeviceID)
+			if err != nil {
+				httpErr(w, "server error", 500)
+				return
+			}
 		}
 
 		bundle := deviceBundle{
@@ -160,15 +171,18 @@ func (h *Handler) RegisterDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Сохраняем одноразовые ключи с привязкой к устройству
+	// Сохраняем одноразовые ключи с привязкой к устройству; возвращаем server-assigned IDs клиенту.
+	var opkIDs []int64
 	if len(opkBytes) > 0 {
-		if err := db.InsertPreKeysForDevice(h.DB, userID, deviceID, opkBytes); err != nil {
+		var err error
+		opkIDs, err = db.InsertPreKeysForDevice(h.DB, userID, deviceID, opkBytes)
+		if err != nil {
 			httpErr(w, "server error", 500)
 			return
 		}
 	}
 
-	reply(w, 200, map[string]string{"deviceId": deviceID})
+	reply(w, 200, map[string]any{"deviceId": deviceID, "opkIds": opkIDs})
 }
 
 // POST /api/keys/prekeys — загрузить новые одноразовые ключи

@@ -612,31 +612,43 @@ func nullableString(s string) any {
 }
 
 func InsertPreKeys(db *sql.DB, userID string, keys [][]byte) error {
-	return insertPreKeysWithDevice(db, userID, "", keys)
+	_, err := insertPreKeysWithDevice(db, userID, "", keys)
+	return err
 }
 
 // InsertPreKeysForDevice сохраняет одноразовые ключи с привязкой к устройству.
-func InsertPreKeysForDevice(db *sql.DB, userID, deviceID string, keys [][]byte) error {
+// Возвращает server-assigned IDs в том же порядке, что и keys.
+func InsertPreKeysForDevice(db *sql.DB, userID, deviceID string, keys [][]byte) ([]int64, error) {
 	return insertPreKeysWithDevice(db, userID, deviceID, keys)
 }
 
-func insertPreKeysWithDevice(db *sql.DB, userID, deviceID string, keys [][]byte) error {
+func insertPreKeysWithDevice(db *sql.DB, userID, deviceID string, keys [][]byte) ([]int64, error) {
 	tx, err := db.Begin()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 	stmt, err := tx.Prepare(`INSERT INTO pre_keys (user_id, device_id, key_public) VALUES (?,?,?)`)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer stmt.Close()
+	ids := make([]int64, 0, len(keys))
 	for _, k := range keys {
-		if _, err := stmt.Exec(userID, nullableString(deviceID), k); err != nil {
-			return err
+		res, err := stmt.Exec(userID, nullableString(deviceID), k)
+		if err != nil {
+			return nil, err
 		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // PopPreKey atomically возвращает и помечает использованным один свободный OPK.

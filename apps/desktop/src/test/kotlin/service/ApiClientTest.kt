@@ -14,7 +14,7 @@ class ApiClientTest {
     fun `login returns tokens on 200`() = runTest {
         val engine = MockEngine { request ->
             respond(
-                content = ByteReadChannel("""{"accessToken":"acc","refreshToken":"ref"}"""),
+                content = ByteReadChannel("""{"accessToken":"acc","userId":"u1","username":"user"}"""),
                 status = HttpStatusCode.OK,
                 headers = headersOf(HttpHeaders.ContentType, "application/json"),
             )
@@ -25,14 +25,15 @@ class ApiClientTest {
         val result = client.login("user", "pass")
 
         assertEquals("acc", result.accessToken)
-        assertEquals("ref", result.refreshToken)
+        assertEquals("u1", result.userId)
+        assertEquals("user", result.username)
     }
 
     @Test
     fun `login stores tokens in tokenStore`() = runTest {
         val engine = MockEngine { _ ->
             respond(
-                content = ByteReadChannel("""{"accessToken":"acc","refreshToken":"ref"}"""),
+                content = ByteReadChannel("""{"accessToken":"acc","userId":"u1","username":"user"}"""),
                 status = HttpStatusCode.OK,
                 headers = headersOf(HttpHeaders.ContentType, "application/json"),
             )
@@ -43,17 +44,14 @@ class ApiClientTest {
         client.login("user", "pass")
 
         assertEquals("acc", tokenStore.accessToken)
-        assertEquals("ref", tokenStore.refreshToken)
     }
 }
 
 class InMemoryTokenStore(
     override var accessToken: String = "",
-    override var refreshToken: String = "",
 ) : TokenStoreInterface {
-    override fun save(accessToken: String, refreshToken: String) {
+    override fun save(accessToken: String) {
         this.accessToken = accessToken
-        this.refreshToken = refreshToken
     }
-    override fun clear() { accessToken = ""; refreshToken = "" }
+    override fun clear() { accessToken = "" }
 }

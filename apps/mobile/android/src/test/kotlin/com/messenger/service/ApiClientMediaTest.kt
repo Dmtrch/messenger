@@ -19,8 +19,7 @@ class ApiClientMediaTest {
         val engine = MockEngine(handler)
         val tokenStore = object : TokenStoreInterface {
             override var accessToken = "test-token"
-            override var refreshToken = ""
-            override fun save(accessToken: String, refreshToken: String) {}
+            override fun save(accessToken: String) {}
             override fun clear() {}
         }
         return ApiClient(

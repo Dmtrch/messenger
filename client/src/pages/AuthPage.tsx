@@ -38,15 +38,7 @@ export default function AuthPage() {
     setError('')
 
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ username: username.trim(), password }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setError(data.error ?? 'Ошибка входа'); return }
-
+      const data = await api.login({ username: username.trim(), password })
       setAccessToken(data.accessToken)
       const user: User = {
         id: data.userId,
@@ -55,8 +47,8 @@ export default function AuthPage() {
         identityKeyPublic: '',
       }
       login(user, data.accessToken)
-    } catch {
-      setError('Ошибка соединения')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Ошибка входа')
     } finally {
       setLoading(false)
     }

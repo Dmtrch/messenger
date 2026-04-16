@@ -9,8 +9,7 @@ import com.goterl.lazysodium.LazySodiumAndroid
 import com.goterl.lazysodium.SodiumAndroid
 import com.messenger.config.ServerConfig
 import com.messenger.crypto.KeyStorage
-import com.messenger.crypto.Ratchet
-import com.messenger.crypto.SenderKey
+import com.messenger.crypto.SessionManager
 import com.messenger.db.DatabaseProvider
 import com.messenger.service.ApiClient
 import com.messenger.service.IceServerDto
@@ -29,6 +28,8 @@ import com.messenger.store.ChatItem
 import com.messenger.store.ChatStore
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.util.UUID
@@ -46,12 +47,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val authState: StateFlow<AuthState> = authStore.state
 
     private val sodiumProvider: () -> LazySodium = { LazySodiumAndroid(SodiumAndroid()) }
-    private val ratchet by lazy { Ratchet(sodiumProvider()) }
-    private val senderKey by lazy { SenderKey(sodiumProvider()) }
+    private val sodium by lazy { sodiumProvider() }
 
     private val tokenStore = TokenStore(application)
     val keyStorage = KeyStorage(application)
     val dbProvider = DatabaseProvider(application)
+    private val sessionManager by lazy { SessionManager(sodium, keyStorage, dbProvider.database) }
 
     var apiClient: ApiClient? = null
     internal var callSignalingTestHooks: CallSignalingTestHooks? = null
@@ -69,9 +70,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val client = apiClient ?: return Result.failure(IllegalStateException("Server URL not set"))
         return try {
             val resp = client.login(username, password)
-            authStore.login(userId = username, username = username, accessToken = resp.accessToken)
+            authStore.login(userId = resp.userId, username = resp.username, accessToken = resp.accessToken)
             startWS(resp.accessToken)
             loadChats()
+            registerKeysIfNeeded(client)
             registerFcmTokenIfAvailable(client)
             Result.success(Unit)
         } catch (e: Exception) {
@@ -106,8 +108,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val client = apiClient ?: return
         val db = dbProvider.database
         val orchestrator = WSOrchestrator(
-            ratchet = ratchet,
-            senderKey = senderKey,
+            sessionManager = sessionManager,
             chatStore = chatStore,
             db = db,
             currentUserId = authStore.state.value.userId,
@@ -148,18 +149,49 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
         chatStore.onMessageReceived(chatId, clientMsgId, plaintext, userId, timestamp)
 
-        val frame = kotlinx.serialization.json.buildJsonObject {
-            put("type", kotlinx.serialization.json.JsonPrimitive("message"))
-            put("chatId", kotlinx.serialization.json.JsonPrimitive(chatId))
-            put("clientMsgId", kotlinx.serialization.json.JsonPrimitive(clientMsgId))
-            put("plaintext", kotlinx.serialization.json.JsonPrimitive(plaintext))
-        }.toString()
+        viewModelScope.launch {
+            val members = chatStore.chats.value.find { it.id == chatId }?.members ?: emptyList()
+            val isGroup = chatStore.isGroup(chatId)
+            val client = apiClient
 
-        val send = wsSend
-        if (send != null) {
-            send(frame)
-        } else {
-            db.messengerQueries.insertOutbox(
+            val recipients = buildJsonArray {
+                if (isGroup) {
+                    val cipher = runCatching { sessionManager.encryptGroupMessage(chatId, plaintext) }.getOrNull() ?: return@launch
+                    members.filter { it != userId }.forEach { memberId ->
+                        add(buildJsonObject {
+                            put("userId", memberId)
+                            put("deviceId", "")
+                            put("ciphertext", cipher)
+                        })
+                    }
+                } else {
+                    members.filter { it != userId }.forEach { memberId ->
+                        runCatching {
+                            val resp = client?.getKeyBundle(memberId)
+                            resp?.devices?.forEach { device ->
+                                val cipher = sessionManager.encryptForDevice(memberId, device.deviceId, device, plaintext)
+                                add(buildJsonObject {
+                                    put("userId", memberId)
+                                    put("deviceId", device.deviceId)
+                                    put("ciphertext", cipher)
+                                })
+                            }
+                        }
+                    }
+                }
+            }
+
+            val frame = buildJsonObject {
+                put("type", "message")
+                put("chatId", chatId)
+                put("clientMsgId", clientMsgId)
+                put("senderKeyId", 0)
+                put("recipients", recipients)
+            }.toString()
+
+            val send = wsSend
+            if (send != null) send(frame)
+            else db.messengerQueries.insertOutbox(
                 client_msg_id = clientMsgId, chat_id = chatId,
                 plaintext = frame, created_at = timestamp,
             )
@@ -272,6 +304,60 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             sent = true
         }
         return sent
+    }
+
+    private suspend fun registerKeysIfNeeded(client: ApiClient) {
+        val sodium = sodiumProvider()
+        val b64 = android.util.Base64.NO_WRAP
+
+        val ikPub = keyStorage.loadKey("ik_pub") ?: run {
+            val pub = ByteArray(com.goterl.lazysodium.interfaces.Sign.PUBLICKEYBYTES)
+            val sec = ByteArray(com.goterl.lazysodium.interfaces.Sign.SECRETKEYBYTES)
+            (sodium as com.goterl.lazysodium.interfaces.Sign.Native).cryptoSignKeypair(pub, sec)
+            keyStorage.saveKey("ik_pub", pub); keyStorage.saveKey("ik_sec", sec); pub
+        }
+        val ikSec = keyStorage.loadKey("ik_sec") ?: return
+
+        val spkPub = keyStorage.loadKey("spk_pub") ?: run {
+            val pub = ByteArray(com.goterl.lazysodium.interfaces.Box.PUBLICKEYBYTES)
+            val sec = ByteArray(com.goterl.lazysodium.interfaces.Box.SECRETKEYBYTES)
+            (sodium as com.goterl.lazysodium.interfaces.Box.Native).cryptoBoxKeypair(pub, sec)
+            keyStorage.saveKey("spk_pub", pub); keyStorage.saveKey("spk_sec", sec); pub
+        }
+        val spkSig = keyStorage.loadKey("spk_sig") ?: run {
+            val sig = ByteArray(com.goterl.lazysodium.interfaces.Sign.BYTES)
+            (sodium as com.goterl.lazysodium.interfaces.Sign.Native)
+                .cryptoSignDetached(sig, spkPub, spkPub.size.toLong(), ikSec)
+            keyStorage.saveKey("spk_sig", sig); sig
+        }
+        val spkId = keyStorage.getOrCreateSpkId()
+
+        val opkSecrets = mutableListOf<ByteArray>()
+        val opkPublics = (1..10).map {
+            val pub = ByteArray(com.goterl.lazysodium.interfaces.Box.PUBLICKEYBYTES)
+            val sec = ByteArray(com.goterl.lazysodium.interfaces.Box.SECRETKEYBYTES)
+            (sodium as com.goterl.lazysodium.interfaces.Box.Native).cryptoBoxKeypair(pub, sec)
+            opkSecrets.add(sec)
+            android.util.Base64.encodeToString(pub, b64)
+        }
+
+        val deviceId = android.provider.Settings.Secure.getString(
+            getApplication<android.app.Application>().contentResolver,
+            android.provider.Settings.Secure.ANDROID_ID) ?: "android"
+
+        val req = com.messenger.service.RegisterKeysRequest(
+            deviceName   = deviceId,
+            ikPublic     = android.util.Base64.encodeToString(ikPub, b64),
+            spkId        = spkId,
+            spkPublic    = android.util.Base64.encodeToString(spkPub, b64),
+            spkSignature = android.util.Base64.encodeToString(spkSig, b64),
+            opkPublics   = opkPublics,
+        )
+        val regResp = runCatching { client.registerKeys(req) }.getOrNull() ?: return
+        // Сохраняем OPK private keys под server-assigned IDs для X3DH responder
+        regResp.opkIds.zip(opkSecrets).forEach { (id, sec) ->
+            keyStorage.saveKey("opk_$id", sec)
+        }
     }
 
     private suspend fun loadChats() {

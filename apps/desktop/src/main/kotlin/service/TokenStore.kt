@@ -5,8 +5,7 @@ import java.util.prefs.Preferences
 
 interface TokenStoreInterface {
     var accessToken: String
-    var refreshToken: String
-    fun save(accessToken: String, refreshToken: String)
+    fun save(accessToken: String)
     fun clear()
 }
 
@@ -20,19 +19,13 @@ class TokenStore : TokenStoreInterface {
         get() = prefs.get("access_token", "")
         set(value) { prefs.put("access_token", value) }
 
-    override var refreshToken: String
-        get() = prefs.get("refresh_token", "")
-        set(value) { prefs.put("refresh_token", value) }
-
-    override fun save(accessToken: String, refreshToken: String) {
+    override fun save(accessToken: String) {
         this.accessToken = accessToken
-        this.refreshToken = refreshToken
         prefs.flush()
     }
 
     override fun clear() {
         prefs.remove("access_token")
-        prefs.remove("refresh_token")
         prefs.flush()
     }
 }

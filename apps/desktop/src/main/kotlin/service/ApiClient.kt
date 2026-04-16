@@ -10,6 +10,8 @@ import io.ktor.client.plugins.auth.Auth
 import io.ktor.client.plugins.auth.providers.BearerTokens
 import io.ktor.client.plugins.auth.providers.bearer
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.cookies.AcceptAllCookiesStorage
+import io.ktor.client.plugins.cookies.HttpCookies
 import io.ktor.client.plugins.websocket.WebSockets
 import com.goterl.lazysodium.LazySodiumJava
 import com.goterl.lazysodium.SodiumJava
@@ -30,8 +32,14 @@ import kotlinx.serialization.json.Json
 import java.util.Base64
 
 @Serializable data class LoginRequest(val username: String, val password: String)
-@Serializable data class LoginResponse(val accessToken: String, val refreshToken: String)
-@Serializable data class RefreshResponse(val accessToken: String, val refreshToken: String)
+@Serializable data class LoginResponse(
+    val accessToken: String,
+    val userId: String,
+    val username: String,
+    val displayName: String? = null,
+    val role: String? = null,
+)
+@Serializable data class RefreshResponse(val accessToken: String)
 @Serializable data class ChatSummaryDto(
     val id: String,
     val name: String,
@@ -53,13 +61,29 @@ import java.util.Base64
 )
 @Serializable data class RecipientDto(val userId: String, val deviceId: String?, val ciphertext: String)
 @Serializable data class RegisterKeysRequest(
-    val identityKey: String,
-    val signedPreKey: String,
-    val signedPreKeySignature: String,
-    val oneTimePreKeys: List<String>,
+    val deviceName: String,
+    val ikPublic: String,
+    val spkId: Int,
+    val spkPublic: String,
+    val spkSignature: String,
+    val opkPublics: List<String>,
+)
+@Serializable data class RegisterKeysResponse(
+    val deviceId: String = "",
+    val opkIds: List<Long> = emptyList(),
 )
 @Serializable data class MediaUploadResponse(val mediaId: String)
 data class MediaUploadResult(val mediaId: String, val mediaKey: String)
+@Serializable data class DeviceBundle(
+    val deviceId: String = "",
+    val ikPublic: String,
+    val spkPublic: String,
+    val spkId: Int = 0,
+    val spkSignature: String = "",
+    val opkPublic: String? = null,
+    val opkId: Int? = null,
+)
+@Serializable data class PreKeyBundleResponse(val devices: List<DeviceBundle>)
 
 private val applicationJson = ContentType.Application.Json.toString()
 private const val MAX_UPLOAD_BYTES = 10 * 1024 * 1024  // 10 МБ
@@ -77,21 +101,19 @@ class ApiClient(
     private fun buildConfig(): HttpClientConfig<*>.() -> Unit = {
         install(ContentNegotiation) { json(jsonConfig) }
         install(WebSockets)
+        install(HttpCookies) { storage = AcceptAllCookiesStorage() }
         install(Auth) {
             bearer {
                 loadTokens {
                     val acc = tokenStore.accessToken
-                    val ref = tokenStore.refreshToken
-                    if (acc.isNotEmpty()) BearerTokens(acc, ref) else null
+                    if (acc.isNotEmpty()) BearerTokens(acc, "") else null
                 }
                 refreshTokens {
                     val resp: RefreshResponse = client.post("$baseUrl/api/auth/refresh") {
                         markAsRefreshTokenRequest()
-                        headers { append(HttpHeaders.ContentType, applicationJson) }
-                        setBody(mapOf("refreshToken" to tokenStore.refreshToken))
                     }.body()
-                    tokenStore.save(resp.accessToken, resp.refreshToken)
-                    BearerTokens(resp.accessToken, resp.refreshToken)
+                    tokenStore.save(resp.accessToken)
+                    BearerTokens(resp.accessToken, "")
                 }
             }
         }
@@ -111,7 +133,7 @@ class ApiClient(
         }
         if (!resp.status.isSuccess()) error("Login failed: ${resp.status}")
         val body: LoginResponse = resp.body()
-        tokenStore.save(body.accessToken, body.refreshToken)
+        tokenStore.save(body.accessToken)
         return body
     }
 
@@ -126,13 +148,17 @@ class ApiClient(
     suspend fun getIceServers(): IceServersResponse =
         http.get("$baseUrl/api/calls/ice-servers").body()
 
-    suspend fun registerKeys(req: RegisterKeysRequest) {
+    suspend fun registerKeys(req: RegisterKeysRequest): RegisterKeysResponse {
         val resp = http.post("$baseUrl/api/keys/register") {
             headers { append(HttpHeaders.ContentType, applicationJson) }
             setBody(req)
         }
         if (!resp.status.isSuccess()) error("registerKeys failed: ${resp.status}")
+        return resp.body()
     }
+
+    suspend fun getKeyBundle(userId: String): PreKeyBundleResponse =
+        http.get("$baseUrl/api/keys/bundle/$userId").body()
 
     /**
      * Шифрует bytes на клиенте (XSalsa20-Poly1305) и загружает на сервер.

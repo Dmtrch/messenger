@@ -1,8 +1,7 @@
 // apps/mobile/android/src/main/kotlin/com/messenger/service/WSOrchestrator.kt
 package com.messenger.service
 
-import com.messenger.crypto.Ratchet
-import com.messenger.crypto.SenderKey
+import com.messenger.crypto.SessionManager
 import com.messenger.db.MessengerDatabase
 import com.messenger.store.ChatStore
 import com.messenger.service.call.CallAnswerSignal
@@ -11,8 +10,7 @@ import com.messenger.service.call.IceCandidateSignal
 import kotlinx.serialization.json.*
 
 class WSOrchestrator(
-    private val ratchet: Ratchet,
-    private val senderKey: SenderKey,
+    private val sessionManager: SessionManager,
     private val chatStore: ChatStore,
     private val db: MessengerDatabase,
     private val currentUserId: String,
@@ -21,7 +19,6 @@ class WSOrchestrator(
     private val onIceCandidate: (IceCandidateSignal) -> Unit = {},
     private val onCallEnd: (String) -> Unit = {},
 ) {
-    private val b64Dec = java.util.Base64.getDecoder()
 
     fun onFrame(frame: JsonElement) {
         val obj = frame.jsonObject
@@ -41,37 +38,27 @@ class WSOrchestrator(
     }
 
     private fun handleMessage(obj: JsonObject) {
-        val chatId      = obj["chatId"]?.jsonPrimitive?.content ?: return
-        val senderId    = obj["senderId"]?.jsonPrimitive?.content ?: return
-        val ciphertext  = obj["ciphertext"]?.jsonPrimitive?.content ?: return
-        val messageId   = obj["messageId"]?.jsonPrimitive?.content ?: return
-        val clientMsgId = obj["clientMsgId"]?.jsonPrimitive?.content ?: messageId
-        val timestamp   = obj["timestamp"]?.jsonPrimitive?.long ?: System.currentTimeMillis()
-        val isGroup     = chatStore.isGroup(chatId)
+        val chatId         = obj["chatId"]?.jsonPrimitive?.content ?: return
+        val senderId       = obj["senderId"]?.jsonPrimitive?.content ?: return
+        val ciphertext     = obj["ciphertext"]?.jsonPrimitive?.content ?: return
+        val messageId      = obj["messageId"]?.jsonPrimitive?.content ?: return
+        val clientMsgId    = obj["clientMsgId"]?.jsonPrimitive?.content ?: messageId
+        val timestamp      = obj["timestamp"]?.jsonPrimitive?.long ?: System.currentTimeMillis()
+        val senderDeviceId = obj["senderDeviceId"]?.jsonPrimitive?.content ?: ""
+        val isGroup        = chatStore.isGroup(chatId)
 
         val plaintext = try {
-            val parts = ciphertext.split(":")
-            if (parts.size != 2) return
-            val nonce = b64Dec.decode(parts[0])
-            val ct    = b64Dec.decode(parts[1])
-            if (isGroup) {
-                val skBlob = db.messengerQueries.loadRatchetSession("sk_$chatId").executeAsOneOrNull() ?: return
-                senderKey.decrypt(ct, nonce, skBlob)
-            } else {
-                val sessionKey = "session_${minOf(senderId, currentUserId)}_${maxOf(senderId, currentUserId)}"
-                val chainKey = db.messengerQueries.loadRatchetSession(sessionKey).executeAsOneOrNull() ?: return
-                val msgKey = ratchet.deriveMessageKey(chainKey, 0)
-                ratchet.decrypt(ct, nonce, msgKey)
-            }
+            if (isGroup) sessionManager.decryptGroupMessage(chatId, senderId, ciphertext)
+            else sessionManager.decryptFromDevice(senderId, senderDeviceId, ciphertext)
         } catch (_: Exception) { return }
 
         db.messengerQueries.insertMessage(
             id = messageId, client_msg_id = clientMsgId, chat_id = chatId,
-            sender_id = senderId, plaintext = String(plaintext),
+            sender_id = senderId, plaintext = plaintext,
             timestamp = timestamp, status = "delivered", is_deleted = 0L,
             media_id = null, media_key = null, original_name = null, content_type = null,
         )
-        chatStore.onMessageReceived(chatId, clientMsgId, String(plaintext), senderId, timestamp)
+        chatStore.onMessageReceived(chatId, clientMsgId, plaintext, senderId, timestamp)
     }
 
     private fun handleAck(obj: JsonObject) {
@@ -145,28 +132,18 @@ class WSOrchestrator(
     }
 
     private fun handleEdited(obj: JsonObject) {
-        val clientMsgId = obj["clientMsgId"]?.jsonPrimitive?.content ?: return
-        val ciphertext  = obj["ciphertext"]?.jsonPrimitive?.content ?: return
-        val senderId    = obj["senderId"]?.jsonPrimitive?.content ?: return
-        val chatId      = obj["chatId"]?.jsonPrimitive?.content ?: return
-        val isGroup     = chatStore.isGroup(chatId)
+        val clientMsgId    = obj["clientMsgId"]?.jsonPrimitive?.content ?: return
+        val ciphertext     = obj["ciphertext"]?.jsonPrimitive?.content ?: return
+        val senderId       = obj["senderId"]?.jsonPrimitive?.content ?: return
+        val chatId         = obj["chatId"]?.jsonPrimitive?.content ?: return
+        val senderDeviceId = obj["senderDeviceId"]?.jsonPrimitive?.content ?: ""
+        val isGroup        = chatStore.isGroup(chatId)
 
         val plaintext = try {
-            val parts = ciphertext.split(":")
-            if (parts.size != 2) return
-            val nonce = b64Dec.decode(parts[0])
-            val ct    = b64Dec.decode(parts[1])
-            if (isGroup) {
-                val skBlob = db.messengerQueries.loadRatchetSession("sk_$chatId").executeAsOneOrNull() ?: return
-                senderKey.decrypt(ct, nonce, skBlob)
-            } else {
-                val sessionKey = "session_${minOf(senderId, currentUserId)}_${maxOf(senderId, currentUserId)}"
-                val chainKey = db.messengerQueries.loadRatchetSession(sessionKey).executeAsOneOrNull() ?: return
-                val msgKey = ratchet.deriveMessageKey(chainKey, 0)
-                ratchet.decrypt(ct, nonce, msgKey)
-            }
+            if (isGroup) sessionManager.decryptGroupMessage(chatId, senderId, ciphertext)
+            else sessionManager.decryptFromDevice(senderId, senderDeviceId, ciphertext)
         } catch (_: Exception) { return }
 
-        chatStore.onMessageEdited(clientMsgId, String(plaintext))
+        chatStore.onMessageEdited(clientMsgId, plaintext)
     }
 }

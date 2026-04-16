@@ -35,6 +35,7 @@ func createUser(t *testing.T, database *sql.DB, username string) string {
 		Username:     username,
 		DisplayName:  username,
 		PasswordHash: "$2a$12$testhash",
+		Role:         "user",
 		CreatedAt:    1000000,
 	}
 	if err := db.CreateUser(database, user); err != nil {
@@ -269,5 +270,52 @@ func TestGetBundle_OPKPopped(t *testing.T) {
 	opk2, has2 := d2["opkId"]
 	if has1 && has2 && opk1 == opk2 {
 		t.Fatal("same OPK popped twice — prekey rotation broken")
+	}
+}
+
+// TestGetBundle_SelfDoesNotPopOPK проверяет что запрос bundle для самого себя
+// не расходует одноразовые prekey (OPK).
+func TestGetBundle_SelfDoesNotPopOPK(t *testing.T) {
+	database := newTestDB(t)
+	userID := createUser(t, database, "alice")
+	h := &keys.Handler{DB: database}
+
+	registerDeviceReq(userID, h, b64(32)) // регистрирует 2 OPK
+
+	getSelf := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req = withChiParam(req, "userId", userID)
+		req = withUserID(req, userID) // caller == owner
+		rr := httptest.NewRecorder()
+		h.GetBundle(rr, req)
+		return rr
+	}
+
+	// Запрашиваем bundle 3 раза как сам владелец
+	for i := 0; i < 3; i++ {
+		rr := getSelf()
+		if rr.Code != 200 {
+			t.Fatalf("self get bundle #%d: want 200, got %d: %s", i+1, rr.Code, rr.Body)
+		}
+		d := firstDeviceBundle(t, rr.Body.Bytes())
+		if _, hasOPK := d["opkId"]; hasOPK {
+			t.Errorf("self get bundle #%d: opkId should NOT be present when caller==owner", i+1)
+		}
+	}
+
+	// Теперь другой пользователь запрашивает bundle — должен получить OPK
+	other := createUser(t, database, "bob")
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req = withChiParam(req, "userId", userID)
+	req = withUserID(req, other)
+	rr := httptest.NewRecorder()
+	h.GetBundle(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("other get bundle: want 200, got %d: %s", rr.Code, rr.Body)
+	}
+	d := firstDeviceBundle(t, rr.Body.Bytes())
+	if _, hasOPK := d["opkId"]; !hasOPK {
+		t.Error("other user should receive OPK in bundle, but opkId is missing")
 	}
 }

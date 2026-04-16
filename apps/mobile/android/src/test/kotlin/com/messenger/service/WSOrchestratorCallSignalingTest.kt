@@ -3,8 +3,8 @@ package com.messenger.service
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.goterl.lazysodium.LazySodiumJava
 import com.goterl.lazysodium.SodiumJava
-import com.messenger.crypto.Ratchet
-import com.messenger.crypto.SenderKey
+import com.messenger.crypto.KeyAccess
+import com.messenger.crypto.SessionManager
 import com.messenger.db.MessengerDatabase
 import com.messenger.store.ChatItem
 import com.messenger.store.ChatStore
@@ -14,6 +14,13 @@ import org.junit.jupiter.api.Assertions.assertIterableEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
+private class FakeKeyAccess : KeyAccess {
+    private val keys = mutableMapOf<String, ByteArray>()
+    override fun loadKey(alias: String): ByteArray? = keys[alias]
+    override fun saveKey(alias: String, keyBytes: ByteArray) { keys[alias] = keyBytes }
+    override fun getOrCreateSpkId(): Int = 1
+}
+
 class WSOrchestratorCallSignalingTest {
     private val sodium = LazySodiumJava(SodiumJava())
 
@@ -21,6 +28,28 @@ class WSOrchestratorCallSignalingTest {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         MessengerDatabase.Schema.create(driver)
         return MessengerDatabase(driver)
+    }
+
+    private fun makeOrchestrator(
+        chatStore: ChatStore = ChatStore(),
+        currentUserId: String = "alice",
+        onCallOffer: (com.messenger.service.call.CallOfferSignal) -> Unit = {},
+        onCallAnswer: (com.messenger.service.call.CallAnswerSignal) -> Unit = {},
+        onIceCandidate: (com.messenger.service.call.IceCandidateSignal) -> Unit = {},
+        onCallEnd: (String) -> Unit = {},
+    ): WSOrchestrator {
+        val db = createDb()
+        val sm = SessionManager(sodium, FakeKeyAccess(), db)
+        return WSOrchestrator(
+            sessionManager = sm,
+            chatStore = chatStore,
+            db = db,
+            currentUserId = currentUserId,
+            onCallOffer = onCallOffer,
+            onCallAnswer = onCallAnswer,
+            onIceCandidate = onIceCandidate,
+            onCallEnd = onCallEnd,
+        )
     }
 
     @Test
@@ -39,12 +68,8 @@ class WSOrchestratorCallSignalingTest {
                 ),
             )
         }
-        val orchestrator = WSOrchestrator(
-            ratchet = Ratchet(sodium),
-            senderKey = SenderKey(sodium),
+        val orchestrator = makeOrchestrator(
             chatStore = chatStore,
-            db = createDb(),
-            currentUserId = "alice",
             onCallOffer = { offer -> events += "offer:${offer.callId}:${offer.sdp}:${offer.isVideo}" },
             onCallAnswer = { answer -> events += "answer:${answer.callId}:${answer.sdp}" },
             onIceCandidate = { ice ->
@@ -119,12 +144,7 @@ class WSOrchestratorCallSignalingTest {
     @Test
     fun `call reject forwards end callback`() {
         val events = mutableListOf<String>()
-        val orchestrator = WSOrchestrator(
-            ratchet = Ratchet(sodium),
-            senderKey = SenderKey(sodium),
-            chatStore = ChatStore(),
-            db = createDb(),
-            currentUserId = "alice",
+        val orchestrator = makeOrchestrator(
             onCallEnd = { callId -> events += callId },
         )
 
@@ -157,12 +177,8 @@ class WSOrchestratorCallSignalingTest {
                 ),
             )
         }
-        val orchestrator = WSOrchestrator(
-            ratchet = Ratchet(sodium),
-            senderKey = SenderKey(sodium),
+        val orchestrator = makeOrchestrator(
             chatStore = chatStore,
-            db = createDb(),
-            currentUserId = "alice",
         )
 
         orchestrator.onFrame(

@@ -5,6 +5,7 @@
 
 import { useCallback } from 'react'
 import { api } from '@/api/client'
+import { getServerUrl } from '@/config/serverConfig'
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -14,7 +15,7 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 }
 
 async function getVapidKey(): Promise<string> {
-  const res = await fetch('/api/push/vapid-public-key')
+  const res = await fetch(`${getServerUrl()}/api/push/vapid-public-key`)
   if (!res.ok) throw new Error('vapid key unavailable')
   const { publicKey } = await res.json() as { publicKey: string }
   return publicKey

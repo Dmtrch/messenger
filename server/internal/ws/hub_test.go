@@ -84,7 +84,7 @@ func TestWSHub_ValidToken_Connects(t *testing.T) {
 	// Создаём пользователя
 	user := db.User{
 		ID: "user-ws-test", Username: "wstest", DisplayName: "WS Test",
-		PasswordHash: "$2a$12$testhash", CreatedAt: time.Now().UnixMilli(),
+		PasswordHash: "$2a$12$testhash", Role: "user", CreatedAt: time.Now().UnixMilli(),
 	}
 	if err := db.CreateUser(database, user); err != nil {
 		t.Fatalf("create user: %v", err)
@@ -140,11 +140,11 @@ func TestWSHub_Broadcast_DeliveredToMember(t *testing.T) {
 
 	alice := db.User{
 		ID: "user-alice", Username: "alice", DisplayName: "Alice",
-		PasswordHash: "$2a$12$testhash", CreatedAt: time.Now().UnixMilli(),
+		PasswordHash: "$2a$12$testhash", Role: "user", CreatedAt: time.Now().UnixMilli(),
 	}
 	bob := db.User{
 		ID: "user-bob", Username: "bob", DisplayName: "Bob",
-		PasswordHash: "$2a$12$testhash", CreatedAt: time.Now().UnixMilli(),
+		PasswordHash: "$2a$12$testhash", Role: "user", CreatedAt: time.Now().UnixMilli(),
 	}
 	db.CreateUser(database, alice)
 	db.CreateUser(database, bob)

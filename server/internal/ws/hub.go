@@ -332,6 +332,12 @@ func (h *Hub) handleMessage(c *client, msg inMsg) {
 	now := time.Now().UnixMilli()
 
 	for _, r := range msg.Recipients {
+		if r.UserID != c.userID {
+			member, err := db.IsConversationMember(h.db, msg.ChatID, r.UserID)
+			if err != nil || !member {
+				continue
+			}
+		}
 		msgID := uuid.New().String()
 		if err := db.SaveMessage(h.db, db.Message{
 			ID:                  msgID,
@@ -412,6 +418,10 @@ func (h *Hub) handleSKDM(c *client, msg inMsg) {
 		return
 	}
 	for _, r := range msg.Recipients {
+		member, err := db.IsConversationMember(h.db, msg.ChatID, r.UserID)
+		if err != nil || !member {
+			continue
+		}
 		payload, _ := json.Marshal(map[string]any{
 			"type":       "skdm",
 			"chatId":     msg.ChatID,
@@ -423,6 +433,10 @@ func (h *Hub) handleSKDM(c *client, msg inMsg) {
 }
 
 func (h *Hub) handleTyping(c *client, msg inMsg) {
+	ok, err := db.IsConversationMember(h.db, msg.ChatID, c.userID)
+	if err != nil || !ok {
+		return
+	}
 	members, err := db.GetConversationMembers(h.db, msg.ChatID)
 	if err != nil {
 		return

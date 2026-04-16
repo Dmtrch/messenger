@@ -147,10 +147,10 @@ final class WSOrchestrator {
     }
 
     private func handleSKDM(_ obj: [String: Any]) {
-        guard let chatId         = obj["chatId"]         as? String,
-              let senderId       = obj["senderId"]       as? String,
-              let senderDeviceId = obj["senderDeviceId"] as? String,
-              let ciphertext     = obj["ciphertext"]     as? String else { return }
+        guard let chatId     = obj["chatId"]     as? String,
+              let senderId   = obj["senderId"]   as? String,
+              let ciphertext = obj["ciphertext"] as? String else { return }
+        let senderDeviceId = (obj["senderDeviceId"] as? String) ?? senderId
         try? sessionManager.handleIncomingSKDM(chatId: chatId, senderId: senderId,
                                                senderDeviceId: senderDeviceId,
                                                encodedSkdm: ciphertext)

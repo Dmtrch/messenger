@@ -2,6 +2,7 @@ package admin
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -53,8 +54,9 @@ func (h *Handler) ApproveRegistrationRequest(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	userID := uuid.New().String()
 	user := db.User{
-		ID:           uuid.New().String(),
+		ID:           userID,
 		Username:     req.Username,
 		DisplayName:  req.DisplayName,
 		PasswordHash: req.PasswordHash,
@@ -64,6 +66,12 @@ func (h *Handler) ApproveRegistrationRequest(w http.ResponseWriter, r *http.Requ
 	if err := db.CreateUser(h.DB, user); err != nil {
 		httpErr(w, "server error", 500)
 		return
+	}
+
+	// Переносим ключевой материал из заявки в рабочие таблицы.
+	if err := transferKeys(h.DB, userID, req); err != nil {
+		// Не прерываем — пользователь создан, ключи можно зарегистрировать при первом входе.
+		_ = err
 	}
 
 	_ = db.UpdateRegistrationRequestStatus(h.DB, id, "approved", adminID, time.Now().UnixMilli())
@@ -204,6 +212,68 @@ func (h *Handler) ResolvePasswordResetRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 	w.WriteHeader(204)
+}
+
+// transferKeys переносит ik/spk/opk из registration_request в рабочие таблицы.
+// Генерирует device ID, так как заявка на регистрацию не содержит device UUID —
+// устройство будет явно переименовано при первом RegisterDevice после логина.
+func transferKeys(database *sql.DB, userID string, req *db.RegistrationRequest) error {
+	ik, err := base64.StdEncoding.DecodeString(req.IKPublic)
+	if err != nil {
+		return err
+	}
+	spk, err := base64.StdEncoding.DecodeString(req.SPKPublic)
+	if err != nil {
+		return err
+	}
+	spkSig, err := base64.StdEncoding.DecodeString(req.SPKSignature)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UnixMilli()
+	deviceID := uuid.New().String()
+	if err := db.UpsertDevice(database, db.Device{
+		ID:         deviceID,
+		UserID:     userID,
+		DeviceName: "Initial device",
+		CreatedAt:  now,
+		LastSeenAt: now,
+	}); err != nil {
+		return err
+	}
+	if err := db.UpsertIdentityKey(database, db.IdentityKey{
+		UserID:       userID,
+		DeviceID:     deviceID,
+		IKPublic:     ik,
+		SPKPublic:    spk,
+		SPKSignature: spkSig,
+		SPKId:        req.SPKId,
+		UpdatedAt:    now,
+	}); err != nil {
+		return err
+	}
+	if req.OPKPublics == "" || req.OPKPublics == "null" {
+		return nil
+	}
+	var opkList []struct {
+		ID  int    `json:"id"`
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal([]byte(req.OPKPublics), &opkList); err != nil {
+		return err
+	}
+	opks := make([][]byte, 0, len(opkList))
+	for _, o := range opkList {
+		keyBytes, err := base64.StdEncoding.DecodeString(o.Key)
+		if err != nil {
+			continue
+		}
+		opks = append(opks, keyBytes)
+	}
+	if len(opks) > 0 {
+		return db.InsertPreKeys(database, userID, opks)
+	}
+	return nil
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

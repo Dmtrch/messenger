@@ -39,6 +39,17 @@ func readFrame(ch chan []byte) map[string]any {
 	}
 }
 
+// drainCh сбрасывает все накопившиеся сообщения из канала (не блокирует).
+func drainCh(ch chan []byte) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
 // setupConversation создаёт пользователей и чат в тестовой БД.
 func setupConversation(t *testing.T, database *sql.DB, convID string, memberIDs []string) {
 	t.Helper()
@@ -48,6 +59,7 @@ func setupConversation(t *testing.T, database *sql.DB, convID string, memberIDs 
 			Username:     uid,
 			DisplayName:  uid,
 			PasswordHash: "x",
+			Role:         "user",
 			CreatedAt:    time.Now().UnixMilli(),
 		})
 	}
@@ -77,6 +89,9 @@ func TestHandleCallOffer_RelaysToTarget(t *testing.T) {
 
 	aliceCh, aliceClient := addMockClient(h, "alice")
 	bobCh, _ := addMockClient(h, "bob")
+	time.Sleep(20 * time.Millisecond) // даём горутинам broadcastPresence завершиться
+	drainCh(aliceCh)
+	drainCh(bobCh)
 
 	h.handleCallOffer(aliceClient, inMsg{
 		Type:     "call_offer",
@@ -116,6 +131,8 @@ func TestHandleCallOffer_BusyTarget(t *testing.T) {
 
 	aliceCh, aliceClient := addMockClient(h, "alice")
 	_, _ = addMockClient(h, "bob")
+	time.Sleep(20 * time.Millisecond)
+	drainCh(aliceCh)
 
 	// bob уже в звонке с carol
 	h.callsMu.Lock()
@@ -228,6 +245,8 @@ func TestHandleCallOffer_InitiatorAlreadyInCall(t *testing.T) {
 
 	aliceCh, aliceClient := addMockClient(h, "alice")
 	_, _ = addMockClient(h, "bob")
+	time.Sleep(20 * time.Millisecond)
+	drainCh(aliceCh)
 
 	// alice уже является инициатором звонка с carol
 	h.callsMu.Lock()
@@ -584,6 +603,93 @@ func TestHandleCallOffer_TargetNotMember(t *testing.T) {
 	h.callsMu.Unlock()
 	if stored {
 		t.Error("call-x session should NOT be stored when target is not a chat member")
+	}
+}
+
+// TestHandleMessage_NonMemberRecipientNotDelivered проверяет что сообщение
+// не доставляется получателю, который не является участником чата.
+func TestHandleMessage_NonMemberRecipientNotDelivered(t *testing.T) {
+	h := setupTestHub(t)
+	// chat1: alice + bob. carol не является участником.
+	setupConversation(t, h.db, "chat1", []string{"alice", "bob"})
+	db.CreateUser(h.db, db.User{ //nolint:errcheck
+		ID: "carol", Username: "carol", DisplayName: "carol",
+		PasswordHash: "x", Role: "user", CreatedAt: 1000000,
+	})
+
+	aliceCh, aliceClient := addMockClient(h, "alice")
+	bobCh, _ := addMockClient(h, "bob")
+	carolCh, _ := addMockClient(h, "carol")
+	time.Sleep(20 * time.Millisecond)
+	drainCh(aliceCh)
+	drainCh(bobCh)
+	drainCh(carolCh)
+
+	h.handleMessage(aliceClient, inMsg{
+		Type:        "message",
+		ChatID:      "chat1",
+		ClientMsgID: "cm-1",
+		Recipients: []recipient{
+			{UserID: "bob", Ciphertext: []byte("enc-for-bob")},
+			{UserID: "carol", Ciphertext: []byte("enc-for-carol")}, // carol НЕ в чате
+		},
+	})
+
+	// carol не должна ничего получить
+	if f := readFrame(carolCh); f != nil {
+		t.Errorf("carol should not receive message (not a chat member), got %v", f)
+	}
+
+	// bob должен получить сообщение
+	f := readFrame(bobCh)
+	if f == nil {
+		t.Fatal("bob should receive message")
+	}
+	if f["type"] != "message" {
+		t.Errorf("expected message, got %v", f["type"])
+	}
+}
+
+// TestHandleSKDM_NonMemberRecipientNotDelivered проверяет что SKDM
+// не доставляется получателю вне чата.
+func TestHandleSKDM_NonMemberRecipientNotDelivered(t *testing.T) {
+	h := setupTestHub(t)
+	// chat1: alice + bob. carol не является участником.
+	setupConversation(t, h.db, "chat1", []string{"alice", "bob"})
+	db.CreateUser(h.db, db.User{ //nolint:errcheck
+		ID: "carol", Username: "carol", DisplayName: "carol",
+		PasswordHash: "x", Role: "user", CreatedAt: 1000000,
+	})
+
+	aliceCh, aliceClient := addMockClient(h, "alice")
+	bobCh, _ := addMockClient(h, "bob")
+	carolCh, _ := addMockClient(h, "carol")
+	time.Sleep(20 * time.Millisecond)
+	drainCh(aliceCh)
+	drainCh(bobCh)
+	drainCh(carolCh)
+
+	h.handleSKDM(aliceClient, inMsg{
+		Type:   "skdm",
+		ChatID: "chat1",
+		Recipients: []recipient{
+			{UserID: "bob", Ciphertext: []byte("skdm-for-bob")},
+			{UserID: "carol", Ciphertext: []byte("skdm-for-carol")}, // carol НЕ в чате
+		},
+	})
+
+	// carol не должна ничего получить
+	if f := readFrame(carolCh); f != nil {
+		t.Errorf("carol should not receive skdm (not a chat member), got %v", f)
+	}
+
+	// bob должен получить skdm
+	f := readFrame(bobCh)
+	if f == nil {
+		t.Fatal("bob should receive skdm")
+	}
+	if f["type"] != "skdm" {
+		t.Errorf("expected skdm, got %v", f["type"])
 	}
 }
 
