@@ -57,6 +57,11 @@ struct RegisterKeysRequest: Encodable {
     let opkPublics: [String]
 }
 
+struct RegisterKeysResponse: Decodable {
+    let deviceId: String
+    let opkIds: [Int]
+}
+
 struct DeviceBundle: Decodable {
     let deviceId: String
     let ikPublic: String
@@ -67,6 +72,11 @@ struct DeviceBundle: Decodable {
     let opkPublic: String?
 }
 struct PreKeyBundleResponse: Decodable { let devices: [DeviceBundle] }
+
+struct UserResultDto: Decodable { let id: String; let username: String; let displayName: String }
+struct SearchUsersResponse: Decodable { let users: [UserResultDto] }
+struct CreateChatRequest: Encodable { let type: String; let memberIds: [String]; let name: String? }
+struct CreateChatResponse: Decodable { let chat: ChatSummaryDto }
 
 struct MediaUploadResponse: Decodable { let mediaId: String }
 struct MediaUploadResult { let mediaId: String; let mediaKey: String }
@@ -138,6 +148,14 @@ actor ApiClient {
         try await get("/api/keys/\(userId)")
     }
 
+    func searchUsers(query: String) async throws -> SearchUsersResponse {
+        try await get("/api/users/search?q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")")
+    }
+
+    func createChat(type: String, memberIds: [String], name: String? = nil) async throws -> CreateChatResponse {
+        try await post("/api/chats", body: CreateChatRequest(type: type, memberIds: memberIds, name: name), authenticated: true)
+    }
+
     // MARK: - Native push token
 
     func registerNativePushToken(platform: String, token: String, deviceId: String) async throws {
@@ -149,8 +167,8 @@ actor ApiClient {
 
     // MARK: - Key registration
 
-    func registerKeys(_ req: RegisterKeysRequest) async throws {
-        _ = try await post("/api/keys/register", body: req, authenticated: true) as EmptyBody?
+    func registerKeys(_ req: RegisterKeysRequest) async throws -> RegisterKeysResponse {
+        try await post("/api/keys/register", body: req, authenticated: true)
     }
 
     // MARK: - Encrypted media

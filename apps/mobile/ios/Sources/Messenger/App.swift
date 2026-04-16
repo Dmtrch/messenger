@@ -72,6 +72,7 @@ struct MessengerApp: App {
 
 enum AppRoute: Hashable {
     case chat(id: String, name: String)
+    case newChat
 }
 
 // MARK: - Root view
@@ -89,15 +90,29 @@ struct RootView: View {
                     } else if !vm.authState.isAuthenticated {
                         AuthScreen()
                     } else {
-                        ChatListScreen { chat in
-                            navPath.append(AppRoute.chat(id: chat.id, name: chat.name))
-                        }
+                        ChatListScreen(
+                            onChatClick: { chat in
+                                navPath.append(AppRoute.chat(id: chat.id, name: chat.name))
+                            },
+                            onNewChatClick: {
+                                navPath.append(AppRoute.newChat)
+                            }
+                        )
                     }
                 }
                 .navigationDestination(for: AppRoute.self) { route in
                     switch route {
                     case .chat(let id, let name):
                         ChatWindowScreen(chatId: id, chatName: name)
+                    case .newChat:
+                        NewChatScreen(
+                            onBack: { navPath.removeLast() },
+                            onChatCreated: { chatId in
+                                navPath.removeLast()
+                                let chat = vm.chatStore.chats.first(where: { $0.id == chatId })
+                                navPath.append(AppRoute.chat(id: chatId, name: chat?.name ?? "Чат"))
+                            }
+                        )
                     }
                 }
             }

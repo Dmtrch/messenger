@@ -5,7 +5,8 @@ import SwiftUI
 
 struct ChatListScreen: View {
     @EnvironmentObject var vm: AppViewModel
-    let onChatSelected: (ChatItem) -> Void
+    let onChatClick: (ChatItem) -> Void
+    let onNewChatClick: () -> Void
 
     @State private var searchText = ""
     @State private var isLoading  = false
@@ -19,7 +20,7 @@ struct ChatListScreen: View {
 
     var body: some View {
         List(filteredChats) { chat in
-            Button { onChatSelected(chat) } label: {
+            Button { onChatClick(chat) } label: {
                 ChatRow(chat: chat)
             }
             .buttonStyle(.plain)
@@ -27,6 +28,11 @@ struct ChatListScreen: View {
         .searchable(text: $searchText, prompt: "Поиск чатов")
         .navigationTitle("Чаты")
         .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: onNewChatClick) {
+                    Image(systemName: "plus")
+                }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 NavigationLink {
                     ProfileScreen()

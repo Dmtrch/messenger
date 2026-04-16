@@ -19,6 +19,7 @@ sealed class Screen {
     object ChatList : Screen()
     data class ChatWindow(val chatId: String) : Screen()
     object Profile : Screen()
+    object NewChat : Screen()
 }
 
 @Composable
@@ -58,8 +59,14 @@ fun App() {
                     chats = chatList,
                     onChatClick = { chatId -> screen = Screen.ChatWindow(chatId) },
                     onProfileClick = { screen = Screen.Profile },
+                    onNewChatClick = { screen = Screen.NewChat },
                 )
             }
+            Screen.NewChat -> NewChatScreen(
+                vm = vm,
+                onBack = { screen = Screen.ChatList },
+                onChatCreated = { chatId -> screen = Screen.ChatWindow(chatId) }
+            )
             is Screen.ChatWindow -> {
                 val chatId = s.chatId
                 val chatName = chats.find { it.id == chatId }?.name ?: chatId

@@ -189,13 +189,36 @@ final class AppViewModel: ObservableObject {
 
             let req = SendMessageRequest(chatId: chatId, clientMsgId: clientMsgId,
                                           senderKeyId: 0, recipients: recipients)
-            sendMessageViaWS(req)
-            try? db.updateMessageStatus(clientMsgId: clientMsgId, status: "sent")
-            chatStore.onMessageStatusUpdate(clientMsgId: clientMsgId, status: "sent")
+            
+            if wsTask?.state == .running {
+                sendMessageViaWS(req)
+                try? db.updateMessageStatus(clientMsgId: clientMsgId, status: "sent")
+                chatStore.onMessageStatusUpdate(clientMsgId: clientMsgId, status: "sent")
+            } else {
+                // WS offline: сохраняем готовый зашифрованный JSON в Outbox
+                if let frame = serializeMessageFrame(req) {
+                    try? db.addOutboxItem(clientMsgId: clientMsgId, chatId: chatId, payload: frame)
+                }
+            }
         } catch {
-            // Outbox fallback при ошибке
-            try? db.addOutboxItem(clientMsgId: clientMsgId, chatId: chatId,
-                                  payload: plaintext)
+            print("SendMessage encrypt error: \(error)")
+        }
+    }
+
+    private func processOutbox() async {
+        guard let db = db, authState.isAuthenticated else { return }
+        do {
+            let items = try db.loadOutbox()
+            for item in items {
+                sendWSFrame(item.payload)
+                try? db.deleteOutboxItem(clientMsgId: item.clientMsgId)
+                try? db.updateMessageStatus(clientMsgId: item.clientMsgId, status: "sent")
+                await MainActor.run {
+                    self.chatStore.onMessageStatusUpdate(clientMsgId: item.clientMsgId, status: "sent")
+                }
+            }
+        } catch {
+            print("Outbox error: \(error)")
         }
     }
 
@@ -254,6 +277,9 @@ final class AppViewModel: ObservableObject {
         wsTask = task
         task.resume()
         receiveLoop(task: task)
+        
+        // Авто-отправка очереди при подключении
+        Task { await processOutbox() }
     }
 
     private func receiveLoop(task: URLSessionWebSocketTask) {
@@ -287,6 +313,12 @@ final class AppViewModel: ObservableObject {
 
     /// Сериализует SendMessageRequest в WS-фрейм `{ type, chatId, clientMsgId, senderKeyId, recipients }`.
     private func sendMessageViaWS(_ req: SendMessageRequest) {
+        if let text = serializeMessageFrame(req) {
+            sendWSFrame(text)
+        }
+    }
+
+    private func serializeMessageFrame(_ req: SendMessageRequest) -> String? {
         struct WsFrame: Encodable {
             let type = "message"
             let chatId: String
@@ -297,8 +329,8 @@ final class AppViewModel: ObservableObject {
         let frame = WsFrame(chatId: req.chatId, clientMsgId: req.clientMsgId,
                             senderKeyId: req.senderKeyId, recipients: req.recipients)
         guard let data = try? JSONEncoder().encode(frame),
-              let text = String(data: data, encoding: .utf8) else { return }
-        sendWSFrame(text)
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        return text
     }
 
     private func sendWSFrame(_ text: String) {
@@ -346,7 +378,16 @@ final class AppViewModel: ObservableObject {
             spkSignature: Data(sig).base64EncodedString(),
             opkPublics:  opks.map { Data($0.publicKey).base64EncodedString() }
         )
-        try? await client.registerKeys(req)
+        do {
+            let resp = try await client.registerKeys(req)
+            resp.opkIds.enumerated().forEach { (index, opkId) in
+                if index < opks.count {
+                    keyStorage.saveOneTimePreKeySecret(opks[index].secretKey, id: opkId)
+                }
+            }
+        } catch {
+            print("Failed to register keys: \(error)")
+        }
     }
 
     // MARK: - Calls

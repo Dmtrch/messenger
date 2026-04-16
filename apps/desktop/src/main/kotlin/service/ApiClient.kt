@@ -20,6 +20,7 @@ import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.get
 import io.ktor.client.request.headers
+import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
@@ -84,6 +85,10 @@ data class MediaUploadResult(val mediaId: String, val mediaKey: String)
     val opkId: Int? = null,
 )
 @Serializable data class PreKeyBundleResponse(val devices: List<DeviceBundle>)
+@Serializable data class UserResultDto(val id: String, val username: String, val displayName: String)
+@Serializable data class SearchUsersResponse(val users: List<UserResultDto>)
+@Serializable data class CreateChatRequest(val type: String, val memberIds: List<String>, val name: String? = null)
+@Serializable data class CreateChatResponse(val chat: ChatSummaryDto)
 
 private val applicationJson = ContentType.Application.Json.toString()
 private const val MAX_UPLOAD_BYTES = 10 * 1024 * 1024  // 10 МБ
@@ -158,7 +163,18 @@ class ApiClient(
     }
 
     suspend fun getKeyBundle(userId: String): PreKeyBundleResponse =
-        http.get("$baseUrl/api/keys/bundle/$userId").body()
+        http.get("$baseUrl/api/keys/$userId").body()
+
+    suspend fun searchUsers(query: String): SearchUsersResponse =
+        http.get("$baseUrl/api/users/search") {
+            parameter("q", query)
+        }.body()
+
+    suspend fun createChat(type: String, memberIds: List<String>, name: String? = null): CreateChatResponse =
+        http.post("$baseUrl/api/chats") {
+            headers { append(HttpHeaders.ContentType, applicationJson) }
+            setBody(CreateChatRequest(type, memberIds, name))
+        }.body()
 
     /**
      * Шифрует bytes на клиенте (XSalsa20-Poly1305) и загружает на сервер.

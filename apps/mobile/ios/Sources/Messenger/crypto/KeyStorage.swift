@@ -80,6 +80,15 @@ final class KeyStorage {
         return newKeys
     }
 
+    func saveOneTimePreKeySecret(_ secret: Bytes, id: Int) {
+        keychainSetData(Data(secret), for: "opk_\(id)")
+    }
+
+    func loadOneTimePreKeySecret(id: Int) -> Bytes? {
+        guard let data = keychainGetData("opk_\(id)") else { return nil }
+        return Array(data)
+    }
+
     func popOneTimePreKey() -> Curve25519KeyPair? {
         var keys = loadOneTimePreKeys()
         guard !keys.isEmpty else { return nil }

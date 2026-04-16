@@ -301,8 +301,16 @@ final class SessionManager {
         let dh2 = sodium.scalarmult.mult(n: myIKCurvePriv,  p: aliceEKPub)!
         let dh3 = sodium.scalarmult.mult(n: mySpkPriv,      p: aliceEKPub)!
 
-        // TODO: OPK (wire.opkId) — для MVP не реализовано
-        let combined = dh1 + dh2 + dh3
+        var combined = dh1 + dh2 + dh3
+
+        if let opkId = wire.opkId,
+           let opkPriv = keyStorage.loadOneTimePreKeySecret(id: opkId) {
+            // dh4 = Bob_OPK × Alice_EK
+            if let dh4 = sodium.scalarmult.mult(n: opkPriv, p: aliceEKPub) {
+                combined += dh4
+            }
+        }
+
         guard let sharedSecret = sodium.genericHash.hash(message: combined, outputLength: 32) else {
             throw SessionError.decryptFailed
         }

@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -17,6 +19,7 @@ fun ChatListScreen(
     chats: List<ChatItem>,
     onChatClick: (String) -> Unit,
     onProfileClick: () -> Unit,
+    onNewChatClick: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -25,6 +28,11 @@ fun ChatListScreen(
                 actions = { TextButton(onClick = onProfileClick) { Text("Профиль") } },
             )
         },
+        floatingActionButton = {
+            FloatingActionButton(onClick = onNewChatClick) {
+                Icon(Icons.Default.Add, contentDescription = "Новый чат")
+            }
+        }
     ) { padding ->
         LazyColumn(modifier = Modifier.padding(padding)) {
             items(chats, key = { it.id }) { chat ->
