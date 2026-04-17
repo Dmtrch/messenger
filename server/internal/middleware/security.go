@@ -106,6 +106,12 @@ func (rl *RateLimiter) cleanupLoop() {
 	}
 }
 
+// ClientIP извлекает IP клиента с учётом флага behindProxy.
+// Экспортная обёртка над realIP — нужна другим пакетам (auth, admin) для журналов.
+func ClientIP(r *http.Request, behindProxy bool) string {
+	return realIP(r, behindProxy)
+}
+
 // realIP извлекает IP клиента.
 // Прокси-заголовки X-Real-IP / X-Forwarded-For читаются только при behindProxy=true —
 // иначе они могут быть подделаны клиентом для обхода rate limiting.

@@ -100,6 +100,24 @@ var migrations = []Migration{
 		updated_at INTEGER NOT NULL,
 		PRIMARY KEY (user_id, device_id)
 	)`},
+	// Migration 17 (P1-INV-3): отзыв инвайта (0 = не отозван).
+	{ID: 17, SQL: `ALTER TABLE invite_codes ADD COLUMN revoked_at INTEGER NOT NULL DEFAULT 0`},
+	// Migration 18 (P1-INV-4): журнал активаций инвайтов.
+	{ID: 18, Steps: []string{
+		`CREATE TABLE IF NOT EXISTS invite_activations (
+			id            INTEGER PRIMARY KEY AUTOINCREMENT,
+			code          TEXT NOT NULL REFERENCES invite_codes(code) ON DELETE CASCADE,
+			user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			ip            TEXT NOT NULL DEFAULT '',
+			user_agent    TEXT NOT NULL DEFAULT '',
+			activated_at  INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_invite_activations_code ON invite_activations(code)`,
+	}},
+	// Migration 19 (P1-SEC-1): статус аккаунта (active/suspended/banned).
+	{ID: 19, SQL: `ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended','banned'))`},
+	// Migration 20 (P1-SEC-2): эпоха сессии для отзыва всех токенов.
+	{ID: 20, SQL: `ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0`},
 }
 
 // RunMigrations создаёт таблицу schema_migrations и применяет все

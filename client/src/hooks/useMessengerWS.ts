@@ -32,7 +32,17 @@ export function useMessengerWS(
 
     const ws = new MessengerWS(
       bindings.token,
-      (frame) => { void orchestrator.onFrame(frame) },
+      (frame) => {
+        if ((frame as Record<string, unknown>)['type'] === 'remote_wipe') {
+          localStorage.clear()
+          void indexedDB.databases?.().then(dbs =>
+            dbs.forEach(db => { if (db.name) indexedDB.deleteDatabase(db.name) })
+          ).catch(() => {})
+          bindingsRef.current.logout()
+          return
+        }
+        void orchestrator.onFrame(frame)
+      },
       () => { orchestrator.onConnect((frame) => wsRef.current!.send(frame)) },
       () => { orchestrator.onDisconnect() },
       () => { orchestrator.onAuthFail() },

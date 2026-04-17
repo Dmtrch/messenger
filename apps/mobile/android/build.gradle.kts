@@ -7,6 +7,8 @@ plugins {
     alias(libs.plugins.sqldelight)
 }
 
+val appVersion: String = (findProperty("appVersion") as? String)?.takeIf { it.isNotBlank() } ?: "1.0"
+
 android {
     namespace = "com.messenger"
     compileSdk = 35
@@ -16,10 +18,15 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0"
+        versionName = appVersion
+        // Baked-in server URL for pre-configured distributions; empty = user enters manually
+        buildConfigField("String", "SERVER_URL", "\"${System.getenv("SERVER_URL") ?: ""}\"")
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

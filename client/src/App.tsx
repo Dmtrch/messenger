@@ -13,6 +13,7 @@ import ProfilePage from '@/pages/ProfilePage'
 import AuthPage from '@/pages/AuthPage'
 import ServerSetupPage from '@/pages/ServerSetupPage'
 import AdminPage from '@/pages/AdminPage'
+import DownloadsPage from '@/pages/DownloadsPage'
 import OfflineIndicator from '@/components/OfflineIndicator/OfflineIndicator'
 import CallOverlay from '@/components/CallOverlay/CallOverlay'
 
@@ -59,6 +60,7 @@ function AppRoutes({ initiateCall, handleCallFrame }: AppRoutesProps) {
       <Route path="/" element={<ChatListPage />} />
       <Route path="/chat/:chatId" element={<ChatWindowPage initiateCall={initiateCall} />} />
       <Route path="/profile" element={<ProfilePage />} />
+      <Route path="/downloads" element={<DownloadsPage />} />
       {role === 'admin' && <Route path="/admin" element={<AdminPage />} />}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

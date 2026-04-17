@@ -14,6 +14,7 @@ type Config struct {
 	Port              string `yaml:"port"`
 	DBPath            string `yaml:"db_path"`
 	MediaDir          string `yaml:"media_dir"`
+	DownloadsDir      string `yaml:"downloads_dir"`
 	JWTSecret         string `yaml:"jwt_secret"`
 	TLSCert           string `yaml:"tls_cert"`
 	TLSKey            string `yaml:"tls_key"`
@@ -45,6 +46,7 @@ func defaults() Config {
 		Port:             "8080",
 		DBPath:           "./messenger.db",
 		MediaDir:         "./media",
+		DownloadsDir:     "./downloads",
 		STUNUrl:          "stun:stun.l.google.com:19302",
 		TURNCredTTL:      86400,
 		ServerName:       "Messenger",
@@ -73,6 +75,9 @@ func loadConfig(path string) (Config, error) {
 	}
 	if v := os.Getenv("MEDIA_DIR"); v != "" {
 		cfg.MediaDir = v
+	}
+	if v := os.Getenv("DOWNLOADS_DIR"); v != "" {
+		cfg.DownloadsDir = v
 	}
 	if v := os.Getenv("JWT_SECRET"); v != "" {
 		cfg.JWTSecret = v

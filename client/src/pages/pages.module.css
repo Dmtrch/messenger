@@ -195,3 +195,98 @@
   text-align: center;
   padding: 0.5rem;
 }
+
+/* ── DownloadsPage ───────────────────────────────────────────────────────────── */
+
+.downloadsPage {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.downloadsHeader {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.downloadsTitle {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.downloadsSection {
+  margin-bottom: 1.5rem;
+}
+
+.downloadsSectionTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  margin-bottom: 0.75rem;
+}
+
+.downloadsCardPrimary,
+.downloadsCard {
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.downloadsCardPrimary {
+  border: 2px solid var(--accent, #3b82f6);
+  background: var(--surface, #fff);
+}
+
+.downloadsCard {
+  border: 1px solid var(--border, #e2e8f0);
+  background: var(--surface, #fff);
+}
+
+.downloadsCardInfo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.downloadsFormat {
+  font-size: 0.8rem;
+  background: var(--bg-secondary, #f1f5f9);
+  color: var(--text-secondary, #64748b);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+}
+
+.downloadsMeta {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #64748b);
+}
+
+.downloadsSha {
+  font-size: 0.7rem;
+  color: var(--text-muted, #94a3b8);
+  word-break: break-all;
+  margin: 0;
+  font-family: monospace;
+}
+
+.btnOutline {
+  padding: 0.625rem 1rem;
+  border: 1px solid var(--accent, #3b82f6);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--accent, #3b82f6);
+  cursor: pointer;
+  align-self: flex-start;
+  transition: background 0.15s;
+}
+.btnOutline:hover { background: var(--accent-light, #eff6ff); }
+.btnOutline:disabled { opacity: 0.6; cursor: default; }

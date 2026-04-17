@@ -11,12 +11,14 @@ import (
 // ─── User ────────────────────────────────────────────────────────────────────
 
 type User struct {
-	ID           string
-	Username     string
-	DisplayName  string
-	PasswordHash string
-	Role         string
-	CreatedAt    int64
+	ID            string
+	Username      string
+	DisplayName   string
+	PasswordHash  string
+	Role          string
+	Status        string // active | suspended | banned
+	SessionEpoch  int64
+	CreatedAt     int64
 }
 
 func CreateUser(db *sql.DB, u User) error {
@@ -30,8 +32,8 @@ func CreateUser(db *sql.DB, u User) error {
 func GetUserByUsername(db *sql.DB, username string) (*User, error) {
 	u := &User{}
 	err := db.QueryRow(
-		`SELECT id, username, display_name, password_hash, role, created_at FROM users WHERE username=?`, username,
-	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Role, &u.CreatedAt)
+		`SELECT id, username, display_name, password_hash, role, COALESCE(status,'active'), COALESCE(session_epoch,0), created_at FROM users WHERE username=?`, username,
+	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status, &u.SessionEpoch, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -41,12 +43,24 @@ func GetUserByUsername(db *sql.DB, username string) (*User, error) {
 func GetUserByID(db *sql.DB, id string) (*User, error) {
 	u := &User{}
 	err := db.QueryRow(
-		`SELECT id, username, display_name, password_hash, role, created_at FROM users WHERE id=?`, id,
-	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Role, &u.CreatedAt)
+		`SELECT id, username, display_name, password_hash, role, COALESCE(status,'active'), COALESCE(session_epoch,0), created_at FROM users WHERE id=?`, id,
+	).Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status, &u.SessionEpoch, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return u, err
+}
+
+// SetUserStatus sets account status to active, suspended, or banned.
+func SetUserStatus(database *sql.DB, userID, status string) error {
+	_, err := database.Exec(`UPDATE users SET status=? WHERE id=?`, status, userID)
+	return err
+}
+
+// IncrementSessionEpoch bumps the epoch so all existing JWTs become invalid.
+func IncrementSessionEpoch(database *sql.DB, userID string) error {
+	_, err := database.Exec(`UPDATE users SET session_epoch=session_epoch+1 WHERE id=?`, userID)
+	return err
 }
 
 func SearchUsers(db *sql.DB, query string, limit int) ([]User, error) {
@@ -893,13 +907,32 @@ func DeleteOrphanedMedia(db *sql.DB, olderThanUnixMs int64) ([]string, error) {
 // ─── InviteCodes ─────────────────────────────────────────────────────────────
 
 type InviteCode struct {
-	Code      string
-	CreatedBy string
-	UsedBy    string
-	UsedAt    int64
-	ExpiresAt int64
-	CreatedAt int64
+	Code      string `json:"code"`
+	CreatedBy string `json:"createdBy"`
+	UsedBy    string `json:"usedBy"`
+	UsedAt    int64  `json:"usedAt"`
+	ExpiresAt int64  `json:"expiresAt"`
+	RevokedAt int64  `json:"revokedAt"`
+	CreatedAt int64  `json:"createdAt"`
 }
+
+// InviteActivation — запись журнала активаций инвайт-кода.
+type InviteActivation struct {
+	ID          int64  `json:"id"`
+	Code        string `json:"code"`
+	UserID      string `json:"userId"`
+	IP          string `json:"ip"`
+	UserAgent   string `json:"userAgent"`
+	ActivatedAt int64  `json:"activatedAt"`
+}
+
+// Ошибки использования инвайта — используются auth-handler для маппинга в HTTP-коды.
+var (
+	ErrInviteNotFound    = fmt.Errorf("invite_not_found")
+	ErrInviteAlreadyUsed = fmt.Errorf("invite_already_used")
+	ErrInviteExpired     = fmt.Errorf("invite_expired")
+	ErrInviteRevoked     = fmt.Errorf("invite_revoked")
+)
 
 func CreateInviteCode(db *sql.DB, code InviteCode) error {
 	_, err := db.Exec(
@@ -912,17 +945,40 @@ func CreateInviteCode(db *sql.DB, code InviteCode) error {
 func GetInviteCode(db *sql.DB, code string) (*InviteCode, error) {
 	c := &InviteCode{}
 	err := db.QueryRow(
-		`SELECT code, created_by, COALESCE(used_by,''), COALESCE(used_at,0), COALESCE(expires_at,0), created_at FROM invite_codes WHERE code=?`, code,
-	).Scan(&c.Code, &c.CreatedBy, &c.UsedBy, &c.UsedAt, &c.ExpiresAt, &c.CreatedAt)
+		`SELECT code, created_by, COALESCE(used_by,''), COALESCE(used_at,0),
+		        COALESCE(expires_at,0), COALESCE(revoked_at,0), created_at
+		 FROM invite_codes WHERE code=?`, code,
+	).Scan(&c.Code, &c.CreatedBy, &c.UsedBy, &c.UsedAt, &c.ExpiresAt, &c.RevokedAt, &c.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return c, err
 }
 
+// UseInviteCode атомарно отмечает код использованным.
+// Возвращает типизированные ошибки (ErrInviteNotFound/Revoked/Expired/AlreadyUsed).
 func UseInviteCode(db *sql.DB, code, usedBy string, usedAt int64) error {
+	existing, err := GetInviteCode(db, code)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return ErrInviteNotFound
+	}
+	if existing.UsedBy != "" {
+		return ErrInviteAlreadyUsed
+	}
+	if existing.RevokedAt > 0 {
+		return ErrInviteRevoked
+	}
+	if existing.ExpiresAt > 0 && usedAt > existing.ExpiresAt {
+		return ErrInviteExpired
+	}
 	res, err := db.Exec(
-		`UPDATE invite_codes SET used_by=?, used_at=? WHERE code=? AND used_by IS NULL AND (expires_at = 0 OR expires_at > ?)`,
+		`UPDATE invite_codes SET used_by=?, used_at=?
+		 WHERE code=? AND used_by IS NULL
+		   AND COALESCE(revoked_at,0) = 0
+		   AND (expires_at = 0 OR expires_at > ?)`,
 		usedBy, usedAt, code, usedAt,
 	)
 	if err != nil {
@@ -930,14 +986,44 @@ func UseInviteCode(db *sql.DB, code, usedBy string, usedAt int64) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("invite code not found or already used")
+		// race — кто-то успел раньше; повторно читаем состояние для точной ошибки
+		again, _ := GetInviteCode(db, code)
+		if again == nil {
+			return ErrInviteNotFound
+		}
+		if again.UsedBy != "" {
+			return ErrInviteAlreadyUsed
+		}
+		if again.RevokedAt > 0 {
+			return ErrInviteRevoked
+		}
+		return ErrInviteExpired
+	}
+	return nil
+}
+
+// RevokeInviteCode помечает код отозванным. Уже использованные коды не отзываются.
+func RevokeInviteCode(db *sql.DB, code string, revokedAt int64) error {
+	res, err := db.Exec(
+		`UPDATE invite_codes SET revoked_at=?
+		 WHERE code=? AND used_by IS NULL AND COALESCE(revoked_at,0) = 0`,
+		revokedAt, code,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrInviteNotFound
 	}
 	return nil
 }
 
 func ListInviteCodes(db *sql.DB) ([]InviteCode, error) {
 	rows, err := db.Query(
-		`SELECT code, created_by, COALESCE(used_by,''), COALESCE(used_at,0), COALESCE(expires_at,0), created_at FROM invite_codes ORDER BY created_at DESC`,
+		`SELECT code, created_by, COALESCE(used_by,''), COALESCE(used_at,0),
+		        COALESCE(expires_at,0), COALESCE(revoked_at,0), created_at
+		 FROM invite_codes ORDER BY created_at DESC`,
 	)
 	if err != nil {
 		return nil, err
@@ -946,12 +1032,44 @@ func ListInviteCodes(db *sql.DB) ([]InviteCode, error) {
 	var codes []InviteCode
 	for rows.Next() {
 		var c InviteCode
-		if err := rows.Scan(&c.Code, &c.CreatedBy, &c.UsedBy, &c.UsedAt, &c.ExpiresAt, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.Code, &c.CreatedBy, &c.UsedBy, &c.UsedAt, &c.ExpiresAt, &c.RevokedAt, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		codes = append(codes, c)
 	}
 	return codes, rows.Err()
+}
+
+// CreateInviteActivation записывает факт успешной активации инвайта.
+func CreateInviteActivation(db *sql.DB, a InviteActivation) error {
+	_, err := db.Exec(
+		`INSERT INTO invite_activations (code, user_id, ip, user_agent, activated_at)
+		 VALUES (?,?,?,?,?)`,
+		a.Code, a.UserID, a.IP, a.UserAgent, a.ActivatedAt,
+	)
+	return err
+}
+
+// ListInviteActivations возвращает журнал активаций конкретного инвайт-кода.
+func ListInviteActivations(db *sql.DB, code string) ([]InviteActivation, error) {
+	rows, err := db.Query(
+		`SELECT id, code, user_id, ip, user_agent, activated_at
+		 FROM invite_activations WHERE code=? ORDER BY activated_at DESC`,
+		code,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []InviteActivation
+	for rows.Next() {
+		var a InviteActivation
+		if err := rows.Scan(&a.ID, &a.Code, &a.UserID, &a.IP, &a.UserAgent, &a.ActivatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 // ─── RegistrationRequests ────────────────────────────────────────────────────

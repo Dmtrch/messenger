@@ -32,6 +32,11 @@ export function hasServerUrl(): boolean {
  */
 export function initServerUrl(): void {
   if (!hasServerUrl()) {
+    const baked = import.meta.env.VITE_SERVER_URL
+    if (baked && /^https?:\/\//.test(baked)) {
+      setServerUrl(baked)
+      return
+    }
     const origin = window.location.origin
     if (origin && origin !== 'null' && /^https?:\/\//.test(origin)) {
       setServerUrl(origin)

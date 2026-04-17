@@ -36,12 +36,14 @@ func Open(dbPath string) (*sql.DB, error) {
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
-    id           TEXT PRIMARY KEY,
-    username     TEXT UNIQUE NOT NULL,
-    display_name TEXT NOT NULL,
-    password_hash TEXT NOT NULL,
-    role         TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'admin')),
-    created_at   INTEGER NOT NULL
+    id             TEXT PRIMARY KEY,
+    username       TEXT UNIQUE NOT NULL,
+    display_name   TEXT NOT NULL,
+    password_hash  TEXT NOT NULL,
+    role           TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'admin')),
+    status         TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'suspended', 'banned')),
+    session_epoch  INTEGER NOT NULL DEFAULT 0,
+    created_at     INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -165,15 +167,31 @@ CREATE TABLE IF NOT EXISTS media_objects (
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
 );
 
--- Коды приглашения для регистрации
+-- Коды приглашения для регистрации.
+-- TTL задаётся жёстко в admin-handler (180с, диапазон 60..600), expires_at хранит
+-- вычисленное время истечения в UnixMilli. revoked_at = 0 означает «не отозван».
 CREATE TABLE IF NOT EXISTS invite_codes (
     code        TEXT PRIMARY KEY,
     created_by  TEXT NOT NULL REFERENCES users(id),
     used_by     TEXT REFERENCES users(id),
     used_at     INTEGER,
     expires_at  INTEGER,
+    revoked_at  INTEGER,
     created_at  INTEGER NOT NULL
 );
+
+-- Журнал активаций инвайт-кодов (IP, User-Agent) для аудита.
+CREATE TABLE IF NOT EXISTS invite_activations (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    code          TEXT NOT NULL REFERENCES invite_codes(code) ON DELETE CASCADE,
+    user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    ip            TEXT NOT NULL DEFAULT '',
+    user_agent    TEXT NOT NULL DEFAULT '',
+    activated_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_invite_activations_code
+    ON invite_activations(code);
 
 -- Заявки на регистрацию (требуют подтверждения админом)
 CREATE TABLE IF NOT EXISTS registration_requests (

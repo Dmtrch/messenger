@@ -208,6 +208,20 @@ func (h *Hub) IsOnline(userID string) bool {
 	return len(h.byUser[userID]) > 0
 }
 
+// DisconnectUser closes all WebSocket connections for a user (used by admin on ban/suspend).
+func (h *Hub) DisconnectUser(userID string) {
+	h.mu.RLock()
+	set := h.byUser[userID]
+	conns := make([]*websocket.Conn, 0, len(set))
+	for c := range set {
+		conns = append(conns, c.conn)
+	}
+	h.mu.RUnlock()
+	for _, conn := range conns {
+		conn.Close()
+	}
+}
+
 // BroadcastToConversation отправляет одинаковый payload всем участникам чата.
 func (h *Hub) BroadcastToConversation(convID string, payload []byte) {
 	members, err := db.GetConversationMembers(h.db, convID)

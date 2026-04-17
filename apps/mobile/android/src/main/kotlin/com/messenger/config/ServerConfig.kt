@@ -3,6 +3,7 @@ package com.messenger.config
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.messenger.BuildConfig
 
 object ServerConfig {
     private lateinit var prefs: SharedPreferences
@@ -12,7 +13,7 @@ object ServerConfig {
     }
 
     var serverUrl: String
-        get() = prefs.getString("server_url", "") ?: ""
+        get() = prefs.getString("server_url", BuildConfig.SERVER_URL) ?: BuildConfig.SERVER_URL
         set(value) { prefs.edit().putString("server_url", value).apply() }
 
     fun hasServerUrl(): Boolean = serverUrl.isNotEmpty()

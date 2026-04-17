@@ -7,19 +7,22 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/messenger/server/db"
-	"golang.org/x/crypto/bcrypt"
+	secmw "github.com/messenger/server/internal/middleware"
+	"github.com/messenger/server/internal/password"
 )
 
 type Handler struct {
 	DB               *sql.DB
 	JWTSecret        []byte
 	RegistrationMode string // open|invite|approval
+	BehindProxy      bool   // определяет, как извлекать IP для журнала активаций
 }
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
@@ -52,16 +55,28 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	switch h.RegistrationMode {
 	case "invite":
 		if req.InviteCode == "" {
-			httpErr(w, "invite code required", 403)
+			inviteErr(w, 400, "invite_required", "invite code required")
 			return
 		}
 		code, err := db.GetInviteCode(h.DB, req.InviteCode)
-		if err != nil || code == nil || code.UsedBy != "" {
-			httpErr(w, "invalid or already used invite code", 403)
+		if err != nil {
+			httpErr(w, "server error", 500)
+			return
+		}
+		if code == nil {
+			inviteErr(w, 404, "invite_not_found", "invalid invite code")
+			return
+		}
+		if code.UsedBy != "" {
+			inviteErr(w, 409, "invite_already_used", "invite code already used")
+			return
+		}
+		if code.RevokedAt > 0 {
+			inviteErr(w, 410, "invite_revoked", "invite code was revoked")
 			return
 		}
 		if code.ExpiresAt > 0 && time.Now().UnixMilli() > code.ExpiresAt {
-			httpErr(w, "invite code expired", 403)
+			inviteErr(w, 410, "invite_expired", "invite code expired")
 			return
 		}
 		reqInviteCode = req.InviteCode
@@ -77,7 +92,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
+	hash, err := password.Hash(req.Password)
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
@@ -87,7 +102,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		ID:           uuid.New().String(),
 		Username:     req.Username,
 		DisplayName:  req.DisplayName,
-		PasswordHash: string(hash),
+		PasswordHash: hash,
 		Role:         "user",
 		CreatedAt:    time.Now().UnixMilli(),
 	}
@@ -97,7 +112,16 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.RegistrationMode == "invite" && reqInviteCode != "" {
-		_ = db.UseInviteCode(h.DB, reqInviteCode, user.ID, time.Now().UnixMilli())
+		now := time.Now().UnixMilli()
+		if err := db.UseInviteCode(h.DB, reqInviteCode, user.ID, now); err == nil {
+			_ = db.CreateInviteActivation(h.DB, db.InviteActivation{
+				Code:        reqInviteCode,
+				UserID:      user.ID,
+				IP:          secmw.ClientIP(r, h.BehindProxy),
+				UserAgent:   r.UserAgent(),
+				ActivatedAt: now,
+			})
+		}
 	}
 
 	// Сохранить публичные ключи Signal Protocol если переданы
@@ -138,9 +162,18 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, "invalid credentials", 401)
 		return
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+	if err := password.Verify(user.PasswordHash, req.Password); err != nil {
 		httpErr(w, "invalid credentials", 401)
 		return
+	}
+	// Lazy-миграция: если хеш устарел (bcrypt), пересчитываем в Argon2id.
+	// Ошибка пересчёта не должна срывать логин — просто логируем.
+	if password.NeedsRehash(user.PasswordHash) {
+		if newHash, err := password.Hash(req.Password); err == nil {
+			if err := db.UpdateUserPassword(h.DB, user.ID, newHash); err != nil {
+				log.Printf("lazy password rehash: user=%s: %v", user.ID, err)
+			}
+		}
 	}
 
 	resp, err := h.issueTokens(w, r, user.ID, user.Username, user.DisplayName, user.Role)
@@ -205,17 +238,17 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, "user not found", 404)
 		return
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+	if err := password.Verify(user.PasswordHash, req.CurrentPassword); err != nil {
 		httpErr(w, "invalid current password", 403)
 		return
 	}
 
-	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), 12)
+	newHash, err := password.Hash(req.NewPassword)
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
 	}
-	if err := db.UpdateUserPassword(h.DB, userID, string(newHash)); err != nil {
+	if err := db.UpdateUserPassword(h.DB, userID, newHash); err != nil {
 		httpErr(w, "server error", 500)
 		return
 	}
@@ -243,12 +276,19 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 
 // issueTokens creates access JWT (15 min) + refresh token in httpOnly cookie (7 days).
 func (h *Handler) issueTokens(w http.ResponseWriter, r *http.Request, userID, username, displayName, role string) (map[string]any, error) {
+	// Include session_epoch so middleware can detect revoked sessions.
+	epoch := int64(0)
+	if u, err := db.GetUserByID(h.DB, userID); err == nil && u != nil {
+		epoch = u.SessionEpoch
+	}
+
 	access, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub":  userID,
-		"name": username,
-		"role": role,
-		"exp":  time.Now().Add(15 * time.Minute).Unix(),
-		"iat":  time.Now().Unix(),
+		"sub":   userID,
+		"name":  username,
+		"role":  role,
+		"epoch": epoch,
+		"exp":   time.Now().Add(15 * time.Minute).Unix(),
+		"iat":   time.Now().Unix(),
 	}).SignedString(h.JWTSecret)
 	if err != nil {
 		return nil, err
@@ -320,7 +360,7 @@ func (h *Handler) RequestRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
+	hash, err := password.Hash(req.Password)
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
@@ -336,7 +376,7 @@ func (h *Handler) RequestRegister(w http.ResponseWriter, r *http.Request) {
 		SPKPublic:    req.SPKPublic,
 		SPKSignature: req.SPKSignature,
 		OPKPublics:   string(opkJSON),
-		PasswordHash: string(hash),
+		PasswordHash: hash,
 		Status:       "pending",
 		CreatedAt:    time.Now().UnixMilli(),
 	}
@@ -398,6 +438,14 @@ func httpErr(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// inviteErr отвечает клиенту структурированной ошибкой по инвайту.
+// error_code — стабильный идентификатор для клиента (см. test-vectors/invites.json).
+func inviteErr(w http.ResponseWriter, status int, code, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg, "error_code": code})
 }
 
 func jsonReply(w http.ResponseWriter, code int, v any) {

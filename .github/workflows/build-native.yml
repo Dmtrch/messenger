@@ -1,0 +1,282 @@
+name: Build Native Clients
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. 1.0.0)'
+        required: true
+        default: '0.0.0-dev'
+      server_url:
+        description: 'Server URL to bake in (optional, overrides SERVER_URL var)'
+        required: false
+        default: ''
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  JAVA_VERSION: '17'
+
+# ── Resolve shared inputs ──────────────────────────────────────────────────────
+
+jobs:
+  resolve-inputs:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      server_url: ${{ steps.url.outputs.server_url }}
+    steps:
+      - name: Version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Server URL
+        id: url
+        env:
+          INPUT_URL: ${{ inputs.server_url }}
+          REPO_URL: ${{ vars.SERVER_URL }}
+        run: |
+          url="$INPUT_URL"
+          if [[ -z "$url" ]]; then url="$REPO_URL"; fi
+          echo "server_url=$url" >> "$GITHUB_OUTPUT"
+
+# ── Desktop ────────────────────────────────────────────────────────────────────
+
+  build-desktop-macos-arm64:
+    needs: resolve-inputs
+    runs-on: macos-latest
+    env:
+      APP_VERSION: ${{ needs.resolve-inputs.outputs.version }}
+      SERVER_URL: ${{ needs.resolve-inputs.outputs.server_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Bake server URL
+        if: ${{ needs.resolve-inputs.outputs.server_url != '' }}
+        run: bash scripts/set-server-url.sh "$SERVER_URL"
+      - name: Package DMG
+        working-directory: apps/desktop
+        run: ./gradlew packageDmg -PappVersion="$APP_VERSION"
+      - name: Rename
+        run: mv apps/desktop/build/compose/binaries/main/dmg/*.dmg "messenger-${APP_VERSION}-macos-arm64.dmg"
+      - name: Sign DMG (optional — set MACOS_CERTIFICATE_BASE64 secret to enable)
+        if: ${{ secrets.MACOS_CERTIFICATE_BASE64 != '' }}
+        env:
+          CERT_B64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          CERT_PASS: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGN_ID: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          echo "$CERT_B64" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p actions build.keychain
+          security import /tmp/cert.p12 -k ~/Library/Keychains/build.keychain \
+            -P "$CERT_PASS" -T /usr/bin/codesign
+          security list-keychains -s ~/Library/Keychains/build.keychain
+          security default-keychain -s ~/Library/Keychains/build.keychain
+          security unlock-keychain -p actions ~/Library/Keychains/build.keychain
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k actions ~/Library/Keychains/build.keychain
+          codesign --force --options runtime --sign "$SIGN_ID" "messenger-${APP_VERSION}-macos-arm64.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: messenger-*-macos-arm64.dmg
+
+  build-desktop-macos-x86_64:
+    needs: resolve-inputs
+    runs-on: macos-13
+    env:
+      APP_VERSION: ${{ needs.resolve-inputs.outputs.version }}
+      SERVER_URL: ${{ needs.resolve-inputs.outputs.server_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Bake server URL
+        if: ${{ needs.resolve-inputs.outputs.server_url != '' }}
+        run: bash scripts/set-server-url.sh "$SERVER_URL"
+      - name: Package DMG
+        working-directory: apps/desktop
+        run: ./gradlew packageDmg -PappVersion="$APP_VERSION"
+      - name: Rename
+        run: mv apps/desktop/build/compose/binaries/main/dmg/*.dmg "messenger-${APP_VERSION}-macos-x86_64.dmg"
+      - name: Sign DMG (optional)
+        if: ${{ secrets.MACOS_CERTIFICATE_BASE64 != '' }}
+        env:
+          CERT_B64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          CERT_PASS: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGN_ID: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          echo "$CERT_B64" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p actions build.keychain
+          security import /tmp/cert.p12 -k ~/Library/Keychains/build.keychain \
+            -P "$CERT_PASS" -T /usr/bin/codesign
+          security list-keychains -s ~/Library/Keychains/build.keychain
+          security default-keychain -s ~/Library/Keychains/build.keychain
+          security unlock-keychain -p actions ~/Library/Keychains/build.keychain
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k actions ~/Library/Keychains/build.keychain
+          codesign --force --options runtime --sign "$SIGN_ID" "messenger-${APP_VERSION}-macos-x86_64.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-x86_64
+          path: messenger-*-macos-x86_64.dmg
+
+  build-desktop-linux:
+    needs: resolve-inputs
+    runs-on: ubuntu-latest
+    env:
+      APP_VERSION: ${{ needs.resolve-inputs.outputs.version }}
+      SERVER_URL: ${{ needs.resolve-inputs.outputs.server_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Bake server URL
+        if: ${{ needs.resolve-inputs.outputs.server_url != '' }}
+        run: bash scripts/set-server-url.sh "$SERVER_URL"
+      - name: Package DEB
+        working-directory: apps/desktop
+        run: ./gradlew packageDeb -PappVersion="$APP_VERSION"
+      - name: Rename
+        run: mv apps/desktop/build/compose/binaries/main/deb/*.deb "messenger-${APP_VERSION}-linux-x86_64.deb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: messenger-*-linux-x86_64.deb
+
+  build-desktop-windows:
+    needs: resolve-inputs
+    runs-on: windows-latest
+    env:
+      APP_VERSION: ${{ needs.resolve-inputs.outputs.version }}
+      SERVER_URL: ${{ needs.resolve-inputs.outputs.server_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Bake server URL
+        if: ${{ needs.resolve-inputs.outputs.server_url != '' }}
+        run: bash scripts/set-server-url.sh "$SERVER_URL"
+      - name: Package MSI
+        working-directory: apps/desktop
+        run: ./gradlew packageMsi -PappVersion="$APP_VERSION"
+      - name: Rename
+        run: mv apps/desktop/build/compose/binaries/main/msi/*.msi "messenger-${APP_VERSION}-windows-x86_64.msi"
+      - name: Sign MSI (optional — set WINDOWS_PFX_BASE64 secret to enable)
+        if: ${{ secrets.WINDOWS_PFX_BASE64 != '' }}
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          PFX_PASS: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          echo "$PFX_B64" | base64 --decode > signing.pfx
+          signtool sign /f signing.pfx /p "$PFX_PASS" \
+            /tr http://timestamp.digicert.com /td sha256 /fd sha256 \
+            "messenger-${APP_VERSION}-windows-x86_64.msi"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: messenger-*-windows-x86_64.msi
+
+# ── Mobile ─────────────────────────────────────────────────────────────────────
+
+  build-android:
+    needs: resolve-inputs
+    runs-on: ubuntu-latest
+    env:
+      APP_VERSION: ${{ needs.resolve-inputs.outputs.version }}
+      SERVER_URL: ${{ needs.resolve-inputs.outputs.server_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Bake server URL
+        if: ${{ needs.resolve-inputs.outputs.server_url != '' }}
+        run: bash scripts/set-server-url.sh "$SERVER_URL"
+      - name: Build APK
+        working-directory: apps/mobile/android
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -n "$KS_B64" ]]; then
+            echo "$KS_B64" | base64 --decode > /tmp/release.keystore
+            ./gradlew assembleRelease -PappVersion="$APP_VERSION" \
+              -Pandroid.injected.signing.store.file=/tmp/release.keystore \
+              -Pandroid.injected.signing.store.password="$KS_PASS" \
+              -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+              -Pandroid.injected.signing.key.password="$KEY_PASS"
+            APK=$(find build/outputs/apk/release -name "*.apk" | head -1)
+          else
+            ./gradlew assembleDebug -PappVersion="$APP_VERSION"
+            APK=$(find build/outputs/apk/debug -name "*.apk" | head -1)
+          fi
+          cp "$APK" "../../../messenger-${APP_VERSION}-android-arm64.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-arm64
+          path: messenger-*-android-arm64.apk
+
+  build-ios-crypto:
+    # Full IPA requires an Xcode project + Apple Developer signing (not in SPM).
+    # This job verifies MessengerCrypto compiles cleanly on each run.
+    needs: resolve-inputs
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build MessengerCrypto (SPM)
+        working-directory: apps/mobile/ios
+        run: swift build --product MessengerCrypto -c release
+
+# ── Release ────────────────────────────────────────────────────────────────────
+
+  publish-release:
+    needs:
+      - build-desktop-macos-arm64
+      - build-desktop-macos-x86_64
+      - build-desktop-linux
+      - build-desktop-windows
+      - build-android
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Messenger ${{ github.ref_name }}"
+          files: artifacts/**
+          generate_release_notes: true

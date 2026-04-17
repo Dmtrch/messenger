@@ -11,11 +11,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/messenger/server/db"
 	"github.com/messenger/server/internal/auth"
-	"golang.org/x/crypto/bcrypt"
+	"github.com/messenger/server/internal/password"
 )
 
+// UserNotifier is implemented by ws.Hub; defined here to avoid circular import.
+type UserNotifier interface {
+	Deliver(userID string, payload []byte)
+	DisconnectUser(userID string)
+}
+
 type Handler struct {
-	DB *sql.DB
+	DB  *sql.DB
+	Hub UserNotifier // nil-safe: may be omitted in tests
 }
 
 // ListRegistrationRequests — GET /api/admin/registration-requests?status=pending
@@ -92,25 +99,54 @@ func (h *Handler) RejectRegistrationRequest(w http.ResponseWriter, r *http.Reque
 	jsonReply(w, 200, map[string]string{"status": "rejected"})
 }
 
-// CreateInviteCode — POST /api/admin/invite-codes
+// InviteTTL — разрешённые границы TTL инвайтов, см. PRD P1-INV-1.
+const (
+	InviteTTLDefault = 180 // секунд
+	InviteTTLMin     = 60
+	InviteTTLMax     = 600
+)
+
+// CreateInviteCode — POST /api/admin/invite-codes.
+// Принимает опциональный ttlSeconds в диапазоне [60, 600]; по умолчанию 180.
+// Любые попытки передать expiresAt напрямую игнорируются.
 func (h *Handler) CreateInviteCode(w http.ResponseWriter, r *http.Request) {
 	adminID := auth.UserIDFromCtx(r)
 	var body struct {
-		ExpiresAt int64 `json:"expiresAt"`
+		TTLSeconds int `json:"ttlSeconds"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 
+	ttl := body.TTLSeconds
+	if ttl == 0 {
+		ttl = InviteTTLDefault
+	}
+	if ttl < InviteTTLMin || ttl > InviteTTLMax {
+		jsonReply(w, 422, map[string]any{
+			"error":      "ttlSeconds out of bounds",
+			"error_code": "invite_ttl_out_of_bounds",
+			"min":        InviteTTLMin,
+			"max":        InviteTTLMax,
+		})
+		return
+	}
+
+	now := time.Now()
+	expiresAt := now.Add(time.Duration(ttl) * time.Second).UnixMilli()
 	code := db.InviteCode{
 		Code:      uuid.New().String()[:8],
 		CreatedBy: adminID,
-		ExpiresAt: body.ExpiresAt,
-		CreatedAt: time.Now().UnixMilli(),
+		ExpiresAt: expiresAt,
+		CreatedAt: now.UnixMilli(),
 	}
 	if err := db.CreateInviteCode(h.DB, code); err != nil {
 		httpErr(w, "server error", 500)
 		return
 	}
-	jsonReply(w, 201, map[string]any{"code": code.Code, "expiresAt": code.ExpiresAt})
+	jsonReply(w, 201, map[string]any{
+		"code":       code.Code,
+		"expiresAt":  code.ExpiresAt,
+		"ttlSeconds": ttl,
+	})
 }
 
 // ListInviteCodes — GET /api/admin/invite-codes
@@ -124,6 +160,44 @@ func (h *Handler) ListInviteCodes(w http.ResponseWriter, r *http.Request) {
 		codes = []db.InviteCode{}
 	}
 	jsonReply(w, 200, map[string]any{"codes": codes})
+}
+
+// RevokeInviteCode — DELETE /api/admin/invite-codes/{code}.
+// Помечает код отозванным. Уже использованные коды не трогаем.
+func (h *Handler) RevokeInviteCode(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	if code == "" {
+		httpErr(w, "code required", 400)
+		return
+	}
+	err := db.RevokeInviteCode(h.DB, code, time.Now().UnixMilli())
+	if err == db.ErrInviteNotFound {
+		httpErr(w, "invite not found or already used", 404)
+		return
+	}
+	if err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	w.WriteHeader(204)
+}
+
+// ListInviteActivations — GET /api/admin/invite-codes/{code}/activations.
+func (h *Handler) ListInviteActivations(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	if code == "" {
+		httpErr(w, "code required", 400)
+		return
+	}
+	list, err := db.ListInviteActivations(h.DB, code)
+	if err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	if list == nil {
+		list = []db.InviteActivation{}
+	}
+	jsonReply(w, 200, map[string]any{"activations": list})
 }
 
 // ListUsers — GET /api/admin/users
@@ -150,12 +224,12 @@ func (h *Handler) ResetUserPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(body.NewPassword), 12)
+	hash, err := password.Hash(body.NewPassword)
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
 	}
-	if err := db.UpdateUserPassword(h.DB, userID, string(hash)); err != nil {
+	if err := db.UpdateUserPassword(h.DB, userID, hash); err != nil {
 		httpErr(w, "server error", 500)
 		return
 	}
@@ -198,18 +272,82 @@ func (h *Handler) ResolvePasswordResetRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(body.TempPassword), 12)
+	hash, err := password.Hash(body.TempPassword)
 	if err != nil {
 		httpErr(w, "server error", 500)
 		return
 	}
-	if err := db.UpdateUserPassword(h.DB, resetReq.UserID, string(hash)); err != nil {
+	if err := db.UpdateUserPassword(h.DB, resetReq.UserID, hash); err != nil {
 		httpErr(w, "server error", 500)
 		return
 	}
 	if err := db.ResolvePasswordResetRequest(h.DB, id, body.TempPassword, adminID, time.Now().UnixMilli()); err != nil {
 		httpErr(w, "server error", 500)
 		return
+	}
+	w.WriteHeader(204)
+}
+
+// SuspendUser — POST /api/admin/users/{id}/suspend
+func (h *Handler) SuspendUser(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	if err := db.SetUserStatus(h.DB, userID, "suspended"); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	_ = db.IncrementSessionEpoch(h.DB, userID)
+	_ = db.DeleteUserSessionsExcept(h.DB, userID, "")
+	if h.Hub != nil {
+		h.Hub.DisconnectUser(userID)
+	}
+	w.WriteHeader(204)
+}
+
+// UnsuspendUser — POST /api/admin/users/{id}/unsuspend
+func (h *Handler) UnsuspendUser(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	if err := db.SetUserStatus(h.DB, userID, "active"); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	w.WriteHeader(204)
+}
+
+// BanUser — POST /api/admin/users/{id}/ban
+func (h *Handler) BanUser(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	if err := db.SetUserStatus(h.DB, userID, "banned"); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	_ = db.IncrementSessionEpoch(h.DB, userID)
+	_ = db.DeleteUserSessionsExcept(h.DB, userID, "")
+	if h.Hub != nil {
+		h.Hub.DisconnectUser(userID)
+	}
+	w.WriteHeader(204)
+}
+
+// RevokeAllSessions — POST /api/admin/users/{id}/revoke-sessions
+func (h *Handler) RevokeAllSessions(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	_ = db.IncrementSessionEpoch(h.DB, userID)
+	_ = db.DeleteUserSessionsExcept(h.DB, userID, "")
+	if h.Hub != nil {
+		h.Hub.DisconnectUser(userID)
+	}
+	w.WriteHeader(204)
+}
+
+// RemoteWipe — POST /api/admin/users/{id}/remote-wipe
+// Инвалидирует все сессии и уведомляет клиент кадром remote_wipe для очистки локальных данных.
+func (h *Handler) RemoteWipe(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	_ = db.IncrementSessionEpoch(h.DB, userID)
+	_ = db.DeleteUserSessionsExcept(h.DB, userID, "")
+	if h.Hub != nil {
+		wipe, _ := json.Marshal(map[string]string{"type": "remote_wipe"})
+		h.Hub.Deliver(userID, wipe)
 	}
 	w.WriteHeader(204)
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { initSodium, generateIdentityKeyPair, generateDHKeyPair, signData, toBase64 } from '@/crypto/x3dh'
 import { saveIdentityKey, saveSignedPreKey, saveOneTimePreKeys, saveDeviceId } from '@/crypto/keystore'
@@ -12,6 +12,7 @@ const OPK_COUNT = 10
 
 export default function AuthPage() {
   const login = useAuthStore((st) => st.login)
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [tab, setTab] = useState<'login' | 'register' | 'forgot'>('login')
   const [username, setUsername] = useState('')
@@ -114,6 +115,7 @@ export default function AuthPage() {
         identityKeyPublic: toBase64(identityKey.publicKey),
       }
       login(user, accessToken)
+      navigate('/downloads')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка регистрации')
     } finally {

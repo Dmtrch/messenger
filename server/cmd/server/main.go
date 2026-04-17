@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"embed"
 	"io/fs"
 	"log"
@@ -15,16 +16,17 @@ import (
 	"github.com/messenger/server/internal/admin"
 	"github.com/messenger/server/internal/auth"
 	"github.com/messenger/server/internal/chat"
-	"github.com/messenger/server/internal/keys"
 	"github.com/messenger/server/internal/clienterrors"
+	"github.com/messenger/server/internal/downloads"
+	"github.com/messenger/server/internal/keys"
 	"github.com/messenger/server/internal/logger"
 	"github.com/messenger/server/internal/media"
 	secmw "github.com/messenger/server/internal/middleware"
+	"github.com/messenger/server/internal/password"
 	"github.com/messenger/server/internal/push"
 	"github.com/messenger/server/internal/serverinfo"
 	"github.com/messenger/server/internal/users"
 	"github.com/messenger/server/internal/ws"
-	"golang.org/x/crypto/bcrypt"
 )
 
 //go:embed static
@@ -79,11 +81,11 @@ func main() {
 
 	// Bootstrap admin: создаём при первом запуске если задан в конфиге
 	if cfg.AdminUsername != "" && cfg.AdminPassword != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(cfg.AdminPassword), 12)
+		hash, err := password.Hash(cfg.AdminPassword)
 		if err != nil {
 			log.Fatalf("hash admin password: %v", err)
 		}
-		if err := db.EnsureAdminUser(database, cfg.AdminUsername, string(hash)); err != nil {
+		if err := db.EnsureAdminUser(database, cfg.AdminUsername, hash); err != nil {
 			log.Fatalf("ensure admin user: %v", err)
 		}
 	}
@@ -104,10 +106,12 @@ func main() {
 		DB:               database,
 		JWTSecret:        []byte(cfg.JWTSecret),
 		RegistrationMode: cfg.RegistrationMode,
+		BehindProxy:      cfg.BehindProxy,
 	}
-	adminHandler := &admin.Handler{DB: database}
+	adminHandler := &admin.Handler{DB: database, Hub: hub}
 	chatHandler := &chat.Handler{DB: database, Hub: hub, MediaDir: cfg.MediaDir}
 	mediaHandler := &media.Handler{MediaDir: cfg.MediaDir, DB: database}
+	downloadsHandler := &downloads.Handler{DownloadsDir: cfg.DownloadsDir}
 	media.StartOrphanCleaner(database, cfg.MediaDir)
 	usersHandler := &users.Handler{DB: database}
 	keysHandler := &keys.Handler{DB: database}
@@ -150,6 +154,7 @@ func main() {
 
 		r.Group(func(r chi.Router) {
 			r.Use(auth.Middleware([]byte(cfg.JWTSecret)))
+			r.Use(auth.AccountStatusMiddleware(database))
 			r.Post("/auth/change-password", authHandler.ChangePassword)
 
 			r.Get("/users/search", usersHandler.Search)
@@ -173,6 +178,9 @@ func main() {
 
 			r.Get("/calls/ice-servers", iceServersHandler(cfg.STUNUrl, cfg.TURNUrl, cfg.TURNSecret, cfg.TURNCredTTL))
 
+				r.Get("/downloads/manifest", downloadsHandler.GetManifest)
+				r.Get("/downloads/{filename}", downloadsHandler.ServeFile)
+
 			r.Group(func(r chi.Router) {
 				r.Use(admin.RequireAdmin)
 				r.Get("/admin/registration-requests", adminHandler.ListRegistrationRequests)
@@ -180,8 +188,15 @@ func main() {
 				r.Post("/admin/registration-requests/{id}/reject", adminHandler.RejectRegistrationRequest)
 				r.Post("/admin/invite-codes", adminHandler.CreateInviteCode)
 				r.Get("/admin/invite-codes", adminHandler.ListInviteCodes)
+				r.Delete("/admin/invite-codes/{code}", adminHandler.RevokeInviteCode)
+				r.Get("/admin/invite-codes/{code}/activations", adminHandler.ListInviteActivations)
 				r.Get("/admin/users", adminHandler.ListUsers)
 				r.Post("/admin/users/{id}/reset-password", adminHandler.ResetUserPassword)
+				r.Post("/admin/users/{id}/suspend", adminHandler.SuspendUser)
+				r.Post("/admin/users/{id}/unsuspend", adminHandler.UnsuspendUser)
+				r.Post("/admin/users/{id}/ban", adminHandler.BanUser)
+				r.Post("/admin/users/{id}/revoke-sessions", adminHandler.RevokeAllSessions)
+				r.Post("/admin/users/{id}/remote-wipe", adminHandler.RemoteWipe)
 				r.Get("/admin/password-reset-requests", adminHandler.ListPasswordResetRequests)
 				r.Post("/admin/password-reset-requests/{id}/resolve", adminHandler.ResolvePasswordResetRequest)
 			})
@@ -218,10 +233,21 @@ func main() {
 	log.Printf("listening on %s (tls=%v)", addr, isHTTPS)
 
 	if isHTTPS {
-		log.Fatal(http.ListenAndServeTLS(addr, cfg.TLSCert, cfg.TLSKey, r))
+		srv := &http.Server{
+			Addr:              addr,
+			Handler:           r,
+			ReadHeaderTimeout: 10 * time.Second,
+			TLSConfig:         tlsConfig(),
+		}
+		log.Fatal(srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey))
 	} else {
 		log.Fatal(http.ListenAndServe(addr, r))
 	}
+}
+
+// tlsConfig — P1-TLS-1: принудительно TLS 1.3 без откатов на 1.2/1.1.
+func tlsConfig() *tls.Config {
+	return &tls.Config{MinVersion: tls.VersionTLS13}
 }
 
 // corsMiddleware добавляет заголовки CORS для HTTP API.

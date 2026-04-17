@@ -516,7 +516,12 @@ final class AppViewModel: ObservableObject {
     // MARK: - Init
 
     init() {
-        if let url = UserDefaults.standard.string(forKey: "messenger.server.url"), !url.isEmpty {
+        let saved = UserDefaults.standard.string(forKey: "messenger.server.url") ?? ""
+        let url = saved.isEmpty ? BuildConfig.defaultServerUrl : saved
+        if !url.isEmpty {
+            if saved.isEmpty {
+                UserDefaults.standard.set(url, forKey: "messenger.server.url")
+            }
             setupComponents(baseURL: url)
             isServerConfigured = true
         }

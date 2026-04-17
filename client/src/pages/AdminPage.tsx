@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { QRCodeSVG } from 'qrcode.react'
 import { useAuthStore } from '@/store/authStore'
 import { getServerUrl } from '@/config/serverConfig'
 import s from './pages.module.css'
@@ -7,9 +8,52 @@ import s from './pages.module.css'
 type Tab = 'requests' | 'users' | 'invites' | 'resets'
 
 interface RegRequest { id: string; username: string; display_name: string; status: string; created_at: number }
-interface AdminUser { id: string; username: string; display_name: string; role: string }
-interface InviteCode { code: string; used_by: string; expires_at: number; created_at: number }
+interface AdminUser { id: string; username: string; display_name: string; role: string; status: string }
+interface InviteCode {
+  code: string
+  usedBy: string
+  expiresAt: number
+  revokedAt: number
+  createdAt: number
+}
+interface InviteActivation {
+  id: number
+  code: string
+  userId: string
+  ip: string
+  userAgent: string
+  activatedAt: number
+}
 interface ResetRequest { id: string; user_id: string; username: string; status: string; created_at: number }
+
+// inviteState — производное состояние для UI (used/revoked/expired/active).
+function inviteState(c: InviteCode, nowMs: number): 'used' | 'revoked' | 'expired' | 'active' {
+  if (c.usedBy) return 'used'
+  if (c.revokedAt && c.revokedAt > 0) return 'revoked'
+  if (c.expiresAt > 0 && nowMs >= c.expiresAt) return 'expired'
+  return 'active'
+}
+
+function formatCountdown(msLeft: number): string {
+  if (msLeft <= 0) return '00:00'
+  const total = Math.floor(msLeft / 1000)
+  const mm = Math.floor(total / 60).toString().padStart(2, '0')
+  const ss = (total % 60).toString().padStart(2, '0')
+  return `${mm}:${ss}`
+}
+
+async function apiDelete(path: string): Promise<void> {
+  const token = useAuthStore.getState().accessToken
+  const res = await fetch(`${getServerUrl()}${path}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+  })
+  if (!res.ok && res.status !== 204) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data as { error?: string }).error ?? res.statusText)
+  }
+}
 
 async function apiGet<T>(path: string): Promise<T> {
   const token = useAuthStore.getState().accessToken
@@ -55,6 +99,16 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
+  const [nowMs, setNowMs] = useState<number>(Date.now())
+  const [activations, setActivations] = useState<Record<string, InviteActivation[]>>({})
+  const [showQR, setShowQR] = useState<Record<string, boolean>>({})
+
+  // live clock для таймера обратного отсчёта (P1-INV-5)
+  useEffect(() => {
+    if (tab !== 'invites') return
+    const t = window.setInterval(() => setNowMs(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [tab])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -109,6 +163,28 @@ export default function AdminPage() {
     }
   }
 
+  const revokeInvite = async (code: string) => {
+    if (!window.confirm(`Аннулировать инвайт ${code}?`)) return
+    try {
+      await apiDelete(`/api/admin/invite-codes/${encodeURIComponent(code)}`)
+      setSuccessMsg('Инвайт аннулирован')
+      void load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка')
+    }
+  }
+
+  const loadActivations = async (code: string) => {
+    try {
+      const data = await apiGet<{ activations: InviteActivation[] }>(
+        `/api/admin/invite-codes/${encodeURIComponent(code)}/activations`,
+      )
+      setActivations(prev => ({ ...prev, [code]: data.activations ?? [] }))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка')
+    }
+  }
+
   const resetPassword = async (userId: string) => {
     const pwd = newPassword[userId]
     if (!pwd || pwd.length < 8) { setError('Пароль минимум 8 символов'); return }
@@ -120,6 +196,35 @@ export default function AdminPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ошибка сброса пароля')
     }
+  }
+
+  const suspendUser = async (userId: string) => {
+    if (!window.confirm('Приостановить аккаунт?')) return
+    try { await apiPost(`/api/admin/users/${userId}/suspend`, {}); void load() }
+    catch (e) { setError(e instanceof Error ? e.message : 'Ошибка') }
+  }
+
+  const unsuspendUser = async (userId: string) => {
+    try { await apiPost(`/api/admin/users/${userId}/unsuspend`, {}); void load() }
+    catch (e) { setError(e instanceof Error ? e.message : 'Ошибка') }
+  }
+
+  const banUser = async (userId: string) => {
+    if (!window.confirm('Заблокировать аккаунт навсегда?')) return
+    try { await apiPost(`/api/admin/users/${userId}/ban`, {}); void load() }
+    catch (e) { setError(e instanceof Error ? e.message : 'Ошибка') }
+  }
+
+  const revokeAllSessions = async (userId: string) => {
+    if (!window.confirm('Выйти со всех устройств пользователя?')) return
+    try { await apiPost(`/api/admin/users/${userId}/revoke-sessions`, {}); setSuccessMsg('Сессии отозваны') }
+    catch (e) { setError(e instanceof Error ? e.message : 'Ошибка') }
+  }
+
+  const remoteWipe = async (userId: string) => {
+    if (!window.confirm('УДАЛЁННОЕ СТИРАНИЕ: очистить все данные на устройствах пользователя?')) return
+    try { await apiPost(`/api/admin/users/${userId}/remote-wipe`, {}); setSuccessMsg('Команда wipe отправлена') }
+    catch (e) { setError(e instanceof Error ? e.message : 'Ошибка') }
   }
 
   const resolveReset = async (id: string) => {
@@ -174,12 +279,32 @@ export default function AdminPage() {
         <div className={s.adminList}>
           {users.map(u => (
             <div key={u.id} className={s.adminItem}>
-              <div><strong>{u.username}</strong> <span className={s.badge}>{u.role}</span></div>
+              <div>
+                <strong>{u.username}</strong>{' '}
+                <span className={s.badge}>{u.role}</span>{' '}
+                {u.status && u.status !== 'active' && (
+                  <span className={s.badge} style={{ background: u.status === 'banned' ? 'crimson' : 'orange' }}>
+                    {u.status}
+                  </span>
+                )}
+              </div>
               <div className={s.adminItemActions}>
                 <input className={s.inputSmall} type="password" placeholder="Новый пароль (мин. 8)"
                   value={newPassword[u.id] ?? ''}
                   onChange={e => setNewPassword(p => ({ ...p, [u.id]: e.target.value }))} />
                 <button className={s.btnDanger} onClick={() => resetPassword(u.id)}>Сбросить пароль</button>
+              </div>
+              <div className={s.adminItemActions} style={{ marginTop: 4 }}>
+                {u.status === 'suspended'
+                  ? <button className={s.btnSmall} onClick={() => unsuspendUser(u.id)}>Восстановить</button>
+                  : u.status !== 'banned' && (
+                    <button className={s.btnSmall} onClick={() => suspendUser(u.id)}>Приостановить</button>
+                  )}
+                {u.status !== 'banned' && (
+                  <button className={s.btnDanger} style={{ fontSize: '0.75rem' }} onClick={() => banUser(u.id)}>Заблокировать</button>
+                )}
+                <button className={s.btnSmall} onClick={() => revokeAllSessions(u.id)}>Kill switch</button>
+                <button className={s.btnDanger} style={{ fontSize: '0.75rem' }} onClick={() => remoteWipe(u.id)}>Remote wipe</button>
               </div>
             </div>
           ))}
@@ -188,19 +313,67 @@ export default function AdminPage() {
 
       {!loading && tab === 'invites' && (
         <div className={s.adminList}>
-          <button className={s.btn} onClick={createInvite}>Создать инвайт-код</button>
-          {invites.map(c => (
-            <div key={c.code} className={`${s.adminItem} ${c.used_by ? s.used : ''}`}>
-              <div><code>{c.code}</code> {c.used_by ? '✓ использован' : '⏳ активен'}</div>
-              {!c.used_by && (
-                <button className={s.btnSmall} onClick={() => {
-                  const link = `${window.location.origin}/auth?invite=${c.code}`
-                  void navigator.clipboard.writeText(link)
-                  setSuccessMsg('Ссылка скопирована')
-                }}>Копировать ссылку</button>
-              )}
-            </div>
-          ))}
+          <button className={s.btn} onClick={createInvite}>Создать инвайт-код (TTL 180с)</button>
+          {invites.map(c => {
+            const state = inviteState(c, nowMs)
+            const inviteUrl = `${window.location.origin}/auth?invite=${c.code}`
+            const msLeft = c.expiresAt - nowMs
+            return (
+              <div key={c.code} className={`${s.adminItem} ${state === 'used' ? s.used : ''}`}>
+                <div>
+                  <code>{c.code}</code>{' '}
+                  {state === 'active' && (
+                    <span style={{ color: 'green' }}>
+                      ⏳ активен · осталось {formatCountdown(msLeft)}
+                    </span>
+                  )}
+                  {state === 'used' && <span>✓ использован</span>}
+                  {state === 'revoked' && <span style={{ color: 'crimson' }}>⛔ аннулирован</span>}
+                  {state === 'expired' && <span style={{ color: 'gray' }}>⌛ истёк</span>}
+                </div>
+                {state === 'active' && (
+                  <div className={s.adminItemActions}>
+                    <button className={s.btnSmall} onClick={() => {
+                      void navigator.clipboard.writeText(inviteUrl)
+                      setSuccessMsg('Ссылка скопирована')
+                    }}>Копировать ссылку</button>
+                    <button
+                      className={s.btnSmall}
+                      onClick={() => setShowQR(p => ({ ...p, [c.code]: !p[c.code] }))}
+                    >
+                      {showQR[c.code] ? 'Скрыть QR' : 'Показать QR'}
+                    </button>
+                    <button className={s.btnDanger} onClick={() => revokeInvite(c.code)}>
+                      Аннулировать
+                    </button>
+                  </div>
+                )}
+                {showQR[c.code] && state === 'active' && (
+                  <div style={{ padding: '8px 0' }}>
+                    <QRCodeSVG value={inviteUrl} size={160} level="M" includeMargin />
+                    <div style={{ fontSize: '0.75rem', opacity: 0.7, wordBreak: 'break-all' }}>
+                      {inviteUrl}
+                    </div>
+                  </div>
+                )}
+                <div className={s.adminItemActions}>
+                  <button className={s.btnSmall} onClick={() => loadActivations(c.code)}>
+                    Показать активации
+                  </button>
+                </div>
+                {activations[c.code] && (
+                  <div style={{ fontSize: '0.8rem', opacity: 0.85 }}>
+                    {activations[c.code].length === 0 && <div>— журнал пуст</div>}
+                    {activations[c.code].map(a => (
+                      <div key={a.id}>
+                        {new Date(a.activatedAt).toLocaleString()} · {a.ip || '—'} · {a.userAgent || '—'}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 

@@ -11,6 +11,24 @@ plugins {
 
 kotlin {
     jvmToolchain(17)
+    sourceSets.getByName("main").kotlin.srcDir(layout.buildDirectory.dir("generated/kotlin"))
+}
+
+val defaultServerUrl: String = System.getenv("SERVER_URL") ?: ""
+
+val generateBuildConfig by tasks.registering {
+    val outFile = layout.buildDirectory.file("generated/kotlin/config/BuildConfig.kt")
+    outputs.file(outFile)
+    doLast {
+        outFile.get().asFile.parentFile.mkdirs()
+        outFile.get().asFile.writeText(
+            "package config\nobject BuildConfig {\n    const val DEFAULT_SERVER_URL = \"$defaultServerUrl\"\n}\n"
+        )
+    }
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    dependsOn(generateBuildConfig)
 }
 
 repositories {
@@ -67,13 +85,15 @@ sqldelight {
     }
 }
 
+val appVersion: String = (findProperty("appVersion") as? String)?.takeIf { it.isNotBlank() } ?: "1.0.0"
+
 compose.desktop {
     application {
         mainClass = "MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Messenger"
-            packageVersion = "1.0.0"
+            packageVersion = appVersion
             macOS { bundleID = "com.messenger.desktop" }
             windows { menuGroup = "Messenger" }
             linux { packageName = "messenger" }
