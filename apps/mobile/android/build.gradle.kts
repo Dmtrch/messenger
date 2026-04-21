@@ -7,7 +7,7 @@ plugins {
     alias(libs.plugins.sqldelight)
 }
 
-val appVersion: String = (findProperty("appVersion") as? String)?.takeIf { it.isNotBlank() } ?: "1.0"
+val appVersion: String = (findProperty("appVersion") as? String)?.takeIf { it.isNotBlank() } ?: "1.0.0"
 
 android {
     namespace = "com.messenger"
@@ -60,6 +60,7 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("org.webrtc:google-webrtc:1.0.32006")
+    implementation("androidx.biometric:biometric:1.2.0-alpha05")
     // FCM — для push-уведомлений. Требует google-services.json в корне модуля.
     // Без него Firebase инициализируется gracefully (не крашит). Плагин google-services
     // добавить вручную когда будет готов google-services.json:

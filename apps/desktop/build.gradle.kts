@@ -15,6 +15,7 @@ kotlin {
 }
 
 val defaultServerUrl: String = System.getenv("SERVER_URL") ?: ""
+val appVersion: String = (findProperty("appVersion") as? String)?.takeIf { it.isNotBlank() } ?: "1.0.0"
 
 val generateBuildConfig by tasks.registering {
     val outFile = layout.buildDirectory.file("generated/kotlin/config/BuildConfig.kt")
@@ -22,7 +23,7 @@ val generateBuildConfig by tasks.registering {
     doLast {
         outFile.get().asFile.parentFile.mkdirs()
         outFile.get().asFile.writeText(
-            "package config\nobject BuildConfig {\n    const val DEFAULT_SERVER_URL = \"$defaultServerUrl\"\n}\n"
+            "package config\nobject BuildConfig {\n    const val DEFAULT_SERVER_URL = \"$defaultServerUrl\"\n    const val APP_VERSION = \"$appVersion\"\n}\n"
         )
     }
 }
@@ -84,8 +85,6 @@ sqldelight {
         }
     }
 }
-
-val appVersion: String = (findProperty("appVersion") as? String)?.takeIf { it.isNotBlank() } ?: "1.0.0"
 
 compose.desktop {
     application {

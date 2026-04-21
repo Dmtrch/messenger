@@ -106,6 +106,18 @@ export interface MediaUploadRes {
   contentType: string
 }
 
+export interface MediaGalleryItem {
+  id: string
+  originalName: string
+  size: number
+  createdAt: number
+}
+
+export interface MediaGalleryPage {
+  items: MediaGalleryItem[]
+  hasMore: boolean
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message)
@@ -155,6 +167,20 @@ export interface BrowserApiClient {
     getIceServers(): Promise<{ iceServers: RTCIceServer[] }>
     subscribePush(subscription: PushSubscriptionJSON): Promise<void>
     searchUsers(q: string): Promise<{ users: Array<{ id: string; username: string; displayName: string }> }>
+    setChatTtl(chatId: string, ttlSeconds: number): Promise<void>
+    requestDeviceLink(): Promise<{ token: string; expiresAt: number }>
+    activateDeviceLink(body: {
+      token: string
+      deviceName: string
+      ikPublic: string
+      spkId: number
+      spkPublic: string
+      spkSignature: string
+      opkPublics: Array<{ id: number; key: string }>
+    }): Promise<{ accessToken: string; userId: string; username: string; displayName: string; role: string; deviceId: string }>
+    getDevices(): Promise<Array<{ id: string; userId: string; deviceName: string; createdAt: number; lastSeenAt: number }>>
+    deleteDevice(deviceId: string): Promise<void>
+    getChatMedia(chatId: string, page: number, limit?: number): Promise<MediaGalleryPage>
   }
   setAccessToken(token: string | null): void
 }
@@ -307,12 +333,18 @@ export function createBrowserApiClient(deps: BrowserApiClientDeps): BrowserApiCl
     const ciphertext = combined.slice(sodium.crypto_secretbox_NONCEBYTES)
     const key = sodium.from_base64(mediaKey)
     const plain = sodium.crypto_secretbox_open_easy(ciphertext, nonce, key)
+    combined.fill(0)
+    key.fill(0)
 
     const blob = new Blob([plain.buffer as ArrayBuffer], {
       type: mimeType || 'application/octet-stream',
     })
     const url = createObjectUrl(blob)
     mediaBlobCache.set(cacheKey, url)
+    setTimeout(() => {
+      URL.revokeObjectURL(url)
+      mediaBlobCache.delete(cacheKey)
+    }, 60_000)
     return url
   }
 
@@ -456,6 +488,33 @@ export function createBrowserApiClient(deps: BrowserApiClientDeps): BrowserApiCl
       req<{ users: Array<{ id: string; username: string; displayName: string }> }>(
         `/api/users/search?q=${encodeURIComponent(q)}`,
       ),
+
+    setChatTtl: (chatId: string, ttlSeconds: number) =>
+      req<void>(`/api/chats/${encodeURIComponent(chatId)}/ttl`, {
+        method: 'POST',
+        body: JSON.stringify({ ttlSeconds }),
+      }),
+
+    requestDeviceLink: () =>
+      req<{ token: string; expiresAt: number }>('/api/auth/device-link-request', { method: 'POST' }),
+
+    activateDeviceLink: (body: {
+      token: string; deviceName: string; ikPublic: string; spkId: number;
+      spkPublic: string; spkSignature: string; opkPublics: Array<{ id: number; key: string }>
+    }) =>
+      req<{ accessToken: string; userId: string; username: string; displayName: string; role: string; deviceId: string }>(
+        '/api/auth/device-link-activate',
+        { method: 'POST', body: JSON.stringify(body), skipAuth: true },
+      ),
+
+    getDevices: () =>
+      req<Array<{ id: string; userId: string; deviceName: string; createdAt: number; lastSeenAt: number }>>('/api/devices'),
+
+    deleteDevice: (deviceId: string) =>
+      req<void>(`/api/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' }),
+
+    getChatMedia: (chatId: string, page: number, limit = 20) =>
+      req<MediaGalleryPage>(`/api/chats/${encodeURIComponent(chatId)}/media?page=${page}&limit=${limit}`),
   }
 
   return {

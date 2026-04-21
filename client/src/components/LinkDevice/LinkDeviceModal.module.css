@@ -1,0 +1,75 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--color-bg-secondary, #1e1e2e);
+  border-radius: 12px;
+  padding: 24px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #cdd6f4);
+  margin: 0;
+}
+
+.qrWrap {
+  padding: 12px;
+  background: #fff;
+  border-radius: 8px;
+  display: flex;
+}
+
+.timer {
+  font-size: 0.85rem;
+  color: var(--color-text-muted, #6c7086);
+}
+
+.timerExpired {
+  color: var(--color-error, #f38ba8);
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #6c7086);
+  text-align: center;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.btnRefresh,
+.btnClose {
+  flex: 1;
+  padding: 8px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.btnRefresh {
+  background: var(--color-accent, #cba6f7);
+  color: #1e1e2e;
+}
+
+.btnClose {
+  background: var(--color-bg-tertiary, #313244);
+  color: var(--color-text-primary, #cdd6f4);
+}

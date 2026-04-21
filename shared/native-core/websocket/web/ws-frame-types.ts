@@ -10,8 +10,11 @@ export const WS_FRAME_TYPES = [
   'read',
   'message_deleted',
   'message_edited',
+  'message_expired',
+  'device_removed',
   'skdm',
   ...['call_offer', 'call_answer', 'call_end', 'call_reject', 'call_busy', 'ice_candidate'],
+  ...['call_room_created', 'call_participant_joined', 'call_participant_left', 'call_track_added'],
 ] as const
 
 export type MessageRecipient = {
@@ -31,6 +34,13 @@ export type WSMessageFrame = {
   messageId: string
   clientMsgId?: string
   replyToId?: string
+  expiresAt?: number
+}
+
+export type WSMessageExpiredFrame = {
+  type: 'message_expired'
+  messageId: string
+  chatId: string
 }
 
 export type WSAckFrame = {
@@ -89,6 +99,41 @@ export type WSSKDMFrame = {
   ciphertext: string
 }
 
+export type WSDeviceRemovedFrame = {
+  type: 'device_removed'
+  deviceId: string
+}
+
+export type WSCallRoomCreatedFrame = {
+  type: 'call_room_created'
+  roomId: string
+  chatId: string
+  creatorId: string
+}
+
+export type WSCallParticipantJoinedFrame = {
+  type: 'call_participant_joined'
+  roomId: string
+  chatId: string
+  userId: string
+  deviceId?: string
+}
+
+export type WSCallParticipantLeftFrame = {
+  type: 'call_participant_left'
+  roomId: string
+  chatId: string
+  userId: string
+}
+
+export type WSCallTrackAddedFrame = {
+  type: 'call_track_added'
+  roomId: string
+  chatId: string
+  userId: string
+  kind: 'audio' | 'video'
+}
+
 export type WSFrame =
   | WSMessageFrame
   | WSAckFrame
@@ -99,7 +144,13 @@ export type WSFrame =
   | WSReadFrame
   | WSMessageDeletedFrame
   | WSMessageEditedFrame
+  | WSMessageExpiredFrame
+  | WSDeviceRemovedFrame
   | WSSKDMFrame
+  | WSCallRoomCreatedFrame
+  | WSCallParticipantJoinedFrame
+  | WSCallParticipantLeftFrame
+  | WSCallTrackAddedFrame
   | CallWSFrame
 
 export type WSSendMessageFrame = {

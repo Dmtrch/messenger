@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS users (
     username       TEXT UNIQUE NOT NULL,
     display_name   TEXT NOT NULL,
     password_hash  TEXT NOT NULL,
-    role           TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'admin')),
+    role           TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'moderator', 'admin')),
     status         TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'suspended', 'banned')),
     session_epoch  INTEGER NOT NULL DEFAULT 0,
     created_at     INTEGER NOT NULL
@@ -64,10 +64,12 @@ CREATE TABLE IF NOT EXISTS contacts (
 );
 
 CREATE TABLE IF NOT EXISTS conversations (
-    id         TEXT PRIMARY KEY,
-    type       TEXT NOT NULL CHECK(type IN ('direct','group')),
-    name       TEXT,
-    created_at INTEGER NOT NULL
+    id          TEXT PRIMARY KEY,
+    type        TEXT NOT NULL CHECK(type IN ('direct','group')),
+    name        TEXT,
+    created_at  INTEGER NOT NULL,
+    default_ttl INTEGER,
+    max_members INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS conversation_members (
@@ -93,6 +95,7 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at      INTEGER NOT NULL,
     delivered_at    INTEGER,
     read_at         INTEGER,
+    expires_at      INTEGER,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
     FOREIGN KEY (sender_id)       REFERENCES users(id)
 );
@@ -228,4 +231,33 @@ CREATE INDEX IF NOT EXISTS idx_registration_requests_status
 
 CREATE INDEX IF NOT EXISTS idx_password_reset_requests_status
     ON password_reset_requests(status);
+
+-- Токены для привязки нового устройства (QR pairing). TTL 120 с.
+CREATE TABLE IF NOT EXISTS device_link_tokens (
+    token      TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    used       INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS user_quotas (
+    user_id    TEXT PRIMARY KEY,
+    quota_bytes INTEGER NOT NULL DEFAULT 0,
+    used_bytes  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS bots (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    owner_id    TEXT NOT NULL REFERENCES users(id),
+    token_hash  TEXT NOT NULL UNIQUE,
+    webhook_url TEXT NOT NULL DEFAULT '',
+    active      INTEGER NOT NULL DEFAULT 1,
+    created_at  INTEGER NOT NULL
+);
 `

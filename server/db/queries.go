@@ -57,6 +57,15 @@ func SetUserStatus(database *sql.DB, userID, status string) error {
 	return err
 }
 
+// SetUserRole обновляет роль пользователя (user, moderator, admin).
+func SetUserRole(db *sql.DB, userID, role string) error {
+	if role != "user" && role != "moderator" && role != "admin" {
+		return fmt.Errorf("invalid role: %s", role)
+	}
+	_, err := db.Exec(`UPDATE users SET role = ? WHERE id = ?`, role, userID)
+	return err
+}
+
 // IncrementSessionEpoch bumps the epoch so all existing JWTs become invalid.
 func IncrementSessionEpoch(database *sql.DB, userID string) error {
 	_, err := database.Exec(`UPDATE users SET session_epoch=session_epoch+1 WHERE id=?`, userID)
@@ -337,6 +346,26 @@ func IsConversationMember(db *sql.DB, conversationID, userID string) (bool, erro
 	return n > 0, err
 }
 
+// SetConversationTTL устанавливает TTL по умолчанию для чата (секунды; 0 — отключить).
+func SetConversationTTL(database *sql.DB, conversationID string, ttlSeconds int64) error {
+	var val any
+	if ttlSeconds > 0 {
+		val = ttlSeconds
+	}
+	_, err := database.Exec(`UPDATE conversations SET default_ttl=? WHERE id=?`, val, conversationID)
+	return err
+}
+
+// GetConversationDefaultTTL возвращает TTL по умолчанию (секунды) и флаг наличия.
+func GetConversationDefaultTTL(database *sql.DB, conversationID string) (int64, bool, error) {
+	var ttl sql.NullInt64
+	err := database.QueryRow(`SELECT default_ttl FROM conversations WHERE id=?`, conversationID).Scan(&ttl)
+	if err != nil {
+		return 0, false, err
+	}
+	return ttl.Int64, ttl.Valid, nil
+}
+
 // ─── Messages ────────────────────────────────────────────────────────────────
 
 type Message struct {
@@ -354,13 +383,14 @@ type Message struct {
 	DeliveredAt          sql.NullInt64
 	ReadAt               sql.NullInt64
 	ReplyToID            string
+	ExpiresAt            sql.NullInt64
 }
 
 func SaveMessage(db *sql.DB, m Message) error {
 	_, err := db.Exec(`
-		INSERT INTO messages (id, client_msg_id, conversation_id, sender_id, recipient_id, destination_device_id, ciphertext, sender_key_id, reply_to_id, created_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		m.ID, m.ClientMsgID, m.ConversationID, m.SenderID, m.RecipientID, m.DestinationDeviceID, m.Ciphertext, m.SenderKeyID, m.ReplyToID, m.CreatedAt,
+		INSERT INTO messages (id, client_msg_id, conversation_id, sender_id, recipient_id, destination_device_id, ciphertext, sender_key_id, reply_to_id, created_at, expires_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		m.ID, m.ClientMsgID, m.ConversationID, m.SenderID, m.RecipientID, m.DestinationDeviceID, m.Ciphertext, m.SenderKeyID, m.ReplyToID, m.CreatedAt, m.ExpiresAt,
 	)
 	return err
 }
@@ -372,10 +402,10 @@ func GetMessageByID(db *sql.DB, id string) (*Message, error) {
 	err := db.QueryRow(`
 		SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
 		       COALESCE(destination_device_id,''), ciphertext, sender_key_id, COALESCE(is_deleted,0),
-		       edited_at, created_at, delivered_at, read_at, COALESCE(reply_to_id,'')
+		       edited_at, created_at, delivered_at, read_at, COALESCE(reply_to_id,''), expires_at
 		FROM messages WHERE id=?`, id,
 	).Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
-		&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt, &m.ReplyToID)
+		&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt, &m.ReplyToID, &m.ExpiresAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -395,7 +425,7 @@ func GetMessages(db *sql.DB, conversationID, recipientID, beforeMsgID string, li
 	args := []any{conversationID, recipientID}
 	q := `SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
 	             COALESCE(destination_device_id,''), ciphertext, sender_key_id, COALESCE(is_deleted,0),
-	             edited_at, created_at, delivered_at, read_at, COALESCE(reply_to_id,'')
+	             edited_at, created_at, delivered_at, read_at, COALESCE(reply_to_id,''), expires_at
 	      FROM messages
 	      WHERE conversation_id=? AND (recipient_id=? OR recipient_id='') AND COALESCE(is_deleted,0)=0`
 	if beforeMsgID != "" {
@@ -415,7 +445,7 @@ func GetMessages(db *sql.DB, conversationID, recipientID, beforeMsgID string, li
 		var m Message
 		var isDeleted int
 		if err := rows.Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
-			&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt, &m.ReplyToID); err != nil {
+			&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt, &m.ReplyToID, &m.ExpiresAt); err != nil {
 			return nil, err
 		}
 		m.IsDeleted = isDeleted == 1
@@ -429,7 +459,7 @@ func GetMessagesByClientMsgID(db *sql.DB, clientMsgID string) ([]Message, error)
 	rows, err := db.Query(`
 		SELECT id, COALESCE(client_msg_id,''), conversation_id, sender_id, COALESCE(recipient_id,''),
 		       COALESCE(destination_device_id,''), ciphertext, sender_key_id, COALESCE(is_deleted,0),
-		       edited_at, created_at, delivered_at, read_at, COALESCE(reply_to_id,'')
+		       edited_at, created_at, delivered_at, read_at, COALESCE(reply_to_id,''), expires_at
 		FROM messages WHERE client_msg_id=?`, clientMsgID)
 	if err != nil {
 		return nil, err
@@ -440,7 +470,7 @@ func GetMessagesByClientMsgID(db *sql.DB, clientMsgID string) ([]Message, error)
 		var m Message
 		var isDeleted int
 		if err := rows.Scan(&m.ID, &m.ClientMsgID, &m.ConversationID, &m.SenderID, &m.RecipientID,
-			&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt, &m.ReplyToID); err != nil {
+			&m.DestinationDeviceID, &m.Ciphertext, &m.SenderKeyID, &isDeleted, &m.EditedAt, &m.CreatedAt, &m.DeliveredAt, &m.ReadAt, &m.ReplyToID, &m.ExpiresAt); err != nil {
 			return nil, err
 		}
 		m.IsDeleted = isDeleted == 1
@@ -470,6 +500,44 @@ func UpdateMessageCiphertext(db *sql.DB, clientMsgID, senderID, recipientID stri
 func MarkDelivered(db *sql.DB, msgID string, ts int64) error {
 	_, err := db.Exec(`UPDATE messages SET delivered_at=? WHERE id=?`, ts, msgID)
 	return err
+}
+
+// ExpiredMessage содержит минимальный контекст удалённого сообщения для рассылки WS-уведомлений.
+type ExpiredMessage struct {
+	ID             string
+	ConversationID string
+}
+
+// DeleteExpiredMessages физически удаляет истёкшие сообщения и возвращает их ID + chat ID
+// для последующей рассылки WS-фрейма message_expired участникам.
+func DeleteExpiredMessages(database *sql.DB, nowMs int64) ([]ExpiredMessage, error) {
+	rows, err := database.Query(
+		`SELECT id, conversation_id FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?`, nowMs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var expired []ExpiredMessage
+	for rows.Next() {
+		var e ExpiredMessage
+		if err := rows.Scan(&e.ID, &e.ConversationID); err != nil {
+			return nil, err
+		}
+		expired = append(expired, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(expired) == 0 {
+		return nil, nil
+	}
+
+	_, err = database.Exec(
+		`DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?`, nowMs,
+	)
+	return expired, err
 }
 
 func MarkRead(db *sql.DB, msgID string, ts int64) error {
@@ -615,6 +683,63 @@ func GetIdentityKeyByIKPublic(db *sql.DB, userID string, ikPublic []byte) (*Iden
 		return nil, err
 	}
 	return k, nil
+}
+
+// DeleteDevice удаляет устройство и связанные с ним ключи.
+func DeleteDevice(database *sql.DB, deviceID, userID string) error {
+	tx, err := database.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM identity_keys WHERE user_id=? AND device_id=?`, userID, deviceID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM pre_keys WHERE user_id=? AND device_id=?`, userID, deviceID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM devices WHERE id=? AND user_id=?`, deviceID, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ─── Device Link Tokens ───────────────────────────────────────────────────────
+
+type DeviceLinkToken struct {
+	Token     string
+	UserID    string
+	ExpiresAt int64
+	Used      bool
+}
+
+func SaveDeviceLinkToken(database *sql.DB, t DeviceLinkToken) error {
+	_, err := database.Exec(
+		`INSERT INTO device_link_tokens (token, user_id, expires_at, used) VALUES (?,?,?,0)`,
+		t.Token, t.UserID, t.ExpiresAt,
+	)
+	return err
+}
+
+func GetDeviceLinkToken(database *sql.DB, token string) (*DeviceLinkToken, error) {
+	t := &DeviceLinkToken{}
+	var used int
+	err := database.QueryRow(
+		`SELECT token, user_id, expires_at, used FROM device_link_tokens WHERE token=?`, token,
+	).Scan(&t.Token, &t.UserID, &t.ExpiresAt, &used)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	t.Used = used == 1
+	return t, nil
+}
+
+func MarkDeviceLinkTokenUsed(database *sql.DB, token string) error {
+	_, err := database.Exec(`UPDATE device_link_tokens SET used=1 WHERE token=?`, token)
+	return err
 }
 
 // nullableString возвращает nil если строка пустая (для SQL NULL).
@@ -861,6 +986,49 @@ func GetMediaObject(db *sql.DB, id string) (*MediaObject, error) {
 		return nil, nil
 	}
 	return m, err
+}
+
+// ChatMediaItem — элемент списка медиафайлов чата.
+type ChatMediaItem struct {
+	ID           string
+	OriginalName string
+	Size         int64
+	CreatedAt    int64
+}
+
+// ListChatMedia возвращает медиафайлы чата с пагинацией (page >= 1).
+// hasMore == true если есть ещё записи после текущей страницы.
+func ListChatMedia(database *sql.DB, conversationID string, page, limit int) (items []ChatMediaItem, hasMore bool, err error) {
+	offset := (page - 1) * limit
+	rows, err := database.Query(`
+		SELECT id, original_name, size, created_at
+		FROM media_objects
+		WHERE conversation_id = ?
+		ORDER BY created_at DESC
+		LIMIT ? OFFSET ?`,
+		conversationID, limit+1, offset,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("list chat media: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var item ChatMediaItem
+		if err := rows.Scan(&item.ID, &item.OriginalName, &item.Size, &item.CreatedAt); err != nil {
+			return nil, false, fmt.Errorf("scan chat media: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("iterate chat media: %w", err)
+	}
+
+	if len(items) > limit {
+		hasMore = true
+		items = items[:limit]
+	}
+	return items, hasMore, nil
 }
 
 // DeleteOrphanedMedia удаляет записи media_objects без привязки к чату
@@ -1227,6 +1395,44 @@ func ListUsers(db *sql.DB) ([]User, error) {
 	return users, rows.Err()
 }
 
+// ─── User Quotas ──────────────────────────────────────────────────────────────
+
+type UserQuota struct {
+	UserID     string
+	QuotaBytes int64
+	UsedBytes  int64
+}
+
+func GetUserQuota(db *sql.DB, userID string) (UserQuota, error) {
+	var q UserQuota
+	q.UserID = userID
+	err := db.QueryRow(
+		`SELECT quota_bytes, used_bytes FROM user_quotas WHERE user_id = ?`, userID,
+	).Scan(&q.QuotaBytes, &q.UsedBytes)
+	if err == sql.ErrNoRows {
+		return q, nil // нет записи → 0/0 (без ограничений)
+	}
+	return q, err
+}
+
+func UpsertUserQuota(db *sql.DB, userID string, quotaBytes int64) error {
+	_, err := db.Exec(
+		`INSERT INTO user_quotas (user_id, quota_bytes, used_bytes) VALUES (?, ?, 0)
+		 ON CONFLICT(user_id) DO UPDATE SET quota_bytes = excluded.quota_bytes`,
+		userID, quotaBytes,
+	)
+	return err
+}
+
+func AddUsedBytes(db *sql.DB, userID string, delta int64) error {
+	_, err := db.Exec(
+		`INSERT INTO user_quotas (user_id, quota_bytes, used_bytes) VALUES (?, 0, ?)
+		 ON CONFLICT(user_id) DO UPDATE SET used_bytes = MAX(0, used_bytes + excluded.used_bytes)`,
+		userID, delta,
+	)
+	return err
+}
+
 // EnsureAdminUser создаёт пользователя-администратора если он не существует.
 // Вызывается при старте сервера из main.go. Безопасно вызывать многократно.
 func EnsureAdminUser(database *sql.DB, username, passwordHash string) error {
@@ -1246,4 +1452,227 @@ func EnsureAdminUser(database *sql.DB, username, passwordHash string) error {
 		CreatedAt:    time.Now().UnixMilli(),
 	}
 	return CreateUser(database, u)
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
+func GetSetting(db *sql.DB, key string) (string, error) {
+	var val string
+	err := db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&val)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return val, err
+}
+
+func SetSetting(db *sql.DB, key, value string) error {
+	_, err := db.Exec(
+		`INSERT INTO settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		key, value,
+	)
+	return err
+}
+
+func DeleteMediaOlderThan(db *sql.DB, beforeUnixMs int64) ([]string, error) {
+	rows, err := db.Query(
+		`SELECT filename FROM media_objects WHERE created_at < ?`, beforeUnixMs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query old media: %w", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan media filename: %w", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate old media: %w", err)
+	}
+	_, err = db.Exec(`DELETE FROM media_objects WHERE created_at < ?`, beforeUnixMs)
+	if err != nil {
+		return nil, fmt.Errorf("delete old media: %w", err)
+	}
+	return names, nil
+}
+
+// ─── Conversation member limit ────────────────────────────────────────────────
+
+// CountConversationMembers возвращает текущее кол-во участников беседы.
+func CountConversationMembers(db *sql.DB, convID string) (int, error) {
+	var n int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ?`, convID,
+	).Scan(&n)
+	return n, err
+}
+
+// GetConversationMaxMembers возвращает max_members для беседы.
+// Второй возвращаемый bool = true, если значение задано (не NULL).
+func GetConversationMaxMembers(db *sql.DB, convID string) (int, bool, error) {
+	var n sql.NullInt64
+	err := db.QueryRow(
+		`SELECT max_members FROM conversations WHERE id = ?`, convID,
+	).Scan(&n)
+	if err != nil {
+		return 0, false, err
+	}
+	if !n.Valid {
+		return 0, false, nil
+	}
+	return int(n.Int64), true, nil
+}
+
+// SetConversationMaxMembers задаёт max_members для беседы.
+func SetConversationMaxMembers(db *sql.DB, convID string, maxMembers int) error {
+	_, err := db.Exec(
+		`UPDATE conversations SET max_members = ? WHERE id = ?`, maxMembers, convID,
+	)
+	return err
+}
+
+// AddConversationMember добавляет участника в беседу.
+func AddConversationMember(db *sql.DB, convID, userID string, joinedAt int64) error {
+	_, err := db.Exec(
+		`INSERT OR IGNORE INTO conversation_members (conversation_id, user_id, joined_at) VALUES (?,?,?)`,
+		convID, userID, joinedAt,
+	)
+	return err
+}
+
+// ─── Bot ─────────────────────────────────────────────────────────────────────
+
+type Bot struct {
+	ID         string
+	Name       string
+	OwnerID    string
+	TokenHash  string
+	WebhookURL string
+	Active     bool
+	CreatedAt  int64
+}
+
+func CreateBot(db *sql.DB, bot Bot) error {
+	_, err := db.Exec(
+		`INSERT INTO bots (id, name, owner_id, token_hash, webhook_url, active, created_at) VALUES (?,?,?,?,?,?,?)`,
+		bot.ID, bot.Name, bot.OwnerID, bot.TokenHash, bot.WebhookURL, boolToInt(bot.Active), bot.CreatedAt,
+	)
+	return err
+}
+
+func GetBotByID(db *sql.DB, id string) (*Bot, error) {
+	b := &Bot{}
+	var active int
+	err := db.QueryRow(
+		`SELECT id, name, owner_id, token_hash, webhook_url, active, created_at FROM bots WHERE id=?`, id,
+	).Scan(&b.ID, &b.Name, &b.OwnerID, &b.TokenHash, &b.WebhookURL, &active, &b.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	b.Active = active != 0
+	return b, nil
+}
+
+func GetBotByTokenHash(db *sql.DB, hash string) (*Bot, error) {
+	b := &Bot{}
+	var active int
+	err := db.QueryRow(
+		`SELECT id, name, owner_id, token_hash, webhook_url, active, created_at FROM bots WHERE token_hash=?`, hash,
+	).Scan(&b.ID, &b.Name, &b.OwnerID, &b.TokenHash, &b.WebhookURL, &active, &b.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	b.Active = active != 0
+	return b, nil
+}
+
+func ListBotsByOwner(db *sql.DB, ownerID string) ([]Bot, error) {
+	rows, err := db.Query(
+		`SELECT id, name, owner_id, token_hash, webhook_url, active, created_at FROM bots WHERE owner_id=? ORDER BY created_at DESC`, ownerID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bots []Bot
+	for rows.Next() {
+		var b Bot
+		var active int
+		if err := rows.Scan(&b.ID, &b.Name, &b.OwnerID, &b.TokenHash, &b.WebhookURL, &active, &b.CreatedAt); err != nil {
+			return nil, err
+		}
+		b.Active = active != 0
+		bots = append(bots, b)
+	}
+	return bots, rows.Err()
+}
+
+// DeleteBot удаляет бота только если owner_id совпадает.
+func DeleteBot(db *sql.DB, id, ownerID string) error {
+	res, err := db.Exec(`DELETE FROM bots WHERE id=? AND owner_id=?`, id, ownerID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func UpdateBotToken(db *sql.DB, id, newHash string) error {
+	_, err := db.Exec(`UPDATE bots SET token_hash=? WHERE id=?`, newHash, id)
+	return err
+}
+
+func UpdateBotWebhook(db *sql.DB, id, ownerID, webhookURL string) error {
+	_, err := db.Exec(`UPDATE bots SET webhook_url=? WHERE id=? AND owner_id=?`, webhookURL, id, ownerID)
+	return err
+}
+
+// GetActiveBotsByConversation возвращает всех активных ботов, которые являются
+// участниками беседы (JOIN bots ON conversation_members WHERE active=1).
+func GetActiveBotsByConversation(database *sql.DB, convID string) ([]Bot, error) {
+	rows, err := database.Query(`
+		SELECT b.id, b.name, b.owner_id, b.token_hash, b.webhook_url, b.active, b.created_at
+		FROM bots b
+		JOIN conversation_members cm ON cm.user_id = b.id
+		WHERE cm.conversation_id = ? AND b.active = 1`, convID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bots []Bot
+	for rows.Next() {
+		var b Bot
+		var active int
+		if err := rows.Scan(&b.ID, &b.Name, &b.OwnerID, &b.TokenHash, &b.WebhookURL, &active, &b.CreatedAt); err != nil {
+			return nil, err
+		}
+		b.Active = active != 0
+		bots = append(bots, b)
+	}
+	return bots, rows.Err()
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

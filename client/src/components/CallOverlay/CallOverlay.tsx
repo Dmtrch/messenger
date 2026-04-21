@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCallStore } from '@/store/callStore'
 import { startRingtone } from '@/utils/ringtone'
+import GroupCallView from '../GroupCallView/GroupCallView'
 import s from './CallOverlay.module.css'
 
 interface Props {
@@ -16,11 +17,14 @@ function formatDuration(seconds: number): string {
 }
 
 export default function CallOverlay({ onAccept, onReject, onHangUp }: Props) {
-  const session      = useCallStore((s) => s.session)
-  const localStream  = useCallStore((s) => s.localStream)
-  const remoteStream = useCallStore((s) => s.remoteStream)
-  const toggleMute   = useCallStore((s) => s.toggleMute)
-  const toggleCamera = useCallStore((s) => s.toggleCamera)
+  const session        = useCallStore((s) => s.session)
+  const localStream    = useCallStore((s) => s.localStream)
+  const remoteStream   = useCallStore((s) => s.remoteStream)
+  const toggleMute     = useCallStore((s) => s.toggleMute)
+  const toggleCamera   = useCallStore((s) => s.toggleCamera)
+  const roomId         = useCallStore((s) => s.roomId)
+  const clearGroupRoom = useCallStore((s) => s.clearGroupRoom)
+  const isGroupCall    = roomId !== null
   const {
     status,
     peerId,
@@ -70,9 +74,42 @@ export default function CallOverlay({ onAccept, onReject, onHangUp }: Props) {
 
   const peerLabel = peerId ?? 'Неизвестный'
 
+  if (isGroupCall && status === 'active') {
+    return (
+      <div className={s.overlay}>
+        <div className={s.timer}>{formatDuration(elapsed)}</div>
+        <div className={s.groupLayout}>
+          <GroupCallView />
+        </div>
+        <div className={s.controls}>
+          <button
+            className={`${s.btn} ${isMuted ? s.btnMuted : s.btnMute}`}
+            onClick={toggleMute}
+            aria-label={isMuted ? 'Включить микрофон' : 'Выключить микрофон'}
+          >
+            {isMuted ? '🔇' : '🎤'}
+          </button>
+          <button
+            className={`${s.btn} ${isCameraOff ? s.btnCamOff : s.btnCamera}`}
+            onClick={toggleCamera}
+            aria-label={isCameraOff ? 'Включить камеру' : 'Выключить камеру'}
+          >
+            {isCameraOff ? '📷' : '📹'}
+          </button>
+          <button
+            className={`${s.btn} ${s.btnHangup}`}
+            onClick={() => { onHangUp(); clearGroupRoom() }}
+            aria-label="Завершить"
+          >
+            📵
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={s.overlay}>
-      {/* Видео-фон */}
       {status === 'active' && isVideo && (
         <>
           <video
@@ -91,7 +128,6 @@ export default function CallOverlay({ onAccept, onReject, onHangUp }: Props) {
         </>
       )}
 
-      {/* Центральный блок */}
       {(status === 'ringing' || status === 'calling' || (status === 'active' && !isVideo)) && (
         <>
           <div className={s.avatar}>
@@ -106,12 +142,10 @@ export default function CallOverlay({ onAccept, onReject, onHangUp }: Props) {
         </>
       )}
 
-      {/* Таймер поверх видео */}
       {status === 'active' && isVideo && (
         <div className={s.timer}>{formatDuration(elapsed)}</div>
       )}
 
-      {/* Кнопки управления */}
       <div className={s.controls}>
         {status === 'ringing' && (
           <>

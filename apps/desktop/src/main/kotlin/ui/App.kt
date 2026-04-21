@@ -2,18 +2,30 @@ package ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import config.ServerConfig
 import kotlinx.coroutines.launch
+import store.BiometricLockStore
+import store.PrivacyScreenStore
+import store.UpdateCheckerStore
+import androidx.compose.foundation.background
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalWindowInfo
 import store.CallStatus
 import ui.screens.*
 import viewmodel.AppViewModel
 import viewmodel.ChatListViewModel
 import viewmodel.ChatWindowViewModel
+import kotlin.system.exitProcess
 
 sealed class Screen {
+    object BiometricGate : Screen()
     object ServerSetup : Screen()
     object Auth : Screen()
     object ChatList : Screen()
@@ -29,16 +41,36 @@ fun App() {
     val chats by vm.chatStore.chats.collectAsState()
     val callState by vm.chatStore.call.collectAsState()
     val scope = rememberCoroutineScope()
+    val privacyEnabled by PrivacyScreenStore.enabled.collectAsState()
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+
+    val updateChecker = remember { UpdateCheckerStore(ServerConfig.serverUrl) }
+    val updateInfo by updateChecker.updateInfo.collectAsState()
+    var updateDismissed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        updateChecker.startPolling()
+    }
 
     var screen by remember {
-        mutableStateOf<Screen>(
-            if (!ServerConfig.hasServerUrl()) Screen.ServerSetup else Screen.Auth
-        )
+        mutableStateOf<Screen>(Screen.BiometricGate)
     }
 
     MaterialTheme {
         Box(modifier = Modifier.fillMaxSize()) {
+        // Пропускаем gate если блокировка отключена
+        LaunchedEffect(Unit) {
+            if (!BiometricLockStore.settings.value.enabled) {
+                screen = if (!ServerConfig.hasServerUrl()) Screen.ServerSetup else Screen.Auth
+            }
+        }
+
         when (val s = screen) {
+            Screen.BiometricGate -> BiometricGateScreen(
+                onUnlocked = {
+                    screen = if (!ServerConfig.hasServerUrl()) Screen.ServerSetup else Screen.Auth
+                }
+            )
             Screen.ServerSetup -> ServerSetupScreen(
                 onServerSet = { url -> vm.setServerUrl(url); screen = Screen.Auth },
             )
@@ -118,6 +150,52 @@ fun App() {
                 remoteFrame = vm.webRtcController?.remoteFrame,
             )
         }
+        if (privacyEnabled && !windowFocused) {
+            PrivacyOverlay()
+        }
+
+        // Диалог обновления
+        val info = updateInfo
+        if (info != null && info.hasUpdate && !updateDismissed) {
+            if (info.isForced) {
+                AlertDialog(
+                    onDismissRequest = {},
+                    title = { Text("Требуется обновление") },
+                    text = { Text("Доступна версия ${info.latestVersion}. Обновите приложение для продолжения работы.") },
+                    confirmButton = {
+                        TextButton(onClick = { exitProcess(0) }) {
+                            Text("Закрыть приложение")
+                        }
+                    }
+                )
+            } else {
+                AlertDialog(
+                    onDismissRequest = { updateDismissed = true },
+                    title = { Text("Доступно обновление") },
+                    text = { Text("Доступна версия ${info.latestVersion}. Обновите приложение.") },
+                    confirmButton = {
+                        TextButton(onClick = { updateDismissed = true }) {
+                            Text("Напомнить позже")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { updateDismissed = true }) {
+                            Text("Закрыть")
+                        }
+                    }
+                )
+            }
+        }
         } // Box
+    }
+}
+
+@Composable
+private fun PrivacyOverlay() {
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color(0xFF0D0D0D)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("🔒", style = MaterialTheme.typography.displayLarge, color = Color.White)
     }
 }

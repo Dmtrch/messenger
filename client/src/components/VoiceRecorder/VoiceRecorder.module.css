@@ -1,0 +1,71 @@
+.recorder {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem calc(0.5rem + var(--safe-bottom));
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.micIcon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.timer {
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  min-width: 2.75rem;
+  flex-shrink: 0;
+}
+
+.levelBar {
+  flex: 1;
+  height: 0.375rem;
+  background: var(--bg-primary);
+  border-radius: 0.25rem;
+  overflow: hidden;
+}
+
+.levelFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 0.25rem;
+  transition: width 0.08s linear;
+}
+
+.cancelBtn {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  font-size: 1rem;
+  transition: color 0.15s;
+}
+.cancelBtn:hover { color: #e05555; }
+
+.sendBtn {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 1.1rem;
+  transition: opacity 0.15s;
+}
+.sendBtn:hover { opacity: 0.85; }
+
+.errorText {
+  flex: 1;
+  font-size: 0.875rem;
+  color: #e05555;
+}

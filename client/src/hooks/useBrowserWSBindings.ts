@@ -24,6 +24,7 @@ export function useBrowserWSBindings(
   const token           = useAuthStore((s) => s.accessToken)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const currentUser     = useAuthStore((s) => s.currentUser)
+  const deviceId        = useAuthStore((s) => s.deviceId)
   const logout          = useAuthStore((s) => s.logout)
 
   const setSend = useWsStore((s) => s.setSend)
@@ -47,6 +48,7 @@ export function useBrowserWSBindings(
         token,
         isAuthenticated,
         currentUserId: currentUser?.id,
+        currentDeviceId: deviceId,
         logout,
 
         getCallFrameHandler: () => handleCallFrame ?? null,
@@ -82,6 +84,6 @@ export function useBrowserWSBindings(
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [token, isAuthenticated, currentUser?.id, logout, setSend, handleCallFrame],
+    [token, isAuthenticated, currentUser?.id, deviceId, logout, setSend, handleCallFrame],
   )
 }

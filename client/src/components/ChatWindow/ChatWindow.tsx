@@ -3,27 +3,35 @@ import { useChatStore } from '@/store/chatStore'
 import { useAuthStore } from '@/store/authStore'
 import { useWsStore } from '@/store/wsStore'
 import { useCallStore } from '@/store/callStore'
+import { useServerInfoStore } from '@/store/serverInfoStore'
 import { api, uploadEncryptedMedia } from '@/api/client'
+import { getServerUrl } from '@/config/serverConfig'
 import { encryptMessage, encryptForAllDevices, decryptMessage, encryptGroupMessage, decryptGroupMessage } from '@/crypto/session'
 import { saveKnownPeerIK, loadKnownPeerIK } from '@/crypto/keystore'
 import SafetyNumber from '@/components/SafetyNumber/SafetyNumber'
-import { loadMessages, appendMessages, saveMessages } from '@/store/messageDb'
+import GalleryModal from '@/components/GalleryModal/GalleryModal'
+import VoiceRecorder from '@/components/VoiceRecorder/VoiceRecorder'
+import VoiceMessage from '@/components/VoiceMessage/VoiceMessage'
+import { loadMessages, appendMessages, saveMessages, deleteMessageFromDb } from '@/store/messageDb'
 import { enqueueOutbox } from '@/store/outboxDb'
 import type { OutboxItem } from '@/store/outboxDb'
 import type { Message } from '@/types'
 import s from './ChatWindow.module.css'
 
 /** Разбирает расшифрованный payload — текст или медиа-JSON */
-function parsePayload(raw: string): Pick<Message, 'text' | 'mediaId' | 'mediaKey' | 'originalName' | 'type'> {
+function parsePayload(raw: string): Pick<Message, 'text' | 'mediaId' | 'mediaKey' | 'originalName' | 'type' | 'duration'> {
   try {
     const obj = JSON.parse(raw) as Record<string, unknown>
     if (obj && typeof obj.mediaId === 'string') {
+      const mediaTypeStr = typeof obj.mediaType === 'string' ? obj.mediaType : ''
+      const isAudio = mediaTypeStr === 'audio' || mediaTypeStr.startsWith('audio/')
       return {
-        type: (obj.mediaType as Message['type']) ?? 'file',
+        type: isAudio ? 'audio' : ((obj.mediaType as Message['type']) ?? 'file'),
         mediaId: obj.mediaId,
         mediaKey: typeof obj.mediaKey === 'string' ? obj.mediaKey : undefined,
         originalName: typeof obj.originalName === 'string' ? obj.originalName : undefined,
         text: typeof obj.text === 'string' ? obj.text : undefined,
+        duration: typeof obj.duration === 'number' ? obj.duration : undefined,
       }
     }
   } catch { /* plain text */ }
@@ -35,9 +43,25 @@ interface PendingMedia {
   mediaId: string
   mediaKey: string      // base64, ключ шифрования — включается в E2E payload
   originalName: string
-  mediaType: 'image' | 'file'
+  mediaType: 'image' | 'file' | 'audio'
   contentType: string
   previewUrl?: string   // объектный URL для превью изображений
+  pendingDuration?: number  // длительность голосовой заметки в мс
+}
+
+const TTL_OPTIONS = [
+  { label: 'Выкл', value: 0 },
+  { label: '5м',   value: 300 },
+  { label: '1ч',   value: 3600 },
+  { label: '1д',   value: 86400 },
+  { label: '1нед', value: 604800 },
+]
+
+function formatRemaining(ms: number): string {
+  const totalSec = Math.ceil(ms / 1000)
+  const m = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  return `${m}:${String(sec).padStart(2, '0')}`
 }
 
 /** Генерация UUID с fallback для старых браузеров (iOS < 15.4, Chrome < 92) */
@@ -75,6 +99,21 @@ interface Props {
   onCall?: (chatId: string, targetId: string, isVideo: boolean) => void
 }
 
+/** Получает лимит участников группы с сервера */
+async function fetchMaxGroupMembers(baseUrl: string, token: string | null): Promise<number | null> {
+  try {
+    const res = await fetch(`${baseUrl}/api/admin/settings/max-group-members`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
+    })
+    if (!res.ok) return null
+    const data = await res.json() as { maxMembers: number }
+    return data.maxMembers ?? null
+  } catch {
+    return null
+  }
+}
+
 export default function ChatWindow({ chatId, onBack, onCall }: Props) {
   const chat = useChatStore((st) => st.chats.find((c) => c.id === chatId))
   const messages = useChatStore((st) => st.messages[chatId] ?? [])
@@ -85,8 +124,10 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
   const editMessage = useChatStore((st) => st.editMessage)
   const markRead = useChatStore((st) => st.markRead)
   const currentUser = useAuthStore((st) => st.currentUser)
+  const accessToken = useAuthStore((st) => st.accessToken)
   const wsSend = useWsStore((st) => st.send)
   const callStatus = useCallStore((s) => s.session.status)
+  const maxUploadBytes = useServerInfoStore((s) => s.maxUploadBytes)
   const [text, setText] = useState('')
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -95,6 +136,10 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const [pendingMedia, setPendingMedia] = useState<PendingMedia | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false)
+  const [showTtlMenu, setShowTtlMenu] = useState(false)
+  const [showGallery, setShowGallery] = useState(false)
+  const [maxGroupMembers, setMaxGroupMembers] = useState<number | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const topSentinelRef = useRef<HTMLDivElement>(null)
   const historyLoaded = useRef<Set<string>>(new Set())
@@ -232,6 +277,12 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
     api.markChatRead(chatId).catch(() => {})
   }, [chatId, markRead, loadHistory])
 
+  // Загружаем лимит участников для групповых чатов
+  useEffect(() => {
+    if (chat?.type !== 'group') return
+    void fetchMaxGroupMembers(getServerUrl(), accessToken).then(setMaxGroupMembers)
+  }, [chat?.type, accessToken])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
@@ -286,6 +337,18 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
     setMenu(null)
   }, [menu])
 
+  const handleExpire = useCallback((msgId: string) => {
+    deleteMessage(chatId, msgId)
+    void deleteMessageFromDb(chatId, msgId).catch(() => {})
+  }, [chatId, deleteMessage])
+
+  const handleSetTtl = useCallback(async (ttlSeconds: number) => {
+    setShowTtlMenu(false)
+    try {
+      await api.setChatTtl(chatId, ttlSeconds)
+    } catch { /* ignore */ }
+  }, [chatId])
+
   const handleDelete = useCallback(() => {
     if (!menu) return
     const msg = menu.msg
@@ -307,6 +370,12 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
     if (!fileInputRef.current) return
     fileInputRef.current.value = ''   // сбрасываем input чтобы можно было выбрать тот же файл снова
     if (!file) return
+
+    if (file.size > maxUploadBytes) {
+      const maxMb = Math.round(maxUploadBytes / (1024 * 1024))
+      setText(`Файл слишком большой (макс. ${maxMb} МБ)`)
+      return
+    }
 
     const mediaType: PendingMedia['mediaType'] = file.type.startsWith('image/') ? 'image' : 'file'
     const previewUrl = mediaType === 'image' ? URL.createObjectURL(file) : undefined
@@ -332,12 +401,41 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
     } finally {
       setUploading(false)
     }
-  }, [chatId])
+  }, [chatId, maxUploadBytes])
 
   const removePendingMedia = useCallback(() => {
     if (pendingMedia?.previewUrl) URL.revokeObjectURL(pendingMedia.previewUrl)
     setPendingMedia(null)
   }, [pendingMedia])
+
+  const handleVoiceSend = useCallback(async (blob: Blob, durationMs: number) => {
+    setShowVoiceRecorder(false)
+    if (blob.size > maxUploadBytes) {
+      const maxMb = Math.round(maxUploadBytes / (1024 * 1024))
+      setText(`Голосовая заметка слишком большая (макс. ${maxMb} МБ)`)
+      return
+    }
+    const msgId = generateId()
+    const file = new File([blob], `voice_${Date.now()}.webm`, { type: 'audio/webm' })
+    setUploading(true)
+    try {
+      const res = await uploadEncryptedMedia(file, chatId, msgId)
+      setPendingMedia({
+        msgId,
+        mediaId: res.mediaId,
+        mediaKey: res.mediaKey,
+        originalName: file.name,
+        mediaType: 'audio',
+        contentType: 'audio/webm',
+        previewUrl: undefined,
+        pendingDuration: durationMs,
+      })
+    } catch {
+      setText((t) => t || '[ошибка загрузки голосовой заметки]')
+    } finally {
+      setUploading(false)
+    }
+  }, [chatId, maxUploadBytes])
 
   // --- Отправка ---
 
@@ -388,6 +486,9 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
         originalName: pendingMedia.originalName,
         mediaType: pendingMedia.contentType,
         text: trimmed || undefined,
+        ...(pendingMedia.mediaType === 'audio' && pendingMedia.pendingDuration != null
+          ? { duration: pendingMedia.pendingDuration }
+          : {}),
       })
     } else {
       plainPayload = trimmed
@@ -399,7 +500,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
       senderId: currentUser.id,
       encryptedPayload: '',
       senderKeyId: 0,
-      text: trimmed || pendingMedia?.originalName,
+      text: trimmed || (pendingMedia?.mediaType !== 'audio' ? pendingMedia?.originalName : undefined),
       mediaId: pendingMedia?.mediaId,
       mediaKey: pendingMedia?.mediaKey,
       originalName: pendingMedia?.originalName,
@@ -407,6 +508,7 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
       status: 'sending',
       type: msgType,
       replyToId: replyingTo?.id,
+      duration: pendingMedia?.pendingDuration,
     }
     addMessage(msg)
     // Сохраняем исходящее сообщение в IDB (статус 'sending' перезапишется позже)
@@ -527,6 +629,11 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
         </button>
         <div className={s.info}>
           <span className={s.chatName}>{chat?.name ?? 'Чат'}</span>
+          {chat?.type === 'group' && (
+            <span className={s.typing}>
+              {(chat.members?.length ?? 0)}{maxGroupMembers != null ? ` / ${maxGroupMembers}` : ''} участн.
+            </span>
+          )}
           {typingUsers.length > 0 && (
             <span className={s.typing}>печатает...</span>
           )}
@@ -561,6 +668,40 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
             🔒
           </button>
         )}
+        <button
+          className={s.galleryBtn}
+          onClick={() => setShowGallery(true)}
+          aria-label="Медиа-галерея"
+          title="Медиа-галерея"
+        >
+          🖼
+        </button>
+        <div className={s.ttlMenuWrap}>
+          <button
+            className={s.ttlBtn}
+            onClick={() => setShowTtlMenu((v) => !v)}
+            aria-label="Таймер сообщений"
+            title="Исчезающие сообщения"
+          >
+            ⏱
+          </button>
+          {showTtlMenu && (
+            <>
+              <div className={s.menuBackdrop} onClick={() => setShowTtlMenu(false)} />
+              <div className={s.ttlDropdown}>
+                {TTL_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    className={s.ttlOption}
+                    onClick={() => void handleSetTtl(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </header>
 
       <div className={s.messages} role="log" aria-live="polite">
@@ -573,18 +714,21 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
             </button>
           </div>
         )}
-        {messages.map((msg) => (
-          <Bubble
-            key={msg.id}
-            msg={msg}
-            isOwn={msg.senderId === currentUser?.id}
-            onTouchStart={handleTouchStart}
-            onTouchEnd={handleTouchEnd}
-            onRightClick={handleRightClick}
-            replyMsg={msg.replyToId ? messages.find((m) => m.id === msg.replyToId) : undefined}
-            hasReply={!!msg.replyToId}
-          />
-        ))}
+        {messages
+          .filter((msg) => msg.expiresAt == null || msg.expiresAt > Date.now())
+          .map((msg) => (
+            <Bubble
+              key={msg.id}
+              msg={msg}
+              isOwn={msg.senderId === currentUser?.id}
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
+              onRightClick={handleRightClick}
+              replyMsg={msg.replyToId ? messages.find((m) => m.id === msg.replyToId) : undefined}
+              hasReply={!!msg.replyToId}
+              onExpire={handleExpire}
+            />
+          ))}
         <div ref={bottomRef} />
       </div>
 
@@ -615,43 +759,61 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
         </div>
       )}
 
-      <div className={s.inputBar}>
-        <input
-          ref={fileInputRef}
-          type="file"
-          className={s.fileInput}
-          accept="image/*,application/pdf,.zip,.txt,.mp4,.mp3"
-          onChange={handleFileChange}
-          aria-label="Прикрепить файл"
+      {showVoiceRecorder ? (
+        <VoiceRecorder
+          onSend={handleVoiceSend}
+          onCancel={() => setShowVoiceRecorder(false)}
         />
-        <button
-          className={s.clipBtn}
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          aria-label="Прикрепить файл"
-          title="Прикрепить файл"
-        >
-          {uploading ? <SpinnerIcon /> : <ClipIcon />}
-        </button>
-        <textarea
-          className={s.input}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Сообщение"
-          rows={1}
-          maxLength={4096}
-          aria-label="Ввод сообщения"
-        />
-        <button
-          className={s.sendBtn}
-          onClick={handleSend}
-          disabled={!text.trim() && !pendingMedia}
-          aria-label="Отправить"
-        >
-          <SendIcon />
-        </button>
-      </div>
+      ) : (
+        <div className={s.inputBar}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            className={s.fileInput}
+            accept="image/*,application/pdf,.zip,.txt,.mp4,.mp3"
+            onChange={handleFileChange}
+            aria-label="Прикрепить файл"
+          />
+          <button
+            className={s.clipBtn}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            aria-label="Прикрепить файл"
+            title={`Прикрепить файл (макс. ${Math.round(maxUploadBytes / (1024 * 1024))} МБ)`}
+          >
+            {uploading ? <SpinnerIcon /> : <ClipIcon />}
+          </button>
+          {!pendingMedia && (
+            <button
+              className={s.micBtn}
+              onClick={() => setShowVoiceRecorder(true)}
+              disabled={uploading}
+              aria-label="Голосовая заметка"
+              title="Голосовая заметка"
+            >
+              🎙
+            </button>
+          )}
+          <textarea
+            className={s.input}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Сообщение"
+            rows={1}
+            maxLength={4096}
+            aria-label="Ввод сообщения"
+          />
+          <button
+            className={s.sendBtn}
+            onClick={handleSend}
+            disabled={!text.trim() && !pendingMedia}
+            aria-label="Отправить"
+          >
+            <SendIcon />
+          </button>
+        </div>
+      )}
 
       {/* Контекстное меню */}
       {menu && (
@@ -676,6 +838,9 @@ export default function ChatWindow({ chatId, onBack, onCall }: Props) {
           onClose={() => setShowSafetyNumber(false)}
         />
       )}
+      {showGallery && (
+        <GalleryModal chatId={chatId} onClose={() => setShowGallery(false)} />
+      )}
     </div>
   )
 }
@@ -690,12 +855,33 @@ interface BubbleProps {
   onRightClick: (msg: Message, e: React.MouseEvent) => void
   replyMsg?: Message
   hasReply?: boolean
+  onExpire?: (msgId: string) => void
 }
 
-function Bubble({ msg, isOwn, onTouchStart, onTouchEnd, onRightClick, replyMsg, hasReply }: BubbleProps) {
+function Bubble({ msg, isOwn, onTouchStart, onTouchEnd, onRightClick, replyMsg, hasReply, onExpire }: BubbleProps) {
   const time = new Date(msg.timestamp).toLocaleTimeString('ru', {
     hour: '2-digit', minute: '2-digit',
   })
+
+  const [remaining, setRemaining] = useState<number | null>(
+    msg.expiresAt != null ? Math.max(0, msg.expiresAt - Date.now()) : null
+  )
+
+  useEffect(() => {
+    if (msg.expiresAt == null) return
+    const tick = () => {
+      const r = msg.expiresAt! - Date.now()
+      if (r <= 0) {
+        setRemaining(0)
+        onExpire?.(msg.id)
+      } else {
+        setRemaining(r)
+      }
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [msg.expiresAt, msg.id, onExpire])
 
   // Системное сообщение (например, предупреждение о смене Identity Key)
   if (msg.type === 'system') {
@@ -730,9 +916,20 @@ function Bubble({ msg, isOwn, onTouchStart, onTouchEnd, onRightClick, replyMsg, 
           <span>{msg.originalName ?? msg.mediaId}</span>
         </AuthFileLink>
       )}
+      {msg.type === 'audio' && msg.mediaId && (
+        <VoiceMessage
+          mediaId={msg.mediaId}
+          mediaKey={msg.mediaKey}
+          duration={msg.duration}
+          className={s.bubbleAudio}
+        />
+      )}
       {msg.text && <p className={s.bubbleText}>{msg.text}</p>}
       <div className={s.meta}>
         {msg.isEdited && <span className={s.edited}>изм.</span>}
+        {remaining != null && remaining > 0 && (
+          <span className={s.expireTimer}>⏱{formatRemaining(remaining)}</span>
+        )}
         <span className={s.ts}>{time}</span>
         {isOwn && <StatusDots status={msg.status} />}
       </div>
@@ -810,13 +1007,20 @@ function AuthImage({
 
   useEffect(() => {
     let cancelled = false
+    let blobUrl: string | null = null
     const fetch = mediaKey
       ? api.fetchEncryptedMediaBlobUrl(mediaId, mediaKey, 'image/*')
       : api.fetchMediaBlobUrl(mediaId)
     fetch
-      .then((url) => { if (!cancelled) setSrc(url) })
+      .then((url) => {
+        if (!cancelled) { blobUrl = url; setSrc(url) }
+        else URL.revokeObjectURL(url)
+      })
       .catch(() => {})
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+    }
   }, [mediaId, mediaKey])
 
   if (!src) {
@@ -849,6 +1053,7 @@ function AuthFileLink({
       a.href = url
       a.download = originalName ?? mediaId
       a.click()
+      URL.revokeObjectURL(url)
     } catch { /* игнорируем */ }
   }, [mediaId, mediaKey, originalName])
 

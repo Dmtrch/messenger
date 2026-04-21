@@ -1,14 +1,24 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { useAuthStore } from '@/store/authStore'
 import { getServerUrl } from '@/config/serverConfig'
 import s from './pages.module.css'
 
-type Tab = 'requests' | 'users' | 'invites' | 'resets'
+type Tab = 'requests' | 'users' | 'invites' | 'resets' | 'settings' | 'system'
+
+interface SystemStats {
+  cpuPercent: number
+  ramUsed: number
+  ramTotal: number
+  diskUsed: number
+  diskTotal: number
+}
+interface StatPoint extends SystemStats { time: string }
 
 interface RegRequest { id: string; username: string; display_name: string; status: string; created_at: number }
-interface AdminUser { id: string; username: string; display_name: string; role: string; status: string }
+interface AdminUser { id: string; username: string; display_name: string; role: string; status: string; quotaBytes?: number; usedBytes?: number }
 interface InviteCode {
   code: string
   usedBy: string
@@ -68,6 +78,25 @@ async function apiGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const token = useAuthStore.getState().accessToken
+  const res = await fetch(`${getServerUrl()}${path}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    credentials: 'include',
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data as { error?: string }).error ?? res.statusText)
+  }
+  if (res.status === 204) return undefined as T
+  return res.json() as Promise<T>
+}
+
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const token = useAuthStore.getState().accessToken
   const res = await fetch(`${getServerUrl()}${path}`, {
@@ -102,12 +131,37 @@ export default function AdminPage() {
   const [nowMs, setNowMs] = useState<number>(Date.now())
   const [activations, setActivations] = useState<Record<string, InviteActivation[]>>({})
   const [showQR, setShowQR] = useState<Record<string, boolean>>({})
+  const [editingQuota, setEditingQuota] = useState<Record<string, string>>({})
+  const [editingRole, setEditingRole] = useState<Record<string, boolean>>({})
+  const [retentionDays, setRetentionDays] = useState<number>(0)
+  const [retentionInput, setRetentionInput] = useState<string>('0')
+  const [maxGroupMembers, setMaxGroupMembers] = useState<number>(0)
+  const [maxGroupMembersInput, setMaxGroupMembersInput] = useState<string>('0')
+  const [sysStats, setSysStats] = useState<SystemStats | null>(null)
+  const [statsHistory, setStatsHistory] = useState<StatPoint[]>([])
 
   // live clock для таймера обратного отсчёта (P1-INV-5)
   useEffect(() => {
     if (tab !== 'invites') return
     const t = window.setInterval(() => setNowMs(Date.now()), 1000)
     return () => window.clearInterval(t)
+  }, [tab])
+
+  // SSE-подписка на системные метрики (P3-ADM-3c)
+  useEffect(() => {
+    if (tab !== 'system') return
+    const token = useAuthStore.getState().accessToken
+    const url = `${getServerUrl()}/api/admin/system/stream${token ? `?token=${encodeURIComponent(token)}` : ''}`
+    const es = new EventSource(url, { withCredentials: true })
+    es.addEventListener('stats', (e: MessageEvent) => {
+      const data = JSON.parse(e.data) as SystemStats
+      setSysStats(data)
+      setStatsHistory((prev) => {
+        const point: StatPoint = { ...data, time: new Date().toLocaleTimeString() }
+        return [...prev.slice(-19), point]
+      })
+    })
+    return () => es.close()
   }, [tab])
 
   const load = useCallback(async () => {
@@ -126,6 +180,15 @@ export default function AdminPage() {
       } else if (tab === 'resets') {
         const data = await apiGet<{ requests: ResetRequest[] }>('/api/admin/password-reset-requests?status=pending')
         setResets(data.requests)
+      } else if (tab === 'settings') {
+        const [retention, maxMembers] = await Promise.all([
+          apiGet<{ retentionDays: number }>('/api/admin/settings/retention'),
+          apiGet<{ maxMembers: number }>('/api/admin/settings/max-group-members').catch(() => ({ maxMembers: 0 })),
+        ])
+        setRetentionDays(retention.retentionDays)
+        setRetentionInput(String(retention.retentionDays))
+        setMaxGroupMembers(maxMembers.maxMembers)
+        setMaxGroupMembersInput(String(maxMembers.maxMembers))
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ошибка загрузки')
@@ -227,6 +290,55 @@ export default function AdminPage() {
     catch (e) { setError(e instanceof Error ? e.message : 'Ошибка') }
   }
 
+  const setUserRole = async (userId: string, role: string) => {
+    try {
+      await apiPut(`/api/admin/users/${userId}/role`, { role })
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, role } : u))
+      setEditingRole(p => { const n = {...p}; delete n[userId]; return n })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка')
+    }
+  }
+
+  const handleSaveQuota = async (userId: string) => {
+    const raw = editingQuota[userId]
+    if (raw === undefined) return
+    const mb = parseFloat(raw)
+    const quotaBytes = isNaN(mb) ? 0 : Math.round(mb * 1024 * 1024)
+    try {
+      await apiPut(`/api/admin/users/${userId}/quota`, { quotaBytes })
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, quotaBytes } : u))
+      setEditingQuota((prev) => { const n = { ...prev }; delete n[userId]; return n })
+      setSuccessMsg('Квота обновлена')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка')
+    }
+  }
+
+  const handleSaveRetention = async () => {
+    const days = parseInt(retentionInput, 10)
+    if (isNaN(days) || days < 0) { setError('Введите число >= 0'); return }
+    try {
+      await apiPut('/api/admin/settings/retention', { retentionDays: days })
+      setRetentionDays(days)
+      setSuccessMsg('Настройки сохранены')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка')
+    }
+  }
+
+  const handleSaveMaxGroupMembers = async () => {
+    const n = parseInt(maxGroupMembersInput, 10)
+    if (isNaN(n) || n < 0) { setError('Введите число >= 0'); return }
+    try {
+      await apiPut('/api/admin/settings/max-group-members', { maxMembers: n })
+      setMaxGroupMembers(n)
+      setSuccessMsg('Настройки сохранены')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка')
+    }
+  }
+
   const resolveReset = async (id: string) => {
     const tmp = tempPasswords[id]
     if (!tmp || tmp.length < 8) { setError('Временный пароль минимум 8 символов'); return }
@@ -247,10 +359,10 @@ export default function AdminPage() {
       </div>
 
       <div className={s.tabs}>
-        {(['requests', 'users', 'invites', 'resets'] as Tab[]).map(t => (
+        {(['requests', 'users', 'invites', 'resets', 'settings', 'system'] as Tab[]).map(t => (
           <button key={t} className={`${s.tab} ${tab === t ? s.tabActive : ''}`}
             onClick={() => { setTab(t); setError(''); setSuccessMsg('') }}>
-            {t === 'requests' ? 'Заявки' : t === 'users' ? 'Пользователи' : t === 'invites' ? 'Инвайты' : 'Сброс паролей'}
+            {t === 'requests' ? 'Заявки' : t === 'users' ? 'Пользователи' : t === 'invites' ? 'Инвайты' : t === 'resets' ? 'Сброс паролей' : t === 'system' ? 'Система' : 'Настройки'}
           </button>
         ))}
       </div>
@@ -279,12 +391,67 @@ export default function AdminPage() {
         <div className={s.adminList}>
           {users.map(u => (
             <div key={u.id} className={s.adminItem}>
-              <div>
-                <strong>{u.username}</strong>{' '}
-                <span className={s.badge}>{u.role}</span>{' '}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <strong>{u.username}</strong>
+                <span
+                  className={s.badge}
+                  style={u.role === 'moderator' ? { background: 'steelblue' } : u.role === 'admin' ? { background: 'darkviolet' } : undefined}
+                >
+                  {u.role === 'moderator' ? 'Мод' : u.role}
+                </span>
+                {editingRole[u.id] ? (
+                  <select
+                    value={u.role}
+                    onChange={e => void setUserRole(u.id, e.target.value)}
+                    onBlur={() => setEditingRole(p => { const n = {...p}; delete n[u.id]; return n })}
+                    style={{ fontSize: '12px' }}
+                    autoFocus
+                  >
+                    <option value="user">user</option>
+                    <option value="moderator">Мод</option>
+                    <option value="admin">admin</option>
+                  </select>
+                ) : (
+                  <button
+                    className={s.btnSmall}
+                    style={{ fontSize: '11px', padding: '2px 6px' }}
+                    onClick={() => setEditingRole(p => ({ ...p, [u.id]: true }))}
+                  >
+                    ✎
+                  </button>
+                )}
                 {u.status && u.status !== 'active' && (
                   <span className={s.badge} style={{ background: u.status === 'banned' ? 'crimson' : 'orange' }}>
                     {u.status}
+                  </span>
+                )}
+                <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--text-secondary)' }}>Квота:</span>
+                {editingQuota[u.id] !== undefined ? (
+                  <span style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                    <input
+                      type="number"
+                      value={editingQuota[u.id]}
+                      onChange={(e) => setEditingQuota((p) => ({ ...p, [u.id]: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveQuota(u.id) }}
+                      style={{ width: '60px', fontSize: '12px' }}
+                      min="0"
+                      step="1"
+                    />
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>МБ</span>
+                    <button onClick={() => void handleSaveQuota(u.id)} style={{ fontSize: '11px', padding: '2px 6px' }}>✓</button>
+                    <button onClick={() => setEditingQuota((p) => { const n = {...p}; delete n[u.id]; return n })} style={{ fontSize: '11px', padding: '2px 4px' }}>✕</button>
+                  </span>
+                ) : (
+                  <span
+                    style={{ cursor: 'pointer', fontSize: '12px' }}
+                    title="Нажмите для редактирования"
+                    onClick={() => setEditingQuota((p) => ({
+                      ...p,
+                      [u.id]: u.quotaBytes ? String(Math.round((u.quotaBytes / 1024 / 1024) * 10) / 10) : '0'
+                    }))}
+                  >
+                    {u.quotaBytes ? `${Math.round(u.quotaBytes / 1024 / 1024)} МБ` : '∞'}
+                    {u.usedBytes ? ` / ${Math.round(u.usedBytes / 1024 / 1024)} МБ` : ''}
                   </span>
                 )}
               </div>
@@ -392,6 +559,137 @@ export default function AdminPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {!loading && tab === 'settings' && (
+        <div style={{ padding: '1rem', maxWidth: '400px' }}>
+          <h3 style={{ marginBottom: '1rem' }}>Настройки хранилища</h3>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+            Хранить медиа (дней)
+          </label>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+            0 — бессрочно
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <input
+              type="number"
+              min="0"
+              value={retentionInput}
+              onChange={(e) => setRetentionInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRetention() }}
+              style={{ width: '80px', padding: '0.375rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-input, var(--bg-secondary))', color: 'var(--text-primary)' }}
+            />
+            <span style={{ fontSize: '0.875rem' }}>дней</span>
+            <button
+              onClick={() => void handleSaveRetention()}
+              style={{ padding: '0.375rem 0.75rem', borderRadius: '6px', background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}
+            >
+              Сохранить
+            </button>
+          </div>
+          {retentionDays > 0 && (
+            <p style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+              Текущее значение: {retentionDays} дн.
+            </p>
+          )}
+
+          <label style={{ display: 'block', marginTop: '1.5rem', marginBottom: '0.5rem', fontWeight: 500 }}>
+            Макс. участников в группе
+          </label>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+            0 — без ограничений
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <input
+              type="number"
+              min="0"
+              value={maxGroupMembersInput}
+              onChange={(e) => setMaxGroupMembersInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveMaxGroupMembers() }}
+              style={{ width: '80px', padding: '0.375rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-input, var(--bg-secondary))', color: 'var(--text-primary)' }}
+            />
+            <span style={{ fontSize: '0.875rem' }}>участн.</span>
+            <button
+              onClick={() => void handleSaveMaxGroupMembers()}
+              style={{ padding: '0.375rem 0.75rem', borderRadius: '6px', background: 'var(--accent)', color: '#fff', border: 'none', cursor: 'pointer' }}
+            >
+              Сохранить
+            </button>
+          </div>
+          {maxGroupMembers > 0 && (
+            <p style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+              Текущее значение: {maxGroupMembers} участн.
+            </p>
+          )}
+        </div>
+      )}
+
+      {!loading && tab === 'system' && (
+        <div style={{ padding: '1rem' }}>
+          <h3 style={{ marginBottom: '1rem' }}>Мониторинг сервера</h3>
+
+          {!sysStats && <p style={{ color: 'var(--text-secondary)' }}>Подключение...</p>}
+
+          {sysStats && (
+            <>
+              {/* CPU + RAM LineChart */}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <p style={{ fontWeight: 500, marginBottom: '0.5rem' }}>CPU / RAM, %</p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={statsHistory}>
+                    <XAxis dataKey="time" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} unit="%" />
+                    <Tooltip formatter={(v) => typeof v === 'number' ? `${v.toFixed(1)}%` : String(v ?? '')} />
+                    <Line type="monotone" dataKey="cpuPercent" stroke="#ef4444" dot={false} name="CPU" strokeWidth={2} />
+                    <Line
+                      type="monotone"
+                      dataKey={(d: StatPoint) => d.ramTotal > 0 ? Math.round(d.ramUsed / d.ramTotal * 100) : 0}
+                      stroke="#3b82f6"
+                      dot={false}
+                      name="RAM"
+                      strokeWidth={2}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Disk ProgressBar */}
+              <div style={{ marginBottom: '1rem' }}>
+                <p style={{ fontWeight: 500, marginBottom: '0.5rem' }}>
+                  Диск: {(sysStats.diskUsed / 1024 ** 3).toFixed(1)} / {(sysStats.diskTotal / 1024 ** 3).toFixed(1)} ГБ
+                </p>
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: '6px', height: '12px', overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%',
+                    width: `${sysStats.diskTotal > 0 ? Math.min(100, sysStats.diskUsed / sysStats.diskTotal * 100) : 0}%`,
+                    background: '#22c55e',
+                    borderRadius: '6px',
+                    transition: 'width 0.5s ease',
+                  }} />
+                </div>
+              </div>
+
+              {/* RAM ProgressBar */}
+              <div>
+                <p style={{ fontWeight: 500, marginBottom: '0.5rem' }}>
+                  RAM: {(sysStats.ramUsed / 1024 ** 3).toFixed(1)} / {(sysStats.ramTotal / 1024 ** 3).toFixed(1)} ГБ
+                </p>
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: '6px', height: '12px', overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%',
+                    width: `${sysStats.ramTotal > 0 ? Math.min(100, sysStats.ramUsed / sysStats.ramTotal * 100) : 0}%`,
+                    background: '#3b82f6',
+                    borderRadius: '6px',
+                    transition: 'width 0.5s ease',
+                  }} />
+                </div>
+              </div>
+
+              <p style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                CPU: {sysStats.cpuPercent.toFixed(1)}%
+              </p>
+            </>
+          )}
         </div>
       )}
     </div>

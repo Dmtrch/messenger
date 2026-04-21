@@ -71,7 +71,7 @@ export function createMessengerWSOrchestrator(deps: MessengerWSOrchestratorDeps)
     async onFrame(frame: WSFrame): Promise<void> {
       switch (frame.type) {
         case 'message': {
-          const { messageId, chatId, senderId, senderDeviceId, ciphertext, senderKeyId, timestamp, clientMsgId, replyToId } = frame
+          const { messageId, chatId, senderId, senderDeviceId, ciphertext, senderKeyId, timestamp, clientMsgId, replyToId, expiresAt } = frame
           const knownChat = deps.getKnownChat(chatId)
           if (!knownChat) {
             deps.getChats().then(async (response) => {
@@ -119,6 +119,7 @@ export function createMessengerWSOrchestrator(deps: MessengerWSOrchestratorDeps)
               encryptedPayload: ciphertext,
               senderKeyId,
               timestamp,
+              expiresAt,
               status: 'delivered',
               ...parsed,
             }
@@ -134,6 +135,7 @@ export function createMessengerWSOrchestrator(deps: MessengerWSOrchestratorDeps)
               encryptedPayload: ciphertext,
               senderKeyId: senderKeyId ?? 0,
               timestamp,
+              expiresAt,
               status: 'delivered',
               type: 'text',
               text: '[зашифровано]',

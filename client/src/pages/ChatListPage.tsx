@@ -4,10 +4,12 @@ import ChatList from '@/components/ChatList/ChatList'
 import NewChatModal from '@/components/NewChatModal/NewChatModal'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { useChatStore } from '@/store/chatStore'
+import { useServerInfoStore } from '@/store/serverInfoStore'
 import { api } from '@/api/client'
 import { loadChats } from '@/store/messageDb'
 import { tryDecryptPreview } from '@/crypto/session'
-import type { Chat } from '@/types'
+import { getServerUrl } from '@/config/serverConfig'
+import type { Chat, ServerInfo } from '@/types'
 import s from './pages.module.css'
 
 export default function ChatListPage() {
@@ -15,6 +17,24 @@ export default function ChatListPage() {
   const { subscribe } = usePushNotifications()
   const [showNewChat, setShowNewChat] = useState(false)
   const setChats = useChatStore((s) => s.setChats)
+  const allowUsersCreateGroups = useServerInfoStore((s) => s.allowUsersCreateGroups)
+  const setAllowUsersCreateGroups = useServerInfoStore((s) => s.setAllowUsersCreateGroups)
+  const setMaxUploadBytes = useServerInfoStore((s) => s.setMaxUploadBytes)
+
+  // Загрузить server info для получения настроек сервера
+  useEffect(() => {
+    fetch(`${getServerUrl()}/api/server/info`)
+      .then((r) => r.json())
+      .then((data: ServerInfo) => {
+        if (typeof data.allowUsersCreateGroups === 'boolean') {
+          setAllowUsersCreateGroups(data.allowUsersCreateGroups)
+        }
+        if (typeof data.maxUploadBytes === 'number') {
+          setMaxUploadBytes(data.maxUploadBytes)
+        }
+      })
+      .catch(() => {/* игнорируем ошибки — используем дефолты */})
+  }, [setAllowUsersCreateGroups, setMaxUploadBytes])
 
   // Загрузить чаты: сначала из IDB (мгновенно), потом фоново с сервера
   useEffect(() => {
@@ -78,6 +98,7 @@ export default function ChatListPage() {
         <NewChatModal
           onClose={() => setShowNewChat(false)}
           onChatCreated={handleChatCreated}
+          allowGroupChat={allowUsersCreateGroups}
         />
       )}
     </div>

@@ -1,0 +1,113 @@
+.container {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  gap: 4px;
+  background: #111;
+}
+
+.grid1 {
+  grid-template-columns: 1fr;
+}
+
+.grid2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.grid4 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.gridN {
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 1fr;
+}
+
+.tile {
+  position: relative;
+  background: #222;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.tileSpeaking {
+  box-shadow: 0 0 0 3px #22c55e;
+}
+
+.pinned {
+  grid-column: span 2;
+}
+
+.video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: #fff;
+  font-size: clamp(24px, 5vw, 64px);
+  font-weight: 600;
+  background: #333;
+}
+
+.overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 6px;
+  padding: 2px 4px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.pinBtn {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  border: none;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  color: #fff;
+  line-height: 1;
+}
+
+.tile:hover .pinBtn {
+  opacity: 1;
+}
+
+.qualityDot {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.qualityFair {
+  background: #eab308;
+}
+
+.qualityPoor {
+  background: #ef4444;
+}

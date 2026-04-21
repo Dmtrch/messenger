@@ -11,3 +11,9 @@
 Важно:
 
 - алгоритмы и wire-format должны оставаться совместимыми с текущей реализацией в `client/src/crypto/`.
+
+## Документы
+
+- [interfaces.md](interfaces.md) — CryptoEngine contract
+- [aes-gcm-spec.md](aes-gcm-spec.md) — AES-256-GCM spec для медиашифрования
+- [../../docs/crypto-rationale.md](../../docs/crypto-rationale.md) — Rationale криптографических решений

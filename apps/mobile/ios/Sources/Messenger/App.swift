@@ -80,56 +80,91 @@ enum AppRoute: Hashable {
 struct RootView: View {
     @EnvironmentObject var vm: AppViewModel
     @State private var navPath = NavigationPath()
+    @StateObject private var lockStore = BiometricLockStore.shared
+    @StateObject private var privacyStore = PrivacyScreenStore.shared
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var isObscured = false
 
     var body: some View {
         ZStack(alignment: .top) {
-            NavigationStack(path: $navPath) {
-                Group {
-                    if !vm.isServerConfigured {
-                        ServerSetupScreen()
-                    } else if !vm.authState.isAuthenticated {
-                        AuthScreen()
-                    } else {
-                        ChatListScreen(
-                            onChatClick: { chat in
-                                navPath.append(AppRoute.chat(id: chat.id, name: chat.name))
-                            },
-                            onNewChatClick: {
-                                navPath.append(AppRoute.newChat)
-                            }
-                        )
+            if lockStore.settings.enabled && lockStore.isLocked {
+                BiometricGateView(onUnlocked: { lockStore.unlock() })
+            } else {
+                NavigationStack(path: $navPath) {
+                    Group {
+                        if !vm.isServerConfigured {
+                            ServerSetupScreen()
+                        } else if !vm.authState.isAuthenticated {
+                            AuthScreen()
+                        } else {
+                            ChatListScreen(
+                                onChatClick: { chat in
+                                    navPath.append(AppRoute.chat(id: chat.id, name: chat.name))
+                                },
+                                onNewChatClick: {
+                                    navPath.append(AppRoute.newChat)
+                                }
+                            )
+                        }
+                    }
+                    .navigationDestination(for: AppRoute.self) { route in
+                        switch route {
+                        case .chat(let id, let name):
+                            ChatWindowScreen(chatId: id, chatName: name)
+                        case .newChat:
+                            NewChatScreen(
+                                onBack: { navPath.removeLast() },
+                                onChatCreated: { chatId in
+                                    navPath.removeLast()
+                                    let chat = vm.chatStore.chats.first(where: { $0.id == chatId })
+                                    navPath.append(AppRoute.chat(id: chatId, name: chat?.name ?? "Чат"))
+                                }
+                            )
+                        }
                     }
                 }
-                .navigationDestination(for: AppRoute.self) { route in
-                    switch route {
-                    case .chat(let id, let name):
-                        ChatWindowScreen(chatId: id, chatName: name)
-                    case .newChat:
-                        NewChatScreen(
-                            onBack: { navPath.removeLast() },
-                            onChatCreated: { chatId in
-                                navPath.removeLast()
-                                let chat = vm.chatStore.chats.first(where: { $0.id == chatId })
-                                navPath.append(AppRoute.chat(id: chatId, name: chat?.name ?? "Чат"))
-                            }
-                        )
-                    }
+
+                // CallOverlay — поверх всего навигационного стека
+                if vm.chatStore.callState.status != .idle {
+                    CallOverlay(
+                        callState: vm.chatStore.callState,
+                        onAccept:  { vm.acceptCall() },
+                        onReject:  { vm.rejectCall() },
+                        onHangUp:  { vm.hangUp() }
+                    )
+                    .environmentObject(vm)
+                    .transition(.move(edge: .bottom))
+                    .animation(.spring(), value: vm.chatStore.callState.status)
                 }
             }
-
-            // CallOverlay — поверх всего навигационного стека
-            if vm.chatStore.callState.status != .idle {
-                CallOverlay(
-                    callState: vm.chatStore.callState,
-                    onAccept:  { vm.acceptCall() },
-                    onReject:  { vm.rejectCall() },
-                    onHangUp:  { vm.hangUp() }
-                )
-                .environmentObject(vm)
-                .transition(.move(edge: .bottom))
-                .animation(.spring(), value: vm.chatStore.callState.status)
+            if privacyStore.privacyScreenEnabled && isObscured {
+                BlurOverlayView()
             }
         }
+        .onChange(of: scenePhase) { newPhase in
+            isObscured = (newPhase != .active)
+        }
+#if canImport(UIKit)
+        .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in
+            if privacyStore.privacyScreenEnabled {
+                isObscured = UIScreen.main.isCaptured
+            }
+        }
+#endif
+    }
+}
+
+// MARK: - Privacy overlay
+
+private struct BlurOverlayView: View {
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.95)
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 60))
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .ignoresSafeArea()
     }
 }
 

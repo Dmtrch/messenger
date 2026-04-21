@@ -7,7 +7,8 @@ interface AuthState {
   currentUser: User | null
   accessToken: string | null
   role: 'admin' | 'user' | null
-  login: (user: User, token: string) => void
+  deviceId: string | null
+  login: (user: User, token: string, deviceId?: string) => void
   logout: () => void
   updateUser: (patch: Partial<User>) => void
 }
@@ -19,10 +20,11 @@ export const useAuthStore = create<AuthState>()(
       currentUser: null,
       accessToken: null,
       role: null,
-      login: (user, token) =>
-        set({ isAuthenticated: true, currentUser: user, accessToken: token, role: user.role ?? 'user' }),
+      deviceId: null,
+      login: (user, token, deviceId) =>
+        set({ isAuthenticated: true, currentUser: user, accessToken: token, role: user.role ?? 'user', deviceId: deviceId ?? null }),
       logout: () =>
-        set({ isAuthenticated: false, currentUser: null, accessToken: null, role: null }),
+        set({ isAuthenticated: false, currentUser: null, accessToken: null, role: null, deviceId: null }),
       updateUser: (patch) =>
         set((s) =>
           s.currentUser ? { currentUser: { ...s.currentUser, ...patch } } : {}
@@ -35,6 +37,7 @@ export const useAuthStore = create<AuthState>()(
         currentUser: s.currentUser,
         accessToken: s.accessToken,
         role: s.role,
+        deviceId: s.deviceId,
       }),
     }
   )

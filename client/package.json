@@ -1,6 +1,6 @@
 {
   "name": "messenger-client",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,10 @@
     "lint": "eslint src --ext ts,tsx --max-warnings 0",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -21,21 +24,27 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.0",
+    "recharts": "^3.8.1",
     "zustand": "^4.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/libsodium-wrappers": "^0.7.13",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@typescript-eslint/eslint-plugin": "^7.15.0",
     "@typescript-eslint/parser": "^7.15.0",
-    "@vitejs/plugin-react": "^4.3.1",
+    "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/coverage-v8": "^4.1.4",
     "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "libsodium-wrappers-sumo": "^0.8.3",
     "typescript": "^5.5.3",
-    "vite": "^5.4.0",
-    "vite-plugin-pwa": "^0.20.5",
-    "vitest": "^2.0.0"
+    "vite": "^8.0.9",
+    "vite-plugin-pwa": "^1.2.0",
+    "vitest": "^4.1.4"
+  },
+  "overrides": {
+    "serialize-javascript": ">=7.0.5"
   }
 }

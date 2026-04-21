@@ -27,13 +27,27 @@ type Artifact struct {
 
 // Manifest is the JSON response for GET /api/downloads/manifest.
 type Manifest struct {
-	GeneratedAt time.Time  `json:"generated_at"`
-	Artifacts   []Artifact `json:"artifacts"`
+	Version          string     `json:"version"`
+	MinClientVersion string     `json:"minClientVersion"`
+	Changelog        string     `json:"changelog,omitempty"`
+	GeneratedAt      time.Time  `json:"generated_at"`
+	Artifacts        []Artifact `json:"artifacts"`
+}
+
+// VersionResponse is the JSON response for GET /api/version.
+type VersionResponse struct {
+	Version          string `json:"version"`
+	MinClientVersion string `json:"minClientVersion"`
+	BuildDate        string `json:"buildDate"`
 }
 
 // Handler serves protected binary downloads.
 type Handler struct {
-	DownloadsDir string
+	DownloadsDir     string
+	Version          string
+	MinClientVersion string
+	Changelog        string
+	BuildDate        string
 }
 
 // GetManifest — GET /api/downloads/manifest (requires auth).
@@ -43,7 +57,7 @@ func (h *Handler) GetManifest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Manifest{GeneratedAt: time.Now(), Artifacts: []Artifact{}}) //nolint:errcheck
+			json.NewEncoder(w).Encode(Manifest{Version: h.Version, MinClientVersion: h.MinClientVersion, Changelog: h.Changelog, GeneratedAt: time.Now(), Artifacts: []Artifact{}}) //nolint:errcheck
 			return
 		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -77,7 +91,17 @@ func (h *Handler) GetManifest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(Manifest{GeneratedAt: time.Now(), Artifacts: artifacts}) //nolint:errcheck
+	json.NewEncoder(w).Encode(Manifest{Version: h.Version, MinClientVersion: h.MinClientVersion, Changelog: h.Changelog, GeneratedAt: time.Now(), Artifacts: artifacts}) //nolint:errcheck
+}
+
+// ServeVersion — GET /api/version (public, no auth).
+func (h *Handler) ServeVersion(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(VersionResponse{ //nolint:errcheck
+		Version:          h.Version,
+		MinClientVersion: h.MinClientVersion,
+		BuildDate:        h.BuildDate,
+	})
 }
 
 // ServeFile — GET /api/downloads/{filename} (requires auth).

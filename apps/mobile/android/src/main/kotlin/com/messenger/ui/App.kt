@@ -4,12 +4,17 @@ package com.messenger.ui
 import android.app.Application
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import com.messenger.config.ServerConfig
 import com.messenger.service.call.AndroidVideoRendererBinding
 import com.messenger.store.CallStatus
+import com.messenger.store.UpdateCheckerStore
 import com.messenger.ui.screens.*
 import com.messenger.viewmodel.AppViewModel
 import com.messenger.viewmodel.ChatListViewModel
@@ -27,7 +32,12 @@ sealed class Screen {
 }
 
 @Composable
-fun App(application: Application) {
+fun App(
+    application: Application,
+    requiresBiometricUnlock: Boolean = false,
+    onUnlocked: () -> Unit = {},
+    onTriggerBiometric: () -> Unit = {},
+) {
     val vm: AppViewModel = viewModel(
         factory = androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.getInstance(application)
     )
@@ -36,11 +46,35 @@ fun App(application: Application) {
     val callState by vm.chatStore.call.collectAsState()
     val scope = rememberCoroutineScope()
     val rendererBinding = remember { AndroidVideoRendererBinding() }
+    val context = LocalContext.current
+
+    // Проверка обновлений: запускаем polling при наличии serverUrl
+    val updateCheckerStore = remember(ServerConfig.serverUrl) {
+        if (!ServerConfig.hasServerUrl()) return@remember null
+        val currentVersion = try {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            info.versionName ?: "1.0"
+        } catch (_: Exception) { "1.0" }
+        UpdateCheckerStore(ServerConfig.serverUrl, currentVersion)
+    }
+    LaunchedEffect(updateCheckerStore) {
+        updateCheckerStore?.startPolling()
+    }
+    val updateInfo by updateCheckerStore?.updateInfo?.collectAsState() ?: remember { mutableStateOf(null) }
+    var updateDismissed by remember { mutableStateOf(false) }
 
     var screen by remember {
         mutableStateOf<Screen>(
             if (!ServerConfig.hasServerUrl()) Screen.ServerSetup else Screen.Auth
         )
+    }
+
+    if (requiresBiometricUnlock) {
+        BiometricGateScreen(
+            onUnlocked = onUnlocked,
+            onTriggerBiometric = onTriggerBiometric,
+        )
+        return
     }
 
     MaterialTheme {
@@ -135,6 +169,30 @@ fun App(application: Application) {
                 onHangUp = { vm.hangUp() },
                 rendererBinding = if (callState.isVideo) rendererBinding else null,
                 onBindRenderers = { vm.bindVideoRenderers(rendererBinding) },
+            )
+        }
+
+        // Диалог обновления
+        val info = updateInfo
+        if (info != null && info.hasUpdate && !updateDismissed) {
+            AlertDialog(
+                onDismissRequest = { if (!info.isForced) updateDismissed = true },
+                title = { Text("Доступна версия ${info.latestVersion}") },
+                text = {
+                    if (info.isForced) Text("Требуется обязательное обновление приложения.")
+                    else Text("Доступна новая версия приложения.")
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val url = info.downloadUrl ?: return@TextButton
+                        updateCheckerStore?.downloadAndInstall(context, url)
+                    }) {
+                        Text(if (info.isForced) "Установить сейчас" else "Скачать и установить")
+                    }
+                },
+                dismissButton = if (!info.isForced) {
+                    { TextButton(onClick = { updateDismissed = true }) { Text("Позже") } }
+                } else null,
             )
         }
         } // Box

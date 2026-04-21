@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,8 +22,9 @@ type UserNotifier interface {
 }
 
 type Handler struct {
-	DB  *sql.DB
-	Hub UserNotifier // nil-safe: may be omitted in tests
+	DB                   *sql.DB
+	Hub                  UserNotifier // nil-safe: may be omitted in tests
+	DefaultMaxGroupMembers int        // глобальный дефолт из env MAX_GROUP_MEMBERS
 }
 
 // ListRegistrationRequests — GET /api/admin/registration-requests?status=pending
@@ -200,6 +202,17 @@ func (h *Handler) ListInviteActivations(w http.ResponseWriter, r *http.Request) 
 	jsonReply(w, 200, map[string]any{"activations": list})
 }
 
+type userWithQuota struct {
+	ID          string `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+	Role        string `json:"role"`
+	Status      string `json:"status"`
+	CreatedAt   int64  `json:"createdAt"`
+	QuotaBytes  int64  `json:"quotaBytes"`
+	UsedBytes   int64  `json:"usedBytes"`
+}
+
 // ListUsers — GET /api/admin/users
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := db.ListUsers(h.DB)
@@ -207,10 +220,44 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, "server error", 500)
 		return
 	}
-	if users == nil {
-		users = []db.User{}
+	result := make([]userWithQuota, 0, len(users))
+	for _, u := range users {
+		q, _ := db.GetUserQuota(h.DB, u.ID)
+		result = append(result, userWithQuota{
+			ID: u.ID, Username: u.Username, DisplayName: u.DisplayName,
+			Role: u.Role, Status: u.Status, CreatedAt: u.CreatedAt,
+			QuotaBytes: q.QuotaBytes, UsedBytes: q.UsedBytes,
+		})
 	}
-	jsonReply(w, 200, map[string]any{"users": users})
+	jsonReply(w, 200, map[string]any{"users": result})
+}
+
+// GetQuota — GET /api/admin/users/{id}/quota
+func (h *Handler) GetQuota(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	q, err := db.GetUserQuota(h.DB, userID)
+	if err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	jsonReply(w, 200, map[string]any{"quotaBytes": q.QuotaBytes, "usedBytes": q.UsedBytes})
+}
+
+// SetQuota — PUT /api/admin/users/{id}/quota
+func (h *Handler) SetQuota(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	var body struct {
+		QuotaBytes int64 `json:"quotaBytes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.QuotaBytes < 0 {
+		httpErr(w, "quotaBytes must be >= 0", 400)
+		return
+	}
+	if err := db.UpsertUserQuota(h.DB, userID, body.QuotaBytes); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ResetUserPassword — POST /api/admin/users/{id}/reset-password
@@ -316,6 +363,14 @@ func (h *Handler) UnsuspendUser(w http.ResponseWriter, r *http.Request) {
 // BanUser — POST /api/admin/users/{id}/ban
 func (h *Handler) BanUser(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
+	callerRole := auth.RoleFromCtx(r)
+	if callerRole == "moderator" {
+		target, err := db.GetUserByID(h.DB, userID)
+		if err != nil || (target.Role == "admin" || target.Role == "moderator") {
+			httpErr(w, "forbidden", 403)
+			return
+		}
+	}
 	if err := db.SetUserStatus(h.DB, userID, "banned"); err != nil {
 		httpErr(w, "server error", 500)
 		return
@@ -326,6 +381,23 @@ func (h *Handler) BanUser(w http.ResponseWriter, r *http.Request) {
 		h.Hub.DisconnectUser(userID)
 	}
 	w.WriteHeader(204)
+}
+
+// SetUserRole — PUT /api/admin/users/{id}/role
+func (h *Handler) SetUserRole(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, "bad request", 400)
+		return
+	}
+	if err := db.SetUserRole(h.DB, userID, req.Role); err != nil {
+		httpErr(w, err.Error(), 400)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // RevokeAllSessions — POST /api/admin/users/{id}/revoke-sessions
@@ -412,6 +484,69 @@ func transferKeys(database *sql.DB, userID string, req *db.RegistrationRequest) 
 		return db.InsertPreKeys(database, userID, opks)
 	}
 	return nil
+}
+
+func (h *Handler) GetRetentionSettings(w http.ResponseWriter, r *http.Request) {
+	val, err := db.GetSetting(h.DB, "media_retention_days")
+	if err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	days := 0
+	if val != "" {
+		days, _ = strconv.Atoi(val)
+	}
+	jsonReply(w, 200, map[string]any{"retentionDays": days})
+}
+
+func (h *Handler) SetRetentionSettings(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		RetentionDays int `json:"retentionDays"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.RetentionDays < 0 {
+		httpErr(w, "retentionDays must be >= 0", 400)
+		return
+	}
+	if err := db.SetSetting(h.DB, "media_retention_days", strconv.Itoa(body.RetentionDays)); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetMaxGroupMembers — GET /api/admin/settings/max-group-members
+func (h *Handler) GetMaxGroupMembers(w http.ResponseWriter, r *http.Request) {
+	val, err := db.GetSetting(h.DB, "max_group_members")
+	if err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	maxMembers := h.DefaultMaxGroupMembers
+	if maxMembers <= 0 {
+		maxMembers = 50
+	}
+	if val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			maxMembers = n
+		}
+	}
+	jsonReply(w, 200, map[string]any{"maxMembers": maxMembers})
+}
+
+// SetMaxGroupMembers — PUT /api/admin/settings/max-group-members
+func (h *Handler) SetMaxGroupMembers(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		MaxMembers int `json:"maxMembers"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.MaxMembers <= 0 {
+		httpErr(w, "maxMembers must be > 0", 400)
+		return
+	}
+	if err := db.SetSetting(h.DB, "max_group_members", strconv.Itoa(body.MaxMembers)); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

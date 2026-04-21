@@ -1,10 +1,13 @@
 package ws
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/messenger/server/db"
+	"github.com/messenger/server/internal/bots"
 	"github.com/messenger/server/internal/push"
 )
 
@@ -81,6 +85,21 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	tokenStr := r.URL.Query().Get("token")
 	deviceIDParam := r.URL.Query().Get("deviceId")
 	userID, authErr := h.verifyJWT(tokenStr)
+
+	// Fallback: если JWT отсутствует — пробуем Bot-аутентификацию.
+	if authErr != nil {
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bot ") {
+			plaintext := strings.TrimPrefix(authHeader, "Bot ")
+			sum := sha256.Sum256([]byte(plaintext))
+			hash := hex.EncodeToString(sum[:])
+			bot, err := db.GetBotByTokenHash(h.db, hash)
+			if err == nil && bot != nil && bot.Active {
+				userID = "bot:" + bot.ID
+				authErr = nil
+			}
+		}
+	}
 
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  4096,
@@ -222,6 +241,22 @@ func (h *Hub) DisconnectUser(userID string) {
 	}
 }
 
+// DisconnectDeviceOnly закрывает WS-соединение конкретного устройства пользователя.
+func (h *Hub) DisconnectDeviceOnly(userID, deviceID string) {
+	h.mu.RLock()
+	set := h.byUser[userID]
+	var toClose []*websocket.Conn
+	for c := range set {
+		if c.deviceID == deviceID {
+			toClose = append(toClose, c.conn)
+		}
+	}
+	h.mu.RUnlock()
+	for _, conn := range toClose {
+		conn.Close()
+	}
+}
+
 // BroadcastToConversation отправляет одинаковый payload всем участникам чата.
 func (h *Hub) BroadcastToConversation(convID string, payload []byte) {
 	members, err := db.GetConversationMembers(h.db, convID)
@@ -252,6 +287,31 @@ func (h *Hub) NotifyPreKeyLow(userID string) {
 	h.checkAndNotifyPrekeys(userID)
 }
 
+// StartCleaner запускает фоновую горутину, которая каждые 30 секунд удаляет
+// просроченные сообщения и рассылает участникам WS-фрейм message_expired.
+func (h *Hub) StartCleaner() {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			nowMs := time.Now().UnixMilli()
+			expired, err := db.DeleteExpiredMessages(h.db, nowMs)
+			if err != nil {
+				log.Printf("cleaner: delete expired: %v", err)
+				continue
+			}
+			for _, e := range expired {
+				payload, _ := json.Marshal(map[string]any{
+					"type":      "message_expired",
+					"messageId": e.ID,
+					"chatId":    e.ConversationID,
+				})
+				h.BroadcastToConversation(e.ConversationID, payload)
+			}
+		}
+	}()
+}
+
 // ─── Incoming message types ───────────────────────────────────────────────────
 
 type inMsg struct {
@@ -263,6 +323,7 @@ type inMsg struct {
 	SenderKeyID int64       `json:"senderKeyId"`
 	ClientMsgID string      `json:"clientMsgId"`
 	ReplyToID   string      `json:"replyToId,omitempty"`
+	TtlSeconds  int64       `json:"ttlSeconds,omitempty"` // 0 = использовать default_ttl чата
 
 	// type:"read"
 	MessageID string `json:"messageId"`
@@ -345,6 +406,18 @@ func (h *Hub) handleMessage(c *client, msg inMsg) {
 
 	now := time.Now().UnixMilli()
 
+	// Вычисляем expires_at: явный ttlSeconds из сообщения > default_ttl чата > nil.
+	var expiresAt sql.NullInt64
+	ttl := msg.TtlSeconds
+	if ttl == 0 {
+		if defTTL, ok, _ := db.GetConversationDefaultTTL(h.db, msg.ChatID); ok {
+			ttl = defTTL
+		}
+	}
+	if ttl >= 5 && ttl <= 604800 {
+		expiresAt = sql.NullInt64{Int64: now + ttl*1000, Valid: true}
+	}
+
 	for _, r := range msg.Recipients {
 		if r.UserID != c.userID {
 			member, err := db.IsConversationMember(h.db, msg.ChatID, r.UserID)
@@ -364,6 +437,7 @@ func (h *Hub) handleMessage(c *client, msg inMsg) {
 			SenderKeyID:         msg.SenderKeyID,
 			ReplyToID:           msg.ReplyToID,
 			CreatedAt:           now,
+			ExpiresAt:           expiresAt,
 		}); err != nil {
 			log.Printf("save message: %v", err)
 			continue
@@ -376,7 +450,7 @@ func (h *Hub) handleMessage(c *client, msg inMsg) {
 			deliveredMsgID = msg.ClientMsgID
 		}
 
-		payload, _ := json.Marshal(map[string]any{
+		frame := map[string]any{
 			"type":           "message",
 			"messageId":      deliveredMsgID,
 			"clientMsgId":    msg.ClientMsgID,
@@ -387,7 +461,11 @@ func (h *Hub) handleMessage(c *client, msg inMsg) {
 			"senderKeyId":    msg.SenderKeyID,
 			"timestamp":      now,
 			"replyToId":      msg.ReplyToID,
-		})
+		}
+		if expiresAt.Valid {
+			frame["expiresAt"] = expiresAt.Int64
+		}
+		payload, _ := json.Marshal(frame)
 		// Если задан deviceId получателя — доставляем только на это устройство
 		if r.DeviceID != "" {
 			h.DeliverToDevice(r.UserID, r.DeviceID, payload)
@@ -416,6 +494,31 @@ func (h *Hub) handleMessage(c *client, msg inMsg) {
 	select {
 	case c.send <- ack:
 	default:
+	}
+
+	// Доставляем webhook всем ботам-участникам чата.
+	go h.deliverBotWebhooks(msg.ChatID, c.userID, msg.ClientMsgID, now)
+}
+
+// deliverBotWebhooks находит активных ботов чата и отправляет им webhook с метаданными сообщения.
+func (h *Hub) deliverBotWebhooks(chatID, senderID, clientMsgID string, timestamp int64) {
+	activeBots, err := db.GetActiveBotsByConversation(h.db, chatID)
+	if err != nil {
+		log.Printf("deliverBotWebhooks: get bots: %v", err)
+		return
+	}
+	for _, b := range activeBots {
+		if b.WebhookURL == "" {
+			continue
+		}
+		payload, _ := json.Marshal(map[string]any{
+			"event":     "message",
+			"chatId":    chatID,
+			"senderId":  senderID,
+			"messageId": clientMsgID,
+			"timestamp": timestamp,
+		})
+		go bots.DeliverWebhook(b.WebhookURL, payload, b.TokenHash[:16])
 	}
 }
 
@@ -773,6 +876,84 @@ func (h *Hub) cleanupCallsForUser(userID string) {
 		})
 		h.Deliver(cc.peerID, end)
 	}
+}
+
+// ─── GroupCall WS frames ──────────────────────────────────────────────────────
+
+type callRoomCreatedMsg struct {
+	Type      string `json:"type"`
+	RoomID    string `json:"roomId"`
+	ChatID    string `json:"chatId"`
+	CreatorID string `json:"creatorId"`
+}
+
+type callParticipantJoinedMsg struct {
+	Type     string `json:"type"`
+	RoomID   string `json:"roomId"`
+	ChatID   string `json:"chatId"`
+	UserID   string `json:"userId"`
+	DeviceID string `json:"deviceId,omitempty"`
+}
+
+type callParticipantLeftMsg struct {
+	Type   string `json:"type"`
+	RoomID string `json:"roomId"`
+	ChatID string `json:"chatId"`
+	UserID string `json:"userId"`
+}
+
+type callTrackAddedMsg struct {
+	Type   string `json:"type"`
+	RoomID string `json:"roomId"`
+	ChatID string `json:"chatId"`
+	UserID string `json:"userId"`
+	Kind   string `json:"kind"` // "audio" | "video"
+}
+
+// BroadcastRoomCreated рассылает всем участникам чата событие создания комнаты группового звонка.
+func (h *Hub) BroadcastRoomCreated(chatID, roomID, creatorID string) {
+	payload, _ := json.Marshal(callRoomCreatedMsg{
+		Type:      "call_room_created",
+		RoomID:    roomID,
+		ChatID:    chatID,
+		CreatorID: creatorID,
+	})
+	h.BroadcastToConversation(chatID, payload)
+}
+
+// BroadcastParticipantJoined рассылает всем участникам чата событие входа в групповой звонок.
+func (h *Hub) BroadcastParticipantJoined(chatID, roomID, userID, deviceID string) {
+	payload, _ := json.Marshal(callParticipantJoinedMsg{
+		Type:     "call_participant_joined",
+		RoomID:   roomID,
+		ChatID:   chatID,
+		UserID:   userID,
+		DeviceID: deviceID,
+	})
+	h.BroadcastToConversation(chatID, payload)
+}
+
+// BroadcastParticipantLeft рассылает всем участникам чата событие выхода из группового звонка.
+func (h *Hub) BroadcastParticipantLeft(chatID, roomID, userID string) {
+	payload, _ := json.Marshal(callParticipantLeftMsg{
+		Type:   "call_participant_left",
+		RoomID: roomID,
+		ChatID: chatID,
+		UserID: userID,
+	})
+	h.BroadcastToConversation(chatID, payload)
+}
+
+// BroadcastTrackAdded рассылает всем участникам чата событие добавления медиа-трека.
+func (h *Hub) BroadcastTrackAdded(chatID, roomID, userID, kind string) {
+	payload, _ := json.Marshal(callTrackAddedMsg{
+		Type:   "call_track_added",
+		RoomID: roomID,
+		ChatID: chatID,
+		UserID: userID,
+		Kind:   kind,
+	})
+	h.BroadcastToConversation(chatID, payload)
 }
 
 func (h *Hub) errMsg(c *client, reason string) {

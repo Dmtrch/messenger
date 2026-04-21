@@ -98,6 +98,12 @@
   color: rgba(255,255,255,0.5);
 }
 
+.groupLayout {
+  position: absolute;
+  inset: 0;
+  bottom: 100px;
+}
+
 .notification {
   position: fixed;
   bottom: 24px;

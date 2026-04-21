@@ -70,6 +70,7 @@ export type {
   WSFrame,
   WSMessageDeletedFrame,
   WSMessageEditedFrame,
+  WSMessageExpiredFrame,
   WSMessageFrame,
   WSPresenceFrame,
   WSPrekeyLowFrame,
@@ -209,6 +210,8 @@ export type {
   IdentityKeyPair as BrowserIdentityKeyPair,
   RatchetSessionData as BrowserRatchetSessionData,
 } from './storage/web/browser-keystore'
+
+export { encryptAesGcm, decryptAesGcm } from './crypto/aesGcm'
 
 export { CryptoRuntime } from './crypto/crypto-runtime'
 export type {

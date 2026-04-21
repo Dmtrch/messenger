@@ -197,6 +197,187 @@ func TestRunMigrations_Migration8_DestinationDeviceID(t *testing.T) {
 	}
 }
 
+// legacySchema создаёт минимальный набор таблиц (без новых колонок/таблиц),
+// достаточный для прохождения всех миграций 1–28 на "старой" БД.
+func legacySchema(t *testing.T, db *sql.DB) {
+	t.Helper()
+	mustExec(t, db, `CREATE TABLE users (
+		id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL,
+		display_name TEXT NOT NULL, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL
+	)`)
+	mustExec(t, db, `INSERT INTO users VALUES ('u1','u1','U1','hash',1)`)
+	mustExec(t, db, `CREATE TABLE messages (
+		id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL,
+		sender_id TEXT NOT NULL, ciphertext BLOB NOT NULL, created_at INTEGER NOT NULL
+	)`)
+	mustExec(t, db, `CREATE TABLE identity_keys (
+		user_id TEXT PRIMARY KEY,
+		ik_public BLOB NOT NULL, spk_public BLOB NOT NULL,
+		spk_signature BLOB NOT NULL, spk_id INTEGER NOT NULL, updated_at INTEGER NOT NULL
+	)`)
+	mustExec(t, db, `CREATE TABLE pre_keys (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id TEXT NOT NULL, key_public BLOB NOT NULL,
+		used INTEGER NOT NULL DEFAULT 0
+	)`)
+	mustExec(t, db, `CREATE TABLE conversations (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL DEFAULT '',
+		is_group INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL
+	)`)
+	mustExec(t, db, `CREATE TABLE media_objects (
+		id TEXT PRIMARY KEY,
+		uploader_id TEXT NOT NULL,
+		filename TEXT NOT NULL,
+		original_name TEXT NOT NULL,
+		content_type TEXT NOT NULL,
+		size INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL
+	)`)
+}
+
+// TestRunMigrations_Migration24_UserQuotas: миграция #24 создаёт таблицу user_quotas.
+func TestRunMigrations_Migration24_UserQuotas(t *testing.T) {
+	db := openTestDB(t)
+	legacySchema(t, db)
+
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+
+	// Проверяем что таблица создана: INSERT + SELECT
+	_, err := db.Exec(`INSERT INTO user_quotas (user_id, quota_bytes, used_bytes) VALUES ('u1', 1000, 200)`)
+	if err != nil {
+		t.Fatalf("insert into user_quotas: %v", err)
+	}
+	var quotaBytes, usedBytes int64
+	if err := db.QueryRow(`SELECT quota_bytes, used_bytes FROM user_quotas WHERE user_id='u1'`).Scan(&quotaBytes, &usedBytes); err != nil {
+		t.Fatalf("select from user_quotas: %v", err)
+	}
+	if quotaBytes != 1000 || usedBytes != 200 {
+		t.Errorf("unexpected values: quota_bytes=%d, used_bytes=%d", quotaBytes, usedBytes)
+	}
+
+	// Идемпотентность
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("second RunMigrations (idempotency): %v", err)
+	}
+}
+
+// TestRunMigrations_Migration25_Settings: миграция #25 создаёт таблицу settings.
+func TestRunMigrations_Migration25_Settings(t *testing.T) {
+	db := openTestDB(t)
+	legacySchema(t, db)
+
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+
+	// INSERT + SELECT
+	mustExec(t, db, `INSERT INTO settings (key, value) VALUES ('site_name', 'MyMessenger')`)
+	var val string
+	if err := db.QueryRow(`SELECT value FROM settings WHERE key='site_name'`).Scan(&val); err != nil {
+		t.Fatalf("select from settings: %v", err)
+	}
+	if val != "MyMessenger" {
+		t.Errorf("unexpected value: %q", val)
+	}
+
+	// Идемпотентность
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("second RunMigrations (idempotency): %v", err)
+	}
+}
+
+// TestRunMigrations_Migration26_ModeratorMarker: миграция #26 — маркер (SELECT 1),
+// проверяем что запись появилась в schema_migrations.
+func TestRunMigrations_Migration26_ModeratorMarker(t *testing.T) {
+	db := openTestDB(t)
+
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatal("apply schema:", err)
+	}
+
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE id=26`).Scan(&count); err != nil {
+		t.Fatalf("query schema_migrations for id=26: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected migration 26 recorded, got count=%d", count)
+	}
+}
+
+// TestRunMigrations_Migration27_MaxMembers: миграция #27 добавляет колонку max_members в conversations.
+func TestRunMigrations_Migration27_MaxMembers(t *testing.T) {
+	db := openTestDB(t)
+	legacySchema(t, db)
+
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+
+	// INSERT с max_members значением
+	_, err := db.Exec(`INSERT INTO conversations (id, name, is_group, created_at, max_members) VALUES ('c1','Test',1,1,50)`)
+	if err != nil {
+		t.Fatalf("insert with max_members: %v", err)
+	}
+
+	// INSERT без max_members — DEFAULT NULL должен работать
+	_, err = db.Exec(`INSERT INTO conversations (id, name, is_group, created_at) VALUES ('c2','Direct',0,1)`)
+	if err != nil {
+		t.Fatalf("insert without max_members: %v", err)
+	}
+
+	var maxMembers *int
+	if err := db.QueryRow(`SELECT max_members FROM conversations WHERE id='c2'`).Scan(&maxMembers); err != nil {
+		t.Fatalf("select max_members: %v", err)
+	}
+	if maxMembers != nil {
+		t.Errorf("expected max_members=NULL for c2, got %v", *maxMembers)
+	}
+}
+
+// TestRunMigrations_Migration28_Bots: миграция #28 создаёт таблицу bots.
+func TestRunMigrations_Migration28_Bots(t *testing.T) {
+	db := openTestDB(t)
+
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatal("apply schema:", err)
+	}
+
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+
+	// Добавляем пользователя для FK owner_id → users(id)
+	mustExec(t, db, `INSERT INTO users (id, username, display_name, password_hash, created_at) VALUES ('u1','u1','U1','hash',1)`)
+
+	// Проверяем INSERT
+	mustExec(t, db, `INSERT INTO bots (id, name, owner_id, token_hash, webhook_url, active, created_at)
+		VALUES ('bot1','TestBot','u1','hash_abc','',1,1000)`)
+
+	// UNIQUE constraint на token_hash
+	_, err := db.Exec(`INSERT INTO bots (id, name, owner_id, token_hash, webhook_url, active, created_at)
+		VALUES ('bot2','AnotherBot','u1','hash_abc','',1,2000)`)
+	if err == nil {
+		t.Fatal("expected UNIQUE constraint violation for duplicate token_hash")
+	}
+
+	// Вторая запись с другим token_hash — должна проходить
+	mustExec(t, db, `INSERT INTO bots (id, name, owner_id, token_hash, webhook_url, active, created_at)
+		VALUES ('bot3','Bot3','u1','hash_xyz','https://example.com',1,3000)`)
+
+	// Идемпотентность
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("second RunMigrations (idempotency): %v", err)
+	}
+}
+
 func mustExec(t *testing.T, db *sql.DB, q string) {
 	t.Helper()
 	if _, err := db.Exec(q); err != nil {

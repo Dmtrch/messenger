@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import { useMessengerWS } from '@/hooks/useMessengerWS'
 import { useBrowserWSBindings } from '@/hooks/useBrowserWSBindings'
@@ -14,8 +15,12 @@ import AuthPage from '@/pages/AuthPage'
 import ServerSetupPage from '@/pages/ServerSetupPage'
 import AdminPage from '@/pages/AdminPage'
 import DownloadsPage from '@/pages/DownloadsPage'
+import LinkDevicePage from '@/pages/LinkDevicePage'
 import OfflineIndicator from '@/components/OfflineIndicator/OfflineIndicator'
 import CallOverlay from '@/components/CallOverlay/CallOverlay'
+import { useVaultStore } from '@/store/vaultStore'
+import PassphraseGate from '@/components/PassphraseGate/PassphraseGate'
+import { checkForUpdate } from '@/config/version'
 
 // Инициализируем URL сервера при загрузке модуля (если не задан — берём window.location.origin)
 initServerUrl()
@@ -28,6 +33,7 @@ interface AppRoutesProps {
 function AppRoutes({ initiateCall, handleCallFrame }: AppRoutesProps) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const role = useAuthStore((s) => s.role)
+  const isVaultUnlocked = useVaultStore((s) => s.isUnlocked)
 
   // WebSocket подключается глобально при авторизации
   const bindings = useBrowserWSBindings(handleCallFrame)
@@ -50,9 +56,15 @@ function AppRoutes({ initiateCall, handleCallFrame }: AppRoutesProps) {
       <Routes>
         <Route path="/setup" element={<ServerSetupPage />} />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/link-device" element={<LinkDevicePage />} />
         <Route path="*" element={<Navigate to="/auth" replace />} />
       </Routes>
     )
+  }
+
+  // Если аутентифицирован но vault заблокирован — показать экран разблокировки
+  if (!isVaultUnlocked) {
+    return <PassphraseGate />
   }
 
   return (
@@ -68,6 +80,14 @@ function AppRoutes({ initiateCall, handleCallFrame }: AppRoutesProps) {
 }
 
 export default function App() {
+  useEffect(() => {
+    checkForUpdate().then(({ hasUpdate, latestVersion, isForced }) => {
+      if (hasUpdate) {
+        console.log(`[update] New version available: ${latestVersion}${isForced ? ' (forced)' : ''}`)
+      }
+    })
+  }, [])
+
   const {
     initiateCall,
     acceptCall,

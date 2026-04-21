@@ -6,7 +6,8 @@
  * Обновление: полная перезапись массива (приемлемо для истории до ~200 сообщений).
  */
 
-import { get, set, createStore } from 'idb-keyval'
+import { createStore } from 'idb-keyval'
+import { encryptedSet, encryptedGet } from '../../../shared/native-core/storage/web/encryptedStore'
 import type { Message, Chat } from '@/types'
 
 const dataStore = createStore('messenger-data', 'data')
@@ -14,11 +15,11 @@ const dataStore = createStore('messenger-data', 'data')
 // ── Сообщения ────────────────────────────────────────────────
 
 export async function saveMessages(chatId: string, msgs: Message[]): Promise<void> {
-  await set(`messages:${chatId}`, msgs, dataStore)
+  await encryptedSet(`messages:${chatId}`, msgs, dataStore)
 }
 
 export async function loadMessages(chatId: string): Promise<Message[]> {
-  return (await get<Message[]>(`messages:${chatId}`, dataStore)) ?? []
+  return (await encryptedGet<Message[]>(`messages:${chatId}`, dataStore)) ?? []
 }
 
 /**
@@ -50,12 +51,23 @@ export async function updateMessageStatusInDb(
   await saveMessages(chatId, updated)
 }
 
+/**
+ * Удалить одно сообщение из IDB по id или clientMsgId.
+ */
+export async function deleteMessageFromDb(chatId: string, msgId: string): Promise<void> {
+  const msgs = await loadMessages(chatId)
+  const filtered = msgs.filter((m) => m.id !== msgId && m.clientMsgId !== msgId)
+  if (filtered.length !== msgs.length) {
+    await saveMessages(chatId, filtered)
+  }
+}
+
 // ── Чаты ─────────────────────────────────────────────────────
 
 export async function saveChats(chats: Chat[]): Promise<void> {
-  await set('chats', chats, dataStore)
+  await encryptedSet('chats', chats, dataStore)
 }
 
 export async function loadChats(): Promise<Chat[]> {
-  return (await get<Chat[]>('chats', dataStore)) ?? []
+  return (await encryptedGet<Chat[]>('chats', dataStore)) ?? []
 }

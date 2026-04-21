@@ -13,6 +13,8 @@ export interface ServerInfo {
   name: string
   description: string
   registrationMode: 'open' | 'invite' | 'approval'
+  allowUsersCreateGroups?: boolean
+  maxUploadBytes?: number
 }
 
 export interface Chat {
@@ -39,8 +41,10 @@ export interface Message {
   mediaKey?: string    // base64, ключ расшифровки медиафайла (из E2E payload)
   originalName?: string
   timestamp: number
+  expiresAt?: number          // Unix ms, когда сообщение должно исчезнуть
   status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
-  type: 'text' | 'image' | 'file' | 'system'
+  type: 'text' | 'image' | 'file' | 'audio' | 'system'
+  duration?: number            // длительность голосовой заметки в мс
   isEdited?: boolean
   replyToId?: string
 }
@@ -67,6 +71,7 @@ export type WSFrame =
   | { type: 'read'; chatId: string; messageId: string; userId: string }
   | { type: 'message_deleted'; chatId: string; clientMsgId: string }
   | { type: 'message_edited'; chatId: string; clientMsgId: string; ciphertext: string; editedAt: number }
+  | { type: 'message_expired'; chatId: string; messageId: string }
   | { type: 'skdm'; chatId: string; senderId: string; ciphertext: string }
   | { type: 'call_offer';    callId: string; chatId: string; callerId: string; sdp: string; isVideo: boolean }
   | { type: 'call_answer';   callId: string; sdp: string }
@@ -74,6 +79,13 @@ export type WSFrame =
   | { type: 'call_reject';   callId: string }
   | { type: 'call_busy';     callId: string }
   | { type: 'ice_candidate'; callId: string; candidate: RTCIceCandidateInit }
+
+export interface MediaGalleryItem {
+  id: string
+  originalName: string
+  size: number
+  createdAt: number
+}
 
 export type WSSendFrame =
   | { type: 'message'; chatId: string; clientMsgId: string; senderKeyId: number; recipients: Array<{ userId: string; deviceId?: string; ciphertext: string }>; replyToId?: string }

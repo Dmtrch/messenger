@@ -7,11 +7,9 @@
 
 import {
   createStore,
-  del,
-  get,
-  set,
   type UseStore,
 } from '../../../../client/node_modules/idb-keyval/dist/index.js'
+import { encryptedSet, encryptedGet, encryptedDel } from './encryptedStore'
 
 const defaultStore = createStore('messenger-keys', 'keys')
 
@@ -64,27 +62,27 @@ export function createBrowserCryptoStore() {
 function createBrowserCryptoStoreWithBackend(store: UseStore): BrowserCryptoStore {
   return {
     async saveIdentityKey(pair) {
-      await set('identity_key', pair, store)
+      await encryptedSet('identity_key', pair, store)
     },
 
     async loadIdentityKey() {
-      return get<IdentityKeyPair>('identity_key', store)
+      return encryptedGet<IdentityKeyPair>('identity_key', store)
     },
 
     async saveSignedPreKey(pair) {
-      await set('signed_prekey', pair, store)
+      await encryptedSet('signed_prekey', pair, store)
     },
 
     async loadSignedPreKey() {
-      return get<DHKeyPair>('signed_prekey', store)
+      return encryptedGet<DHKeyPair>('signed_prekey', store)
     },
 
     async saveOneTimePreKeys(keys) {
-      await set('one_time_prekeys', keys, store)
+      await encryptedSet('one_time_prekeys', keys, store)
     },
 
     async loadOneTimePreKeys() {
-      return (await get<DHKeyPair[]>('one_time_prekeys', store)) ?? []
+      return (await encryptedGet<DHKeyPair[]>('one_time_prekeys', store)) ?? []
     },
 
     async consumeOneTimePreKey(id) {
@@ -108,59 +106,59 @@ function createBrowserCryptoStoreWithBackend(store: UseStore): BrowserCryptoStor
     },
 
     async saveRatchetSession(data) {
-      await set(`ratchet:${data.chatId}`, data, store)
+      await encryptedSet(`ratchet:${data.chatId}`, data, store)
     },
 
     async loadRatchetSession(chatId) {
-      return get<RatchetSessionData>(`ratchet:${chatId}`, store)
+      return encryptedGet<RatchetSessionData>(`ratchet:${chatId}`, store)
     },
 
     async deleteRatchetSession(chatId) {
-      await del(`ratchet:${chatId}`, store)
+      await encryptedDel(`ratchet:${chatId}`, store)
     },
 
     async saveMySenderKey(chatId, serialized) {
-      await set(`my_sender_key:${chatId}`, serialized, store)
+      await encryptedSet(`my_sender_key:${chatId}`, serialized, store)
     },
 
     async loadMySenderKey(chatId) {
-      return get<string>(`my_sender_key:${chatId}`, store)
+      return encryptedGet<string>(`my_sender_key:${chatId}`, store)
     },
 
     async deleteMySenderKey(chatId) {
-      await del(`my_sender_key:${chatId}`, store)
+      await encryptedDel(`my_sender_key:${chatId}`, store)
     },
 
     async savePeerSenderKey(chatId, senderId, serialized) {
-      await set(`peer_sender_key:${chatId}:${senderId}`, serialized, store)
+      await encryptedSet(`peer_sender_key:${chatId}:${senderId}`, serialized, store)
     },
 
     async loadPeerSenderKey(chatId, senderId) {
-      return get<string>(`peer_sender_key:${chatId}:${senderId}`, store)
+      return encryptedGet<string>(`peer_sender_key:${chatId}:${senderId}`, store)
     },
 
     async saveDeviceId(id) {
-      await set('device_id', id, store)
+      await encryptedSet('device_id', id, store)
     },
 
     async loadDeviceId() {
-      return get<string>('device_id', store)
+      return encryptedGet<string>('device_id', store)
     },
 
     async savePushSubscription(sub) {
-      await set('push_subscription', sub, store)
+      await encryptedSet('push_subscription', sub, store)
     },
 
     async loadPushSubscription() {
-      return get<PushSubscriptionJSON>('push_subscription', store)
+      return encryptedGet<PushSubscriptionJSON>('push_subscription', store)
     },
 
     async savePreKeyReplenishTime() {
-      await set('prekey_replenish_ts', Date.now(), store)
+      await encryptedSet('prekey_replenish_ts', Date.now(), store)
     },
 
     async isPreKeyReplenishOnCooldown(minIntervalMs) {
-      const ts = await get<number>('prekey_replenish_ts', store)
+      const ts = await encryptedGet<number>('prekey_replenish_ts', store)
       if (!ts) return false
       return Date.now() - ts < minIntervalMs
     },
@@ -195,9 +193,9 @@ export const isPreKeyReplenishOnCooldown =
 
 // Хранение и получение известного публичного Identity Key удалённого пользователя
 export async function saveKnownPeerIK(userId: string, ikPublic: string, store = defaultStore): Promise<void> {
-  await set(`known_ik:${userId}`, ikPublic, store)
+  await encryptedSet(`known_ik:${userId}`, ikPublic, store)
 }
 
 export async function loadKnownPeerIK(userId: string, store = defaultStore): Promise<string | undefined> {
-  return get<string>(`known_ik:${userId}`, store)
+  return encryptedGet<string>(`known_ik:${userId}`, store)
 }

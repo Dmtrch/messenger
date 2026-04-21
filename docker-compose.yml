@@ -29,6 +29,12 @@ services:
       - messenger_data:/data
     networks:
       - messenger_net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/server/info"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   # Cloudflare Tunnel (опционально)
   # Запуск: docker compose --profile cloudflare up -d

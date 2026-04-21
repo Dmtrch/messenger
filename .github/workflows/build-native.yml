@@ -256,17 +256,39 @@ jobs:
         working-directory: apps/mobile/ios
         run: swift build --product MessengerCrypto -c release
 
+# ── Server Tests ───────────────────────────────────────────────────────────────
+
+  test-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Run server tests
+        working-directory: server
+        run: go test ./... -race -coverprofile=coverage.out
+      - name: Check coverage threshold
+        working-directory: server
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
+          echo "Total coverage: ${COVERAGE}%"
+          awk -v cov="${COVERAGE}" 'BEGIN { if (cov+0 < 50) { print "Coverage too low: " cov "%"; exit 1 } }'
+
 # ── Release ────────────────────────────────────────────────────────────────────
 
   publish-release:
     needs:
+      - resolve-inputs
       - build-desktop-macos-arm64
       - build-desktop-macos-x86_64
       - build-desktop-linux
       - build-desktop-windows
       - build-android
+      - build-ios-crypto
+      - test-server
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
@@ -274,9 +296,25 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-      - name: Create GitHub Release
+      - name: Create GitHub Release (draft)
         uses: softprops/action-gh-release@v2
+        env:
+          APP_VERSION: ${{ needs.resolve-inputs.outputs.version }}
         with:
-          name: "Messenger ${{ github.ref_name }}"
-          files: artifacts/**
-          generate_release_notes: true
+          draft: true
+          name: "Messenger v${{ needs.resolve-inputs.outputs.version }}"
+          tag_name: ${{ github.ref_name }}
+          body: |
+            ## What's Changed
+
+            See [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for full details.
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | macOS (Apple Silicon) | `messenger-*-macos-arm64.dmg` |
+            | macOS (Intel)         | `messenger-*-macos-x86_64.dmg` |
+            | Linux                 | `messenger-*-linux-x86_64.deb` |
+            | Windows               | `messenger-*-windows-x86_64.msi` |
+            | Android               | `messenger-*-android-arm64.apk` |
+          files: artifacts/**/*

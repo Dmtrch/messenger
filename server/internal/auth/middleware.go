@@ -37,8 +37,17 @@ func Middleware(secret []byte) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if !strings.HasPrefix(authHeader, "Bearer ") {
-				httpErr(w, "missing token", 401)
-				return
+				// ?token= разрешён только для WebSocket и SSE-потоков,
+				// где браузер не может передать Authorization header.
+				p := r.URL.Path
+				isStreamPath := strings.HasSuffix(p, "/ws") || p == "/ws" ||
+					strings.HasSuffix(p, "/stream")
+				if q := r.URL.Query().Get("token"); q != "" && isStreamPath {
+					authHeader = "Bearer " + q
+				} else {
+					httpErr(w, "missing token", 401)
+					return
+				}
 			}
 			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 			token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
@@ -105,4 +114,16 @@ func AccountStatusMiddleware(database *sql.DB) func(http.Handler) http.Handler {
 func UserIDFromCtx(r *http.Request) string {
 	id, _ := r.Context().Value(UserIDKey).(string)
 	return id
+}
+
+// RequireAdminOrModerator разрешает доступ только администраторам и модераторам.
+func RequireAdminOrModerator(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		role := RoleFromCtx(r)
+		if role != "admin" && role != "moderator" {
+			httpErr(w, "forbidden", 403)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

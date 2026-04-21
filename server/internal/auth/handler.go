@@ -45,8 +45,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, "invalid body", 400)
 		return
 	}
-	if len(req.Username) < 3 || len(req.Password) < 8 {
-		httpErr(w, "username>=3 chars, password>=8 chars", 400)
+	if len(req.Username) < 3 || len(req.Username) > 64 || len(req.Password) < 8 || len(req.Password) > 128 {
+		httpErr(w, "username 3-64 chars, password 8-128 chars", 400)
 		return
 	}
 
@@ -349,8 +349,8 @@ func (h *Handler) RequestRegister(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, "invalid body", 400)
 		return
 	}
-	if len(req.Username) < 3 || len(req.Password) < 8 {
-		httpErr(w, "username>=3 chars, password>=8 chars", 400)
+	if len(req.Username) < 3 || len(req.Username) > 64 || len(req.Password) < 8 || len(req.Password) > 128 {
+		httpErr(w, "username 3-64 chars, password 8-128 chars", 400)
 		return
 	}
 
@@ -427,6 +427,129 @@ func saveKeys(database *sql.DB, userID string, ik, spk, spkSig []byte, spkID int
 		return db.InsertPreKeys(database, userID, opks)
 	}
 	return nil
+}
+
+// DeviceLinkRequest генерирует одноразовый токен привязки нового устройства (TTL 120 с).
+// Требует авторизации: вызывается с основного устройства, которое показывает QR-код.
+func (h *Handler) DeviceLinkRequest(w http.ResponseWriter, r *http.Request) {
+	userID := UserIDFromCtx(r)
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	token := hex.EncodeToString(raw)
+	expiresAt := time.Now().Add(120 * time.Second).UnixMilli()
+	if err := db.SaveDeviceLinkToken(h.DB, db.DeviceLinkToken{
+		Token:     token,
+		UserID:    userID,
+		ExpiresAt: expiresAt,
+	}); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	jsonReply(w, 200, map[string]any{"token": token, "expiresAt": expiresAt})
+}
+
+// DeviceLinkActivate активирует токен привязки: регистрирует новое устройство и выдаёт JWT.
+// Не требует авторизации — это точка входа для нового устройства.
+func (h *Handler) DeviceLinkActivate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token        string `json:"token"`
+		DeviceName   string `json:"deviceName"`
+		IKPublic     string `json:"ikPublic"`
+		SPKId        int    `json:"spkId"`
+		SPKPublic    string `json:"spkPublic"`
+		SPKSignature string `json:"spkSignature"`
+		OPKPublics   []struct {
+			ID  int    `json:"id"`
+			Key string `json:"key"`
+		} `json:"opkPublics"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, "invalid body", 400)
+		return
+	}
+	if req.Token == "" || req.DeviceName == "" {
+		httpErr(w, "token and deviceName required", 400)
+		return
+	}
+
+	t, err := db.GetDeviceLinkToken(h.DB, req.Token)
+	if err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	if t == nil {
+		httpErr(w, "invalid token", 404)
+		return
+	}
+	if t.Used {
+		httpErr(w, "token already used", 410)
+		return
+	}
+	if time.Now().UnixMilli() > t.ExpiresAt {
+		httpErr(w, "token expired", 410)
+		return
+	}
+	if err := db.MarkDeviceLinkTokenUsed(h.DB, req.Token); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+
+	user, err := db.GetUserByID(h.DB, t.UserID)
+	if err != nil || user == nil {
+		httpErr(w, "user not found", 404)
+		return
+	}
+
+	deviceID := uuid.New().String()
+	now := time.Now().UnixMilli()
+	if err := db.UpsertDevice(h.DB, db.Device{
+		ID:         deviceID,
+		UserID:     t.UserID,
+		DeviceName: req.DeviceName,
+		CreatedAt:  now,
+		LastSeenAt: now,
+	}); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+
+	ik, _ := base64.StdEncoding.DecodeString(req.IKPublic)
+	spk, _ := base64.StdEncoding.DecodeString(req.SPKPublic)
+	spkSig, _ := base64.StdEncoding.DecodeString(req.SPKSignature)
+	if err := db.UpsertIdentityKey(h.DB, db.IdentityKey{
+		UserID:       t.UserID,
+		DeviceID:     deviceID,
+		IKPublic:     ik,
+		SPKPublic:    spk,
+		SPKSignature: spkSig,
+		SPKId:        req.SPKId,
+		UpdatedAt:    now,
+	}); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+
+	if len(req.OPKPublics) > 0 {
+		opks := make([][]byte, len(req.OPKPublics))
+		for i, o := range req.OPKPublics {
+			opks[i], _ = base64.StdEncoding.DecodeString(o.Key)
+		}
+		if _, err := db.InsertPreKeysForDevice(h.DB, t.UserID, deviceID, opks); err != nil {
+			httpErr(w, "server error", 500)
+			return
+		}
+	}
+
+	resp, err := h.issueTokens(w, r, t.UserID, user.Username, user.DisplayName, user.Role)
+	if err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	resp["deviceId"] = deviceID
+	jsonReply(w, 200, resp)
 }
 
 func sha256hex(s string) string {

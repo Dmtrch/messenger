@@ -1,167 +1,111 @@
 # Messenger
 
-Self-hosted messenger with E2E encryption, installable PWA client, Go backend, and a shared foundation for future native apps.
+Self-hosted end-to-end encrypted chat with a PWA client, Go backend, and native app foundation for desktop and mobile.
 
-The repository currently contains:
+![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go) ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react) ![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6?logo=typescript) ![SQLite](https://img.shields.io/badge/SQLite-embedded-003B57?logo=sqlite) ![License](https://img.shields.io/badge/license-MIT-green)
 
-- `server/` — Go API + WebSocket server with SQLite, media storage, push notifications, admin flows, and ICE configuration for calls
-- `client/` — React/Vite PWA with Signal-style crypto, offline queues, push notifications, server setup flow, admin UI, and browser WebRTC call handling
-- `shared/` — protocol contracts, domain docs, test vectors, and `shared/native-core` for future desktop/mobile clients
-- `apps/` — native app foundation directories for desktop and mobile tracks
+---
 
-## Tech Stack
+## Features
 
-| Layer | Stack |
-|------|-------|
-| Backend | Go 1.22, Chi, Gorilla WebSocket, SQLite (`modernc.org/sqlite`), JWT |
-| Web client | React 18, Vite 5, TypeScript, Zustand, libsodium, Vite PWA |
-| Push | Web Push VAPID |
-| Calls | Browser WebRTC + server ICE config endpoint |
-| Shared contracts | TypeScript package + JSON schemas + test vectors |
+- **E2E Encryption** — Signal-style X3DH key exchange + double ratchet; PWA passphrase vault (AES-256-GCM, PBKDF2 600k iterations)
+- **Encrypted Media** — media blobs encrypted at rest, auto-revoke URLs after 60 seconds
+- **Registration Modes** — open / invite-only (QR codes + TTL) / admin-approval; roles: admin / moderator / user
+- **Strong Auth** — JWT + Argon2id passwords; lazy bcrypt → Argon2id migration; TLS 1.3 enforced
+- **Account Safety** — Kill Switch, Suspend, Ban + Remote Wipe via WebSocket
+- **Disappearing Messages** — per-chat TTL (5 min / 1 h / 1 d / 1 week) with real-time countdown
+- **Multi-Device Pairing** — QR-code device pairing + per-device management
+- **Group & Video Calls** — WebRTC SFU (pion), grid UI, voice activity detection
+- **Voice Notes** — in-chat audio recording (audio/webm+opus) with waveform preview
+- **Media Gallery** — built-in lightbox gallery per chat
+- **Bot API** — webhooks, HMAC-SHA256 signatures, rate-limiting, token rotation
+- **Biometrics / Screen Lock** — Android BiometricPrompt, iOS LAContext, Desktop PIN; screenshot block (FLAG_SECURE / blur overlay)
+- **Admin Controls** — disk quotas, media retention policy, group member limits, `AllowUsersCreateGroups` flag
+- **Monitoring** — CPU / RAM / disk dashboard (gopsutil + SSE + recharts)
+- **Native Apps + Auto-Update** — desktop (DMG / DEB / MSI) and mobile (APK / IPA) with auto-update and CI builds
 
-## Repository Layout
+---
 
-```text
-messenger/
-├── client/                 # PWA клиент
-├── server/                 # Go сервер
-├── shared/                 # общие контракты, схемы и test vectors
-├── apps/                   # foundation для desktop/mobile native клиентов
-├── docs/                   # архитектура, спецификации, планы
-├── docker-compose.yml      # контейнерный запуск сервера
-└── .env.example            # пример переменных окружения
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     Clients                             │
+│  PWA (React/Vite)  │  Desktop (Compose)  │  Mobile     │
+│                    │                     │ (Android /  │
+│  libsodium crypto  │                     │   iOS)      │
+└────────┬───────────┴──────────┬──────────┴──────┬───────┘
+         │  REST + WebSocket    │  shared/         │
+         │  (HTTPS / WSS)       │  native-core     │
+┌────────▼──────────────────────▼──────────────────▼───────┐
+│                    Go Backend (server/)                   │
+│  Chi router · Gorilla WebSocket · JWT auth               │
+│  X3DH key exchange · WebRTC SFU (pion)                   │
+│  Web Push VAPID · Bot API · Admin API                    │
+│  Media storage · Monitoring SSE                          │
+│  SQLite (modernc.org/sqlite)                             │
+└──────────────────────────────────────────────────────────┘
 ```
 
-More specifically:
+### Repository layout
 
-- `server/cmd/server/` — entrypoint, config loading, route registration, call ICE helpers
-- `server/internal/auth` — login, refresh, logout, password change, registration request flow
-- `server/internal/admin` — approval of registration requests, invite codes, user management, password reset requests
-- `server/internal/chat` — chats, messages, read markers, edit/delete
-- `server/internal/keys` — device key registration and prekey bundle delivery
-- `server/internal/push` — VAPID public key and push subscription handling
-- `server/internal/ws` — realtime transport and call signaling
-- `client/src/pages` — auth, server setup, chats, profile, admin pages
-- `client/src/crypto` — X3DH, ratchet, sender key, keystore
-- `client/src/store` — auth/chat/call/ws/offline persistence
-- `shared/native-core` — shared runtime API boundary for future native clients
+```
+messenger/
+├── server/          # Go API + WebSocket server
+│   ├── cmd/server/  # Entry point, config, route registration
+│   └── internal/    # auth, chat, ws, media, admin, bot, push, calls…
+├── client/          # React/Vite PWA
+│   └── src/         # pages, components, crypto, store, hooks
+├── shared/
+│   ├── native-core/ # Platform-neutral TS runtime for native clients
+│   ├── protocol/    # REST/WS API contracts & JSON schemas
+│   ├── crypto-contracts/ # E2E encryption specs
+│   └── test-vectors/    # Crypto validation data
+├── apps/
+│   ├── desktop/     # Kotlin Multiplatform + Compose Desktop
+│   └── mobile/      # Android (Kotlin/Compose) + iOS (SwiftUI)
+└── docs/            # Architecture, specs, plans
+```
 
-## Current Product Scope
-
-What is already reflected in code:
-
-- self-hosted Go server serving API, WebSocket, and embedded static client assets
-- PWA client with installable shell and server selection screen
-- JWT auth with refresh flow and `httpOnly` cookie refresh endpoint
-- registration modes from server config: `open`, `invite`, `request`
-- admin panel for approving registrations, creating invite codes, resetting passwords, and resolving password reset requests
-- direct and group chats, message history, edit/delete, read markers
-- device key registration and prekey upload for E2E bootstrap
-- browser push notifications using VAPID
-- browser call flow using WebRTC helpers and `/api/calls/ice-servers`
-- shared protocol/contracts and test vectors prepared for native tracks
-
-Important limitation: media files are uploaded and served by the backend, but the current README should not imply that media binaries are already end-to-end encrypted at rest unless you verify and implement that behavior explicitly.
-
-## Configuration
-
-Server config is loaded in this priority order:
-
-`environment variables` > `server/cmd/server/config.yaml` (if present as `config.yaml` near the binary working dir) > built-in defaults
-
-### Main environment variables
-
-| Variable | Purpose | Default |
-|---------|---------|---------|
-| `JWT_SECRET` | JWT signing secret, required | none |
-| `PORT` | HTTP/TLS listen port | `8080` |
-| `DB_PATH` | SQLite database path | `./messenger.db` |
-| `MEDIA_DIR` | uploaded media directory | `./media` |
-| `ALLOWED_ORIGIN` | CORS and WebSocket origin check | empty |
-| `TLS_CERT` / `TLS_KEY` | direct TLS certificate paths | empty |
-| `BEHIND_PROXY` | trust reverse proxy deployment mode | `false` |
-| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | push keys | auto-generated if empty |
-| `STUN_URL` | default STUN server | `stun:stun.l.google.com:19302` |
-| `TURN_URL` | optional TURN server URL | empty |
-| `TURN_SECRET` | shared secret for TURN credentials | empty |
-| `TURN_CREDENTIAL_TTL` | TTL for TURN credentials | `86400` |
-| `SERVER_NAME` | public server name for setup screen | `Messenger` |
-| `SERVER_DESCRIPTION` | public server description | empty |
-| `REGISTRATION_MODE` | `open`, `invite`, or `request` | `open` |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | bootstrap admin on first run | empty |
-
-For Docker-based setup, start from the root `.env.example`.
+---
 
 ## Quick Start
 
-### Option 1: Local development
-
-1. Start the backend:
-
-```bash
-cd server
-go run ./cmd/server
-```
-
-2. In a second terminal start the PWA:
-
-```bash
-cd client
-npm install
-npm run dev
-```
-
-3. Open `http://localhost:5173`.
-   The client will use `window.location.origin` by default, but it also has a dedicated `/setup` flow where you can point it to another Messenger server via `/api/server/info`.
-
-### Option 2: Docker
+### Option 1: Docker (recommended)
 
 ```bash
 cp .env.example .env
-# заполните JWT_SECRET и при необходимости остальные параметры
-
+# Set at minimum: JWT_SECRET=<your-secret>
 docker compose up --build
 ```
 
-Default exposed address:
+Open `http://localhost:8080`.
 
-- `http://localhost:8080`
-
-Optional Cloudflare Tunnel profile:
+Optional — Cloudflare Tunnel sidecar:
 
 ```bash
 docker compose --profile cloudflare up -d
 ```
 
-## Build and Validation
-
-### Client
+### Option 2: Local development
 
 ```bash
+# Terminal 1 — backend
+cd server
+go run ./cmd/server
+
+# Terminal 2 — web client
 cd client
 npm install
 npm run dev
-npm run build
-npm run lint
-npm run type-check
-npm run test
 ```
 
-### Server
+Open `http://localhost:5173`. Use the `/setup` screen to point the client at any running Messenger server.
+
+### Embedded build (single binary)
 
 ```bash
-cd server
-go test ./...
-go build ./...
-```
-
-### Embedded static build
-
-If you want the Go server to serve the built PWA from `server/cmd/server/static`:
-
-```bash
-cd client
-npm run build
+cd client && npm run build
 rm -rf ../server/cmd/server/static/*
 cp -R dist/. ../server/cmd/server/static/
 
@@ -170,80 +114,76 @@ go build -o ./bin/messenger ./cmd/server
 JWT_SECRET=change-me ./bin/messenger
 ```
 
-## API Surface
+---
 
-The main routes currently registered in `server/cmd/server/main.go` include:
+## Environment Variables
 
-### Public
+| Variable | Default | Purpose |
+|---|---|---|
+| `JWT_SECRET` | **required** | JWT signing key |
+| `PORT` | `8080` | HTTP/TLS listen port |
+| `DB_PATH` | `./messenger.db` | SQLite database path |
+| `MEDIA_DIR` | `./media` | Uploaded media directory |
+| `ALLOWED_ORIGIN` | — | CORS and WebSocket origin check |
+| `TLS_CERT` / `TLS_KEY` | — | Direct TLS certificate paths |
+| `BEHIND_PROXY` | `false` | Trust reverse proxy headers |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | auto-generated | Web Push keys (persist for production) |
+| `STUN_URL` | `stun:stun.l.google.com:19302` | STUN server |
+| `TURN_URL` / `TURN_SECRET` | — | TURN server (optional) |
+| `REGISTRATION_MODE` | `open` | `open` / `invite` / `request` |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | — | Bootstrap admin on first run |
+| `SERVER_NAME` | `Messenger` | Displayed on the setup screen |
 
-- `GET /api/server/info`
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `POST /api/auth/refresh`
-- `POST /api/auth/logout`
-- `POST /api/auth/request-register`
-- `POST /api/auth/password-reset-request`
-- `GET /api/push/vapid-public-key`
-- `GET /ws`
+Full list and descriptions in `.env.example`.
 
-### Authenticated
+---
 
-- `POST /api/auth/change-password`
-- `GET /api/users/search`
-- `GET /api/chats`
-- `POST /api/chats`
-- `GET /api/chats/{chatId}/messages`
-- `POST /api/chats/{chatId}/read`
-- `DELETE /api/messages/{clientMsgId}`
-- `PATCH /api/messages/{clientMsgId}`
-- `GET /api/keys/{userId}`
-- `POST /api/keys/prekeys`
-- `POST /api/keys/register`
-- `POST /api/push/subscribe`
-- `POST /api/media/upload`
-- `GET /api/media/{id}`
-- `GET /api/calls/ice-servers`
+## Build & Validation
 
-### Admin-only
+```bash
+# Client
+cd client
+npm run lint        # ESLint (zero warnings)
+npm run type-check  # TypeScript validation
+npm run test        # Vitest unit tests
+npm run build       # Production build
 
-- `GET /api/admin/registration-requests`
-- `POST /api/admin/registration-requests/{id}/approve`
-- `POST /api/admin/registration-requests/{id}/reject`
-- `POST /api/admin/invite-codes`
-- `GET /api/admin/invite-codes`
-- `GET /api/admin/users`
-- `POST /api/admin/users/{id}/reset-password`
-- `GET /api/admin/password-reset-requests`
-- `POST /api/admin/password-reset-requests/{id}/resolve`
+# Server
+cd server
+go test ./...
+go build ./...
+```
 
-## Frontend Routes
+CI produces release artifacts for all platforms (DMG, DEB, MSI, APK, IPA) via `.github/workflows/build-native.yml`.
 
-The current React app exposes these main screens:
+---
 
-- `/setup` — server connection and server info discovery
-- `/auth` — login/register flow
-- `/` — chat list
-- `/chat/:chatId` — chat window
-- `/profile` — profile/settings
-- `/admin` — admin panel, only for users with `role === 'admin'`
+## Native Apps
 
-## Native App Foundation
+`apps/` provides the foundation for native clients — not yet production-ready, but under active development:
 
-`apps/` is not a full product yet. It defines the direction for future native clients:
+- **Desktop** (`apps/desktop/`) — Kotlin Multiplatform + Compose Desktop; CI builds DMG / DEB / MSI
+- **Android** (`apps/mobile/android/`) — Kotlin + Jetpack Compose; CI builds APK
+- **iOS** (`apps/mobile/ios/`) — SwiftUI; CI builds IPA
+- **Shared core** (`shared/native-core/`) — platform-neutral TypeScript runtime reused by all native tracks
 
-- `apps/desktop` — Kotlin Multiplatform + Compose Multiplatform Desktop
-- `apps/mobile` — Android on Kotlin + Compose, iOS on SwiftUI
-- `shared/native-core` — platform-neutral runtime boundary that both native tracks can reuse
+The `/downloads` page auto-detects the visitor's OS and serves the appropriate installer.
+
+---
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — architecture overview and system decisions
-- `docs/superpowers/specs/` — feature/spec documents
-- `shared/protocol/` — REST/WS contracts and schemas
-- `shared/test-vectors/` — crypto and protocol vectors
+- [`docs/`](docs/) — architecture overviews, feature specs, plans
+- [`shared/protocol/`](shared/protocol/) — REST/WS API contracts and JSON schemas
+- [`shared/crypto-contracts/`](shared/crypto-contracts/) — E2E encryption specification
+- [`shared/test-vectors/`](shared/test-vectors/) — crypto and protocol test vectors
 
-## Notes
+---
 
-- Push subscriptions will break after restart if you rely on auto-generated VAPID keys and do not persist them.
-- If you deploy behind a reverse proxy or Cloudflare Tunnel, set `BEHIND_PROXY=true`.
-- The semantic repository shape already assumes the web client is the current production UI and native apps are an in-progress foundation, not a finished deliverable.
+## Contributing
+
+Pull requests are welcome. Please open an issue first for significant changes.
+
+## License
+
+MIT

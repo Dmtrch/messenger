@@ -23,9 +23,11 @@ type Broadcaster interface {
 }
 
 type Handler struct {
-	DB       *sql.DB
-	Hub      Broadcaster
-	MediaDir string // для удаления файлов при удалении сообщения
+	DB                     *sql.DB
+	Hub                    Broadcaster
+	MediaDir               string // для удаления файлов при удалении сообщения
+	MaxGroupMembers        int    // глобальный лимит участников группы (default 50)
+	AllowUsersCreateGroups bool   // разрешить обычным пользователям создавать группы (P3-ADM-6)
 }
 
 type ChatDTO struct {
@@ -57,6 +59,7 @@ type MessageDTO struct {
 	Delivered        bool   `json:"delivered"`
 	Read             bool   `json:"read"`
 	ReplyToID        string `json:"replyToId,omitempty"`
+	ExpiresAt        *int64 `json:"expiresAt,omitempty"`
 }
 
 // GET /api/chats — список чатов текущего пользователя
@@ -131,6 +134,17 @@ func (h *Handler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// P3-ADM-6: если создание групп отключено — разрешаем только admin/moderator
+	if req.Type == "group" && !h.AllowUsersCreateGroups {
+		role := auth.RoleFromCtx(r)
+		if role != "admin" && role != "moderator" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(403)
+			json.NewEncoder(w).Encode(map[string]string{"error": "groups_creation_disabled"}) //nolint:errcheck
+			return
+		}
+	}
+
 	memberSet := map[string]struct{}{userID: {}}
 	for _, id := range req.MemberIDs {
 		memberSet[id] = struct{}{}
@@ -138,6 +152,23 @@ func (h *Handler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	members := make([]string, 0, len(memberSet))
 	for id := range memberSet {
 		members = append(members, id)
+	}
+
+	// Для group: проверить лимит участников
+	if req.Type == "group" {
+		limit := h.MaxGroupMembers
+		if limit <= 0 {
+			limit = 50
+		}
+		if len(members) > limit {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(422)
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"error":      "group_member_limit_reached",
+				"maxMembers": limit,
+			})
+			return
+		}
 	}
 
 	// Для direct: проверить не существует ли уже чат между этими двумя
@@ -220,7 +251,7 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]MessageDTO, 0, len(msgs))
 	for _, m := range msgs {
-		result = append(result, MessageDTO{
+		dto := MessageDTO{
 			ID:               m.ID,
 			ChatID:           m.ConversationID,
 			SenderID:         m.SenderID,
@@ -230,7 +261,11 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 			Delivered:        m.DeliveredAt.Valid,
 			Read:             m.ReadAt.Valid,
 			ReplyToID:        m.ReplyToID,
-		})
+		}
+		if m.ExpiresAt.Valid {
+			dto.ExpiresAt = &m.ExpiresAt.Int64
+		}
+		result = append(result, dto)
 	}
 	reply(w, 200, map[string]any{"messages": result, "nextCursor": nextCursorID(msgs)})
 }
@@ -290,6 +325,7 @@ func (h *Handler) MarkChatRead(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/messages/{clientMsgId}
 func (h *Handler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromCtx(r)
+	callerRole := auth.RoleFromCtx(r)
 	clientMsgID := chi.URLParam(r, "clientMsgId")
 
 	// Получаем все копии, чтобы узнать chatId и проверить авторство
@@ -298,7 +334,7 @@ func (h *Handler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, "not found", 404)
 		return
 	}
-	if copies[0].SenderID != userID {
+	if copies[0].SenderID != userID && callerRole != "admin" && callerRole != "moderator" {
 		httpErr(w, "forbidden", 403)
 		return
 	}
@@ -379,6 +415,112 @@ func (h *Handler) EditMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reply(w, http.StatusOK, map[string]any{"editedAt": now})
+}
+
+const (
+	ttlMin int64 = 5       // 5 секунд — минимальный TTL
+	ttlMax int64 = 604800  // 7 дней — максимальный TTL
+)
+
+// POST /api/chats/{chatId}/ttl — установить TTL по умолчанию для чата.
+// ttlSeconds=0 отключает автоудаление. Диапазон: [5..604800].
+func (h *Handler) SetChatTTL(w http.ResponseWriter, r *http.Request) {
+	userID := auth.UserIDFromCtx(r)
+	chatID := chi.URLParam(r, "chatId")
+
+	member, err := db.IsConversationMember(h.DB, chatID, userID)
+	if err != nil || !member {
+		httpErr(w, "not found", 404)
+		return
+	}
+
+	var req struct {
+		TTLSeconds int64 `json:"ttlSeconds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpErr(w, "invalid body", 400)
+		return
+	}
+	if req.TTLSeconds != 0 && (req.TTLSeconds < ttlMin || req.TTLSeconds > ttlMax) {
+		httpErr(w, "ttlSeconds must be 0 or in range [5..604800]", 422)
+		return
+	}
+
+	if err := db.SetConversationTTL(h.DB, chatID, req.TTLSeconds); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+
+	if h.Hub != nil {
+		payload, _ := json.Marshal(map[string]any{
+			"type":       "chat_ttl_updated",
+			"chatId":     chatID,
+			"ttlSeconds": req.TTLSeconds,
+		})
+		h.Hub.BroadcastToConversation(chatID, payload)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /api/chats/{chatId}/members — добавить участника в групповой чат.
+// Тело: {"userId": "<uuid>"}
+func (h *Handler) AddMember(w http.ResponseWriter, r *http.Request) {
+	callerID := auth.UserIDFromCtx(r)
+	chatID := chi.URLParam(r, "chatId")
+
+	member, err := db.IsConversationMember(h.DB, chatID, callerID)
+	if err != nil || !member {
+		httpErr(w, "not found", 404)
+		return
+	}
+
+	var req struct {
+		UserID string `json:"userId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == "" {
+		httpErr(w, "invalid body", 400)
+		return
+	}
+
+	// Проверить лимит
+	limit := h.MaxGroupMembers
+	if limit <= 0 {
+		limit = 50
+	}
+	if convMax, ok, _ := db.GetConversationMaxMembers(h.DB, chatID); ok && convMax > 0 {
+		limit = convMax
+	}
+	count, err := db.CountConversationMembers(h.DB, chatID)
+	if err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+	if count >= limit {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(422)
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"error":      "group_member_limit_reached",
+			"maxMembers": limit,
+		})
+		return
+	}
+
+	if err := db.AddConversationMember(h.DB, chatID, req.UserID, time.Now().UnixMilli()); err != nil {
+		httpErr(w, "server error", 500)
+		return
+	}
+
+	if h.Hub != nil {
+		payload, _ := json.Marshal(map[string]any{
+			"type":   "member_added",
+			"chatId": chatID,
+			"userId": req.UserID,
+		})
+		h.Hub.BroadcastToConversation(chatID, payload)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // nextCursorID возвращает ID последнего сообщения как opaque cursor для пагинации.

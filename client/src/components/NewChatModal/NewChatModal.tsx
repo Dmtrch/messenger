@@ -7,6 +7,7 @@ import s from './NewChatModal.module.css'
 interface Props {
   onClose: () => void
   onChatCreated: (chatId: string) => void
+  allowGroupChat?: boolean
 }
 
 interface UserResult {
@@ -15,7 +16,7 @@ interface UserResult {
   displayName: string
 }
 
-export default function NewChatModal({ onClose, onChatCreated }: Props) {
+export default function NewChatModal({ onClose, onChatCreated, allowGroupChat = true }: Props) {
   const [mode, setMode] = useState<'direct' | 'group'>('direct')
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<UserResult[]>([])
@@ -130,12 +131,14 @@ export default function NewChatModal({ onClose, onChatCreated }: Props) {
           >
             Личный
           </button>
-          <button
-            className={`${s.tab} ${mode === 'group' ? s.tabActive : ''}`}
-            onClick={() => { setMode('group'); setQuery(''); setError('') }}
-          >
-            Группа
-          </button>
+          {allowGroupChat && (
+            <button
+              className={`${s.tab} ${mode === 'group' ? s.tabActive : ''}`}
+              onClick={() => { setMode('group'); setQuery(''); setError('') }}
+            >
+              Группа
+            </button>
+          )}
         </div>
 
         {/* Поле имени группы */}

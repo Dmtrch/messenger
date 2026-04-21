@@ -4,6 +4,10 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const pkg = require('./package.json') as { version: string }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -74,6 +78,11 @@ export default defineConfig({
       devOptions: { enabled: true }
     })
   ],
+  define: {
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(
+      process.env.VITE_APP_VERSION ?? pkg.version
+    ),
+  },
   resolve: {
     alias: { '@': path.resolve(__dirname, 'src') }
   },
@@ -91,6 +100,16 @@ export default defineConfig({
     // sumo-версия нужна для crypto_auth_hmacsha256, используемой в ratchet.ts
     alias: {
       'libsodium-wrappers': 'libsodium-wrappers-sumo',
+    },
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov', 'html'],
+      thresholds: {
+        lines: 60,
+        functions: 60,
+      },
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/main.tsx'],
     },
   },
 })

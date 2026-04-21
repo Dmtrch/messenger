@@ -10,6 +10,8 @@ export interface BrowserWSBindings extends Omit<
   token: string | null
   /** Флаг для guard в useEffect: не создавать WS если не аутентифицирован. */
   isAuthenticated: boolean
+  /** ID текущего устройства (из device-link flow), нужен для device_removed фрейма. */
+  currentDeviceId?: string | null
 }
 
 /**

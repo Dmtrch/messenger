@@ -15,13 +15,18 @@ import (
 	"github.com/messenger/server/db"
 	"github.com/messenger/server/internal/admin"
 	"github.com/messenger/server/internal/auth"
+	"github.com/messenger/server/internal/bots"
+	"github.com/messenger/server/internal/calls"
 	"github.com/messenger/server/internal/chat"
 	"github.com/messenger/server/internal/clienterrors"
+	"github.com/messenger/server/internal/devices"
 	"github.com/messenger/server/internal/downloads"
 	"github.com/messenger/server/internal/keys"
 	"github.com/messenger/server/internal/logger"
 	"github.com/messenger/server/internal/media"
 	secmw "github.com/messenger/server/internal/middleware"
+	"github.com/messenger/server/internal/monitoring"
+	"github.com/messenger/server/internal/sfu"
 	"github.com/messenger/server/internal/password"
 	"github.com/messenger/server/internal/push"
 	"github.com/messenger/server/internal/serverinfo"
@@ -101,6 +106,7 @@ func main() {
 
 	hub := ws.NewHub(cfg.JWTSecret, database, cfg.VAPIDPrivate, cfg.VAPIDPublic, cfg.AllowedOrigin)
 	hub.SetNativePushConfig(nativePushCfg)
+	hub.StartCleaner()
 
 	authHandler := &auth.Handler{
 		DB:               database,
@@ -108,11 +114,18 @@ func main() {
 		RegistrationMode: cfg.RegistrationMode,
 		BehindProxy:      cfg.BehindProxy,
 	}
-	adminHandler := &admin.Handler{DB: database, Hub: hub}
-	chatHandler := &chat.Handler{DB: database, Hub: hub, MediaDir: cfg.MediaDir}
-	mediaHandler := &media.Handler{MediaDir: cfg.MediaDir, DB: database}
-	downloadsHandler := &downloads.Handler{DownloadsDir: cfg.DownloadsDir}
+	adminHandler := &admin.Handler{DB: database, Hub: hub, DefaultMaxGroupMembers: cfg.MaxGroupMembers}
+	chatHandler := &chat.Handler{DB: database, Hub: hub, MediaDir: cfg.MediaDir, MaxGroupMembers: cfg.MaxGroupMembers, AllowUsersCreateGroups: cfg.AllowUsersCreateGroups}
+	mediaHandler := &media.Handler{MediaDir: cfg.MediaDir, DB: database, MaxUploadBytes: cfg.MaxUploadBytes}
+	downloadsHandler := &downloads.Handler{
+		DownloadsDir:     cfg.DownloadsDir,
+		Version:          cfg.AppVersion,
+		MinClientVersion: cfg.MinClientVersion,
+		Changelog:        cfg.AppChangelog,
+		BuildDate:        time.Now().UTC().Format(time.RFC3339),
+	}
 	media.StartOrphanCleaner(database, cfg.MediaDir)
+	media.StartRetentionCleaner(database, cfg.MediaDir)
 	usersHandler := &users.Handler{DB: database}
 	keysHandler := &keys.Handler{DB: database}
 	pushHandler := &push.Handler{
@@ -121,14 +134,22 @@ func main() {
 		VAPIDPrivate: cfg.VAPIDPrivate,
 		NativeCfg:    nativePushCfg,
 	}
+	devicesHandler := &devices.Handler{DB: database, Hub: hub}
+	callsHandler := &calls.Handler{SFU: sfu.NewManager(), Hub: hub}
+	monitoringHandler := &monitoring.Handler{}
+	botsHandler := &bots.Handler{DB: database}
 	serverinfoHandler := &serverinfo.Handler{
-		Name:             cfg.ServerName,
-		Description:      cfg.ServerDescription,
-		RegistrationMode: cfg.RegistrationMode,
+		Name:                   cfg.ServerName,
+		Description:            cfg.ServerDescription,
+		RegistrationMode:       cfg.RegistrationMode,
+		AllowUsersCreateGroups: cfg.AllowUsersCreateGroups,
+		MaxUploadBytes:         cfg.MaxUploadBytes,
 	}
 
 	// Rate limiter для auth endpoints: 20 запросов в минуту с одного IP
 	authLimiter := secmw.NewRateLimiter(20, time.Minute, cfg.BehindProxy)
+	// Rate limiter для bot endpoints: 60 запросов в минуту с одного IP
+	botLimiter := secmw.NewRateLimiter(60, time.Minute, cfg.BehindProxy)
 
 	r := chi.NewRouter()
 	r.Use(secmw.RequestLogger)
@@ -141,6 +162,7 @@ func main() {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/server/info", serverinfoHandler.ServeHTTP)
+		r.Get("/version", downloadsHandler.ServeVersion)
 		r.Post("/client-errors", clientErrorsHandler.ServeHTTP)
 
 		r.With(authLimiter.Middleware()).Post("/auth/register", authHandler.Register)
@@ -149,6 +171,7 @@ func main() {
 		r.Post("/auth/logout", authHandler.Logout)
 		r.With(authLimiter.Middleware()).Post("/auth/request-register", authHandler.RequestRegister)
 		r.With(authLimiter.Middleware()).Post("/auth/password-reset-request", authHandler.PasswordResetRequest)
+		r.With(authLimiter.Middleware()).Post("/auth/device-link-activate", authHandler.DeviceLinkActivate)
 
 		r.Get("/push/vapid-public-key", pushHandler.GetVAPIDPublicKey)
 
@@ -156,12 +179,18 @@ func main() {
 			r.Use(auth.Middleware([]byte(cfg.JWTSecret)))
 			r.Use(auth.AccountStatusMiddleware(database))
 			r.Post("/auth/change-password", authHandler.ChangePassword)
+			r.Post("/auth/device-link-request", authHandler.DeviceLinkRequest)
+
+			r.Get("/devices", devicesHandler.GetDevices)
+			r.Delete("/devices/{deviceId}", devicesHandler.DeleteDevice)
 
 			r.Get("/users/search", usersHandler.Search)
 
 			r.Get("/chats", chatHandler.ListChats)
 			r.Post("/chats", chatHandler.CreateChat)
 			r.Get("/chats/{chatId}/messages", chatHandler.ListMessages)
+			r.Post("/chats/{chatId}/ttl", chatHandler.SetChatTTL)
+			r.Post("/chats/{chatId}/members", chatHandler.AddMember)
 			r.Post("/chats/{chatId}/read", chatHandler.MarkChatRead)
 			r.Delete("/messages/{clientMsgId}", chatHandler.DeleteMessage)
 			r.Patch("/messages/{clientMsgId}", chatHandler.EditMessage)
@@ -175,11 +204,26 @@ func main() {
 
 			r.Post("/media/upload", mediaHandler.Upload)
 			r.Get("/media/{id}", mediaHandler.Serve)
+			r.Get("/chats/{chatId}/media", mediaHandler.ListChatMedia)
 
 			r.Get("/calls/ice-servers", iceServersHandler(cfg.STUNUrl, cfg.TURNUrl, cfg.TURNSecret, cfg.TURNCredTTL))
+				r.Post("/calls/room", callsHandler.CreateRoom)
+				r.Delete("/calls/room/{roomId}", callsHandler.DeleteRoom)
+				r.Get("/calls/room/{roomId}/participants", callsHandler.GetParticipants)
+				r.Post("/calls/room/{roomId}/join", callsHandler.JoinRoom)
+				r.Post("/calls/room/{roomId}/leave", callsHandler.LeaveRoom)
 
 				r.Get("/downloads/manifest", downloadsHandler.GetManifest)
 				r.Get("/downloads/{filename}", downloadsHandler.ServeFile)
+
+			r.Group(func(r chi.Router) {
+				r.Use(botLimiter.Middleware())
+				r.Post("/bots", botsHandler.CreateBot)
+				r.Get("/bots", botsHandler.ListBots)
+				r.Delete("/bots/{botId}", botsHandler.DeleteBot)
+				r.Post("/bots/{botId}/token/rotate", botsHandler.RegenerateToken)
+				r.Post("/bots/{botId}/token", botsHandler.RegenerateToken)
+			})
 
 			r.Group(func(r chi.Router) {
 				r.Use(admin.RequireAdmin)
@@ -197,8 +241,17 @@ func main() {
 				r.Post("/admin/users/{id}/ban", adminHandler.BanUser)
 				r.Post("/admin/users/{id}/revoke-sessions", adminHandler.RevokeAllSessions)
 				r.Post("/admin/users/{id}/remote-wipe", adminHandler.RemoteWipe)
+				r.Get("/admin/users/{id}/quota", adminHandler.GetQuota)
+				r.Put("/admin/users/{id}/quota", adminHandler.SetQuota)
+				r.Put("/admin/users/{id}/role", adminHandler.SetUserRole)
+				r.Get("/admin/settings/retention", adminHandler.GetRetentionSettings)
+				r.Put("/admin/settings/retention", adminHandler.SetRetentionSettings)
+				r.Get("/admin/settings/max-group-members", adminHandler.GetMaxGroupMembers)
+				r.Put("/admin/settings/max-group-members", adminHandler.SetMaxGroupMembers)
 				r.Get("/admin/password-reset-requests", adminHandler.ListPasswordResetRequests)
 				r.Post("/admin/password-reset-requests/{id}/resolve", adminHandler.ResolvePasswordResetRequest)
+				r.Get("/admin/system/stats", monitoringHandler.GetStats)
+				r.Get("/admin/system/stream", monitoringHandler.StreamStats)
 			})
 		})
 	})
@@ -269,7 +322,11 @@ func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 
 			if allow == origin || allowedOrigin == "" {
 				w.Header().Set("Access-Control-Allow-Origin", allow)
-				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				// Allow-Credentials только если явно задан разрешённый origin;
+				// при wildcard-reflect (AllowedOrigin=="") credentials не нужны — защита от CSRF.
+				if allowedOrigin != "" {
+					w.Header().Set("Access-Control-Allow-Credentials", "true")
+				}
 				w.Header().Set("Vary", "Origin")
 			}
 

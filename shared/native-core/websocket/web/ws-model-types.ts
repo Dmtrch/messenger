@@ -10,6 +10,7 @@ export const WS_MESSAGE_KINDS = [
   'text',
   'image',
   'file',
+  'audio',
   'system',
 ] as const
 
@@ -29,9 +30,11 @@ export interface RealtimeMessage {
   mediaKey?: string
   originalName?: string
   timestamp: number
+  expiresAt?: number
   status: RealtimeMessageStatus
   type: RealtimeMessageKind
   isEdited?: boolean
+  duration?: number
 }
 
 export interface RealtimeChat {

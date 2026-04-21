@@ -31,6 +31,16 @@ type Config struct {
 	RegistrationMode  string `yaml:"registration_mode"`
 	AdminUsername     string `yaml:"admin_username"`
 	AdminPassword     string `yaml:"admin_password"`
+	// Лимит участников группы (P3-ADM-5). 0 означает «не задан, использовать дефолт».
+	MaxGroupMembers int `yaml:"max_group_members"`
+	// Разрешить обычным пользователям создавать группы (P3-ADM-6). Default true.
+	AllowUsersCreateGroups bool `yaml:"allow_users_create_groups"`
+	// Максимальный размер загружаемого файла в байтах (P3-UX-3a). 0 = дефолт 100 МБ.
+	MaxUploadBytes int64 `yaml:"max_upload_bytes"`
+	// App version info (P3-UPD-1)
+	AppVersion       string `yaml:"app_version"`
+	MinClientVersion string `yaml:"min_client_version"`
+	AppChangelog     string `yaml:"app_changelog"`
 	// Native push notifications
 	FCMLegacyKey  string `yaml:"fcm_legacy_key"`  // Firebase Server Key
 	APNsKeyPath   string `yaml:"apns_key_path"`   // путь к .p8 файлу
@@ -51,6 +61,11 @@ func defaults() Config {
 		TURNCredTTL:      86400,
 		ServerName:       "Messenger",
 		RegistrationMode: "open",
+		MaxGroupMembers:        50,
+		AllowUsersCreateGroups: true,
+		MaxUploadBytes:         100 << 20, // 100 МБ
+		AppVersion:             "dev",
+		MinClientVersion:       "0.0.0",
 	}
 }
 
@@ -146,6 +161,28 @@ func loadConfig(path string) (Config, error) {
 	}
 	if v := os.Getenv("APNS_SANDBOX"); v != "" {
 		cfg.APNsSandbox = v == "true"
+	}
+	if v := os.Getenv("MAX_GROUP_MEMBERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.MaxGroupMembers = n
+		}
+	}
+	if v := os.Getenv("ALLOW_USERS_CREATE_GROUPS"); v != "" {
+		cfg.AllowUsersCreateGroups = v == "true"
+	}
+	if v := os.Getenv("MAX_UPLOAD_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			cfg.MaxUploadBytes = n
+		}
+	}
+	if v := os.Getenv("APP_VERSION"); v != "" {
+		cfg.AppVersion = v
+	}
+	if v := os.Getenv("MIN_CLIENT_VERSION"); v != "" {
+		cfg.MinClientVersion = v
+	}
+	if v := os.Getenv("APP_CHANGELOG"); v != "" {
+		cfg.AppChangelog = v
 	}
 
 	return cfg, nil

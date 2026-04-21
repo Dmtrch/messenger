@@ -28,7 +28,9 @@ var migrations = []Migration{
 	// Migration 7: меняем PK identity_keys с user_id на (user_id, device_id).
 	// SQLite не поддерживает ALTER TABLE для смены PK — пересоздаём таблицу.
 	{ID: 7, Steps: []string{
-		`CREATE TABLE identity_keys_new (
+		// IF NOT EXISTS защищает от повторного запуска если транзакция упала
+		// после CREATE, но до RENAME (промежуточное состояние).
+		`CREATE TABLE IF NOT EXISTS identity_keys_new (
 			user_id       TEXT NOT NULL,
 			device_id     TEXT NOT NULL DEFAULT '',
 			ik_public     BLOB NOT NULL,
@@ -118,6 +120,32 @@ var migrations = []Migration{
 	{ID: 19, SQL: `ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended','banned'))`},
 	// Migration 20 (P1-SEC-2): эпоха сессии для отзыва всех токенов.
 	{ID: 20, SQL: `ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0`},
+	// Migration 21 (P2-EPH-1a): срок жизни конкретного сообщения (UnixMilli, NULL = бессрочно).
+	{ID: 21, SQL: `ALTER TABLE messages ADD COLUMN expires_at INTEGER`},
+	// Migration 22 (P2-EPH-1a): TTL по умолчанию для чата (секунды, NULL = выкл).
+	{ID: 22, SQL: `ALTER TABLE conversations ADD COLUMN default_ttl INTEGER`},
+	// Migration 23 (P2-MD-1): токены привязки нового устройства (device-link QR pairing).
+	{ID: 23, SQL: `CREATE TABLE IF NOT EXISTS device_link_tokens (
+		token      TEXT PRIMARY KEY,
+		user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		expires_at INTEGER NOT NULL,
+		used       INTEGER NOT NULL DEFAULT 0
+	)`},
+	{ID: 24, SQL: `CREATE TABLE IF NOT EXISTS user_quotas (
+    user_id    TEXT PRIMARY KEY,
+    quota_bytes INTEGER NOT NULL DEFAULT 0,
+    used_bytes  INTEGER NOT NULL DEFAULT 0
+)`},
+	{ID: 25, SQL: `CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+)`},
+	// Migration 26 (P3-ADM-4): маркер введения роли moderator.
+	{ID: 26, SQL: `SELECT 1`},
+	// Migration 27 (P3-ADM-5): лимит участников группы.
+	{ID: 27, SQL: `ALTER TABLE conversations ADD COLUMN max_members INTEGER`},
+	// Migration 28 (P3-BOT-1): таблица ботов.
+	{ID: 28, SQL: `CREATE TABLE IF NOT EXISTS bots (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, webhook_url TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL)`},
 }
 
 // RunMigrations создаёт таблицу schema_migrations и применяет все
@@ -175,8 +203,11 @@ func RunMigrations(db *sql.DB) error {
 			_ = tx.Rollback()
 			// Идемпотентность: свежие установки уже содержат колонки в schema,
 			// или ALTER TABLE на несуществующую таблицу (устаревшие тест-БД).
+			// "already exists" покрывает случай когда multi-step миграция упала
+			// на середине и промежуточная таблица (напр. identity_keys_new) уже есть.
 			idempotent := strings.Contains(execErr.Error(), "duplicate column name") ||
-				strings.Contains(execErr.Error(), "no such table")
+				strings.Contains(execErr.Error(), "no such table") ||
+				strings.Contains(execErr.Error(), "already exists")
 			if idempotent {
 				// tx уже откатана выше; INSERT записываем вне транзакции
 				if _, err2 := db.Exec(
