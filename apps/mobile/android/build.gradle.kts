@@ -1,10 +1,27 @@
 // apps/mobile/android/build.gradle.kts
+buildscript {
+    dependencies {
+        if (file("google-services.json").exists()) {
+            classpath("com.google.gms:google-services:4.4.2")
+        }
+    }
+}
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.sqldelight)
+}
+
+// Авто-подключение google-services при наличии google-services.json.
+// Пользователь кладёт файл в apps/mobile/android/ — плагин активируется, FCM начинает работать.
+// Без файла Firebase инициализируется gracefully, push-уведомления не приходят,
+// но приложение собирается и работает в остальном функционале.
+val googleServicesJson = file("google-services.json")
+if (googleServicesJson.exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }
 
 val appVersion: String = (findProperty("appVersion") as? String)?.takeIf { it.isNotBlank() } ?: "1.0.0"

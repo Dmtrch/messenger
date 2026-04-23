@@ -15,6 +15,7 @@ fun AuthScreen(
     serverUrl: String,
     onLogin: suspend (username: String, password: String) -> Result<Unit>,
     onChangeServer: () -> Unit,
+    onLinkDevice: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var username by remember { mutableStateOf("") }
@@ -61,6 +62,10 @@ fun AuthScreen(
         ) {
             if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             else Text("Войти")
+        }
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = onLinkDevice, enabled = !loading) {
+            Text("Привязать это устройство по токену")
         }
     }
 }

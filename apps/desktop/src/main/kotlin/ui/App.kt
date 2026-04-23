@@ -28,10 +28,13 @@ sealed class Screen {
     object BiometricGate : Screen()
     object ServerSetup : Screen()
     object Auth : Screen()
+    object LinkDevice : Screen()
     object ChatList : Screen()
     data class ChatWindow(val chatId: String) : Screen()
     object Profile : Screen()
     object NewChat : Screen()
+    object Downloads : Screen()
+    object Admin : Screen()
 }
 
 @Composable
@@ -40,6 +43,7 @@ fun App() {
     val authState by vm.authState.collectAsState()
     val chats by vm.chatStore.chats.collectAsState()
     val callState by vm.chatStore.call.collectAsState()
+    val callError by vm.chatStore.callError.collectAsState()
     val scope = rememberCoroutineScope()
     val privacyEnabled by PrivacyScreenStore.enabled.collectAsState()
     val windowFocused = LocalWindowInfo.current.isWindowFocused
@@ -82,6 +86,17 @@ fun App() {
                     serverUrl = ServerConfig.serverUrl,
                     onLogin = { username, password -> vm.login(username, password) },
                     onChangeServer = { screen = Screen.ServerSetup },
+                    onLinkDevice = { screen = Screen.LinkDevice },
+                )
+            }
+            Screen.LinkDevice -> {
+                LaunchedEffect(authState.isAuthenticated) {
+                    if (authState.isAuthenticated) screen = Screen.ChatList
+                }
+                LinkDeviceScreen(
+                    serverUrl = ServerConfig.serverUrl,
+                    onActivate = { token, deviceName -> vm.activateDeviceLink(token, deviceName) },
+                    onBack = { screen = Screen.Auth },
                 )
             }
             Screen.ChatList -> {
@@ -134,6 +149,16 @@ fun App() {
                 onBack = { screen = Screen.ChatList },
                 onLogout = { scope.launch { vm.logout(); screen = Screen.Auth } },
                 onChangeServer = { screen = Screen.ServerSetup },
+                onDownloads = { screen = Screen.Downloads },
+                onAdmin = { screen = Screen.Admin },
+            )
+            Screen.Downloads -> DownloadsScreen(
+                apiClient = vm.apiClient,
+                onBack = { screen = Screen.Profile },
+            )
+            Screen.Admin -> AdminScreen(
+                apiClient = vm.apiClient,
+                onBack = { screen = Screen.Profile },
             )
         }
         // Оверлей звонка поверх всех экранов
@@ -152,6 +177,20 @@ fun App() {
         }
         if (privacyEnabled && !windowFocused) {
             PrivacyOverlay()
+        }
+
+        // Диалог ошибки звонка (WebRTC init failed и т.п.)
+        callError?.let { msg ->
+            AlertDialog(
+                onDismissRequest = { vm.chatStore.clearCallError() },
+                title = { Text("Ошибка звонка") },
+                text = { Text(msg) },
+                confirmButton = {
+                    TextButton(onClick = { vm.chatStore.clearCallError() }) {
+                        Text("OK")
+                    }
+                },
+            )
         }
 
         // Диалог обновления

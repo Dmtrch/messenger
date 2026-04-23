@@ -62,6 +62,25 @@ struct RegisterKeysResponse: Decodable {
     let opkIds: [Int]
 }
 
+struct OpkPublicDto: Encodable { let id: Int; let key: String }
+struct DeviceLinkActivateRequest: Encodable {
+    let token: String
+    let deviceName: String
+    let ikPublic: String
+    let spkId: Int
+    let spkPublic: String
+    let spkSignature: String
+    let opkPublics: [OpkPublicDto]
+}
+struct DeviceLinkActivateResponse: Decodable {
+    let accessToken: String
+    let userId: String
+    let username: String
+    let displayName: String?
+    let role: String?
+    let deviceId: String
+}
+
 struct DeviceBundle: Decodable {
     let deviceId: String
     let ikPublic: String
@@ -80,6 +99,118 @@ struct CreateChatResponse: Decodable { let chat: ChatSummaryDto }
 
 struct MediaUploadResponse: Decodable { let mediaId: String }
 struct MediaUploadResult { let mediaId: String; let mediaKey: String }
+
+struct DownloadArtifactDto: Decodable {
+    let platform: String
+    let arch: String
+    let format: String
+    let filename: String
+    let url: String
+    let sha256: String
+    let sizeBytes: Int64
+    enum CodingKeys: String, CodingKey {
+        case platform, arch, format, filename, url, sha256
+        case sizeBytes = "size_bytes"
+    }
+}
+struct DownloadsManifestDto: Decodable {
+    let version: String
+    let minClientVersion: String
+    let changelog: String?
+    let artifacts: [DownloadArtifactDto]
+}
+
+struct AdminUserDto: Decodable, Identifiable {
+    let id: String
+    let username: String
+    let displayName: String
+    let role: String
+    let status: String
+    enum CodingKeys: String, CodingKey {
+        case id, username, role, status
+        case displayName = "display_name"
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        username = try c.decode(String.self, forKey: .username)
+        displayName = (try? c.decode(String.self, forKey: .displayName)) ?? ""
+        role = (try? c.decode(String.self, forKey: .role)) ?? "user"
+        status = (try? c.decode(String.self, forKey: .status)) ?? "active"
+    }
+}
+struct AdminUsersResponse: Decodable { let users: [AdminUserDto] }
+
+struct AdminRegRequestDto: Decodable, Identifiable {
+    let id: String
+    let username: String
+    let displayName: String
+    let status: String
+    enum CodingKeys: String, CodingKey {
+        case id, username, status
+        case displayName = "display_name"
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        username = try c.decode(String.self, forKey: .username)
+        displayName = (try? c.decode(String.self, forKey: .displayName)) ?? ""
+        status = (try? c.decode(String.self, forKey: .status)) ?? "pending"
+    }
+}
+struct AdminRegRequestsResponse: Decodable { let requests: [AdminRegRequestDto] }
+
+struct AdminResetRequestDto: Decodable, Identifiable {
+    let id: String
+    let userId: String
+    let username: String
+    let status: String
+    enum CodingKeys: String, CodingKey {
+        case id, username, status
+        case userId = "user_id"
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        userId = (try? c.decode(String.self, forKey: .userId)) ?? ""
+        username = (try? c.decode(String.self, forKey: .username)) ?? ""
+        status = (try? c.decode(String.self, forKey: .status)) ?? "pending"
+    }
+}
+struct AdminResetRequestsResponse: Decodable { let requests: [AdminResetRequestDto] }
+
+struct AdminInviteCodeDto: Decodable, Identifiable {
+    let code: String
+    let createdBy: String
+    let usedBy: String
+    let usedAt: Int64
+    let expiresAt: Int64
+    let revokedAt: Int64
+    let createdAt: Int64
+    var id: String { code }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        code = try c.decode(String.self, forKey: .code)
+        createdBy = (try? c.decode(String.self, forKey: .createdBy)) ?? ""
+        usedBy    = (try? c.decode(String.self, forKey: .usedBy)) ?? ""
+        usedAt    = (try? c.decode(Int64.self, forKey: .usedAt)) ?? 0
+        expiresAt = (try? c.decode(Int64.self, forKey: .expiresAt)) ?? 0
+        revokedAt = (try? c.decode(Int64.self, forKey: .revokedAt)) ?? 0
+        createdAt = (try? c.decode(Int64.self, forKey: .createdAt)) ?? 0
+    }
+    enum CodingKeys: String, CodingKey { case code, createdBy, usedBy, usedAt, expiresAt, revokedAt, createdAt }
+}
+struct AdminInviteCodesResponse: Decodable { let codes: [AdminInviteCodeDto] }
+struct AdminRetentionDto: Decodable { let retentionDays: Int }
+struct AdminMaxMembersDto: Decodable { let maxMembers: Int }
+
+struct AdminSystemStatsDto: Decodable {
+    let cpuPercent: Double
+    let ramUsed: Int64
+    let ramTotal: Int64
+    let diskUsed: Int64
+    let diskTotal: Int64
+}
 
 // MARK: - Errors
 
@@ -128,6 +259,23 @@ actor ApiClient {
     func logout() async throws {
         _ = try? await post("/api/auth/logout", body: EmptyBody(), authenticated: true) as EmptyBody?
         tokenStore.clear()
+    }
+
+    func activateDeviceLink(_ req: DeviceLinkActivateRequest) async throws -> DeviceLinkActivateResponse {
+        let resp: DeviceLinkActivateResponse = try await post("/api/auth/device-link-activate",
+                                                              body: req, authenticated: false)
+        tokenStore.save(accessToken: resp.accessToken)
+        return resp
+    }
+
+    func changePassword(currentPassword: String, newPassword: String) async throws {
+        struct Body: Encodable {
+            let currentPassword: String
+            let newPassword: String
+        }
+        _ = try await post("/api/auth/change-password",
+                           body: Body(currentPassword: currentPassword, newPassword: newPassword),
+                           authenticated: true) as EmptyBody?
     }
 
     // MARK: - Chats
@@ -219,6 +367,132 @@ actor ApiClient {
             throw ApiError.decryptionFailed
         }
         return Data(plain)
+    }
+
+    // MARK: - Admin API
+
+    func adminListUsers() async throws -> [AdminUserDto] {
+        let r: AdminUsersResponse = try await get("/api/admin/users"); return r.users
+    }
+    func adminListRegistrationRequests() async throws -> [AdminRegRequestDto] {
+        let r: AdminRegRequestsResponse = try await get("/api/admin/registration-requests?status=pending"); return r.requests
+    }
+    func adminListResetRequests() async throws -> [AdminResetRequestDto] {
+        let r: AdminResetRequestsResponse = try await get("/api/admin/password-reset-requests?status=pending"); return r.requests
+    }
+
+    func adminSuspendUser(_ id: String)    async throws { try await adminPostEmpty("/api/admin/users/\(id)/suspend") }
+    func adminUnsuspendUser(_ id: String)  async throws { try await adminPostEmpty("/api/admin/users/\(id)/unsuspend") }
+    func adminBanUser(_ id: String)        async throws { try await adminPostEmpty("/api/admin/users/\(id)/ban") }
+    func adminRevokeSessions(_ id: String) async throws { try await adminPostEmpty("/api/admin/users/\(id)/revoke-sessions") }
+    func adminRemoteWipe(_ id: String)     async throws { try await adminPostEmpty("/api/admin/users/\(id)/remote-wipe") }
+
+    func adminApproveRegistration(_ id: String) async throws { try await adminPostEmpty("/api/admin/registration-requests/\(id)/approve") }
+    func adminRejectRegistration(_ id: String)  async throws { try await adminPostEmpty("/api/admin/registration-requests/\(id)/reject") }
+
+    func adminSetUserRole(_ id: String, role: String) async throws {
+        struct Body: Encodable { let role: String }
+        try await adminPutJSON("/api/admin/users/\(id)/role", body: Body(role: role))
+    }
+    func adminResetUserPassword(_ id: String, newPassword: String) async throws {
+        struct Body: Encodable { let newPassword: String }
+        _ = try await post("/api/admin/users/\(id)/reset-password", body: Body(newPassword: newPassword), authenticated: true) as EmptyBody?
+    }
+    func adminResolveReset(_ id: String, tempPassword: String) async throws {
+        struct Body: Encodable { let tempPassword: String }
+        _ = try await post("/api/admin/password-reset-requests/\(id)/resolve", body: Body(tempPassword: tempPassword), authenticated: true) as EmptyBody?
+    }
+
+    private func adminPostEmpty(_ path: String) async throws {
+        struct Empty: Encodable {}
+        _ = try await post(path, body: Empty(), authenticated: true) as EmptyBody?
+    }
+
+    private func adminPutJSON<B: Encodable>(_ path: String, body: B) async throws {
+        var req = try buildRequest(path, method: "PUT", authenticated: true)
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try encoder.encode(body)
+        let (_, response) = try await session.data(for: req)
+        if (response as? HTTPURLResponse)?.statusCode == 401 {
+            try await refreshAccessToken()
+            req.setValue("Bearer \(tokenStore.accessToken)", forHTTPHeaderField: "Authorization")
+            let (_, resp2) = try await session.data(for: req)
+            try validate(resp2); return
+        }
+        try validate(response)
+    }
+
+    // MARK: - Admin extras (invites, settings, system)
+
+    func adminListInviteCodes() async throws -> [AdminInviteCodeDto] {
+        let r: AdminInviteCodesResponse = try await get("/api/admin/invite-codes"); return r.codes
+    }
+    func adminCreateInviteCode() async throws -> AdminInviteCodeDto {
+        struct Empty: Encodable {}
+        return try await post("/api/admin/invite-codes", body: Empty(), authenticated: true)
+    }
+    func adminRevokeInviteCode(_ code: String) async throws {
+        guard let encoded = code.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            throw ApiError.httpError(400, "bad code")
+        }
+        var req = try buildRequest("/api/admin/invite-codes/\(encoded)", method: "DELETE", authenticated: true)
+        let (_, response) = try await session.data(for: req)
+        if (response as? HTTPURLResponse)?.statusCode == 401 {
+            try await refreshAccessToken()
+            req.setValue("Bearer \(tokenStore.accessToken)", forHTTPHeaderField: "Authorization")
+            let (_, resp2) = try await session.data(for: req)
+            try validate(resp2); return
+        }
+        try validate(response)
+    }
+
+    func adminGetRetention() async throws -> Int {
+        let r: AdminRetentionDto = try await get("/api/admin/settings/retention"); return r.retentionDays
+    }
+    func adminSetRetention(_ days: Int) async throws {
+        struct Body: Encodable { let retentionDays: Int }
+        try await adminPutJSON("/api/admin/settings/retention", body: Body(retentionDays: days))
+    }
+    func adminGetMaxGroupMembers() async throws -> Int {
+        let r: AdminMaxMembersDto = try await get("/api/admin/settings/max-group-members"); return r.maxMembers
+    }
+    func adminSetMaxGroupMembers(_ value: Int) async throws {
+        struct Body: Encodable { let maxMembers: Int }
+        try await adminPutJSON("/api/admin/settings/max-group-members", body: Body(maxMembers: value))
+    }
+
+    func adminGetSystemStats() async throws -> AdminSystemStatsDto {
+        try await get("/api/admin/system/stats")
+    }
+
+    // MARK: - Downloads manifest / artifacts
+
+    func getDownloadsManifest() async throws -> DownloadsManifestDto {
+        var req = try buildRequest("/api/downloads/manifest", method: "GET", authenticated: true)
+        let (data, response) = try await session.data(for: req)
+        if (response as? HTTPURLResponse)?.statusCode == 401 {
+            try await refreshAccessToken()
+            req.setValue("Bearer \(tokenStore.accessToken)", forHTTPHeaderField: "Authorization")
+            let (data2, resp2) = try await session.data(for: req)
+            try validate(resp2)
+            return try JSONDecoder().decode(DownloadsManifestDto.self, from: data2)
+        }
+        try validate(response)
+        return try JSONDecoder().decode(DownloadsManifestDto.self, from: data)
+    }
+
+    func downloadArtifact(filename: String) async throws -> Data {
+        var req = try buildRequest("/api/downloads/\(filename)", method: "GET", authenticated: true)
+        let (data, response) = try await session.data(for: req)
+        if (response as? HTTPURLResponse)?.statusCode == 401 {
+            try await refreshAccessToken()
+            req.setValue("Bearer \(tokenStore.accessToken)", forHTTPHeaderField: "Authorization")
+            let (data2, resp2) = try await session.data(for: req)
+            try validate(resp2)
+            return data2
+        }
+        try validate(response)
+        return data
     }
 
     // MARK: - WS URL helper

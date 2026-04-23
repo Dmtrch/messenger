@@ -137,9 +137,8 @@ class SessionManager(
         val raw = b64dec.decode(encodedPayload)
         val payload = try {
             json.decodeFromString<WirePayload>(String(raw))
-        } catch (_: Exception) {
-            // Fallback: plain base64 text (stub payload)
-            return String(raw)
+        } catch (e: Exception) {
+            error("Invalid direct payload: not a WirePayload JSON (${e.message})")
         }
 
         val sessionKey = "$senderId:$senderDeviceId"

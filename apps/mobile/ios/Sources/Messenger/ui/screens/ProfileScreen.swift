@@ -30,6 +30,15 @@ struct ProfileScreen: View {
                 .foregroundStyle(.blue)
             }
 
+            Section("Приложение") {
+                NavigationLink("Загрузки и обновления") {
+                    DownloadsScreen()
+                }
+                NavigationLink("Администрирование") {
+                    AdminScreen()
+                }
+            }
+
             Section {
                 Button("Выйти", role: .destructive) {
                     showLogoutAlert = true
@@ -130,9 +139,19 @@ private struct ChangePasswordView: View {
     private func save() {
         guard newPwd == confirm else { error = "Пароли не совпадают"; return }
         guard newPwd.count >= 8 else { error = "Минимум 8 символов"; return }
-        // TODO Step B+: ApiClient.changePassword
         error = nil
-        success = true
+        success = false
+        Task {
+            do {
+                try await vm.changePassword(currentPassword: current, newPassword: newPwd)
+                success = true
+                current = ""
+                newPwd = ""
+                confirm = ""
+            } catch {
+                self.error = "Не удалось сменить пароль: \(error.localizedDescription)"
+            }
+        }
     }
 }
 

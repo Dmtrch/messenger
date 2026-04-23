@@ -1,1829 +1,585 @@
-# Техническая документация проекта Messenger
+# Техническая документация Messenger
 
-## 1. Назначение документа
+> Актуально на коммит `60d7c93` (2026-04-21). Источник истины — код и `docs/docs-main-update-research.md`. При расхождениях приоритет у кода. Документ парный с `docs/main/architecture.md` (высокоуровневый обзор) и `docs/api-reference.md` (контракты).
 
-Этот документ описывает фактическое техническое состояние проекта `messenger` на основе исходного кода в репозитории. Он дополняет существующие файлы [`docs/architecture.md`](/Users/dim/vscodeproject/messenger/docs/architecture.md) и [`docs/superpowers/specs/messenger-spec.md`](/Users/dim/vscodeproject/messenger/docs/superpowers/specs/messenger-spec.md), но опирается прежде всего на реальную реализацию.
+---
 
-Документ нужен для:
+## 1. Назначение документа и область применения
 
-- быстрого входа нового разработчика в проект;
-- понимания текущей архитектуры и границ модулей;
-- описания серверного API, клиентской логики и модели данных;
-- фиксации расхождений между спецификацией и текущей реализацией;
-- подготовки к дальнейшей доработке и рефакторингу.
+Справочник по реализации сервера, web-клиента, общего shared-слоя и native-приложений. Предназначен для:
 
-## 2. Краткое описание системы
+- быстрого входа в репозиторий (что где лежит, как вызывается);
+- ориентации по публичным API модулей, REST/WS-эндпоинтов, схеме БД;
+- фиксации конфигурационных контрактов (ENV, YAML);
+- фиксации известных ограничений и рисков.
 
-`Messenger` это self-hosted мессенджер с Go backend и PWA-клиентом на React. Проект ориентирован на личный или малогрупповой сценарий развёртывания: сервер запускается пользователем локально или на своём хосте, клиент работает в браузере и может устанавливаться как PWA.
+Что **не** входит в документ:
+- пошаговые user-сценарии (см. `docs/main/usersguid.md`);
+- инструкции по деплою и подготовке окружения (см. `docs/main/deployment.md`);
+- обоснование крипто-решений (см. `docs/crypto-rationale.md`);
+- полные JSON-схемы запросов/ответов (см. `docs/api-reference.md` и `shared/protocol/`).
 
-Ключевые свойства текущей реализации:
+---
 
-- backend написан на Go 1.22;
-- HTTP API построен на `chi`;
-- хранилище данных: SQLite в WAL-режиме;
-- realtime-коммуникация: WebSocket;
-- аутентификация: JWT access token + refresh token в `httpOnly` cookie;
-- frontend: React 18 + TypeScript + Vite + Zustand;
-- PWA: `vite-plugin-pwa` + Service Worker;
-- клиент содержит собственный криптографический слой для X3DH и Double Ratchet на базе `libsodium-wrappers`.
+## 2. Сервер
 
-Важно: проект уже содержит E2E-модули на клиенте, но не все аспекты спецификации Signal Protocol и безопасности доведены до production-уровня. Это MVP-реализация с заметным заделом на дальнейшее развитие.
+### 2.1 Входная точка
 
-Отдельно зафиксировано направление дальнейшего развития: поверх текущего backend и протокольного слоя проект переходит к native-first семейству клиентов для `Desktop`, `Android` и `iOS`. Desktop MVP реализован в `apps/desktop/` и покрывает macOS/Windows/Linux. Android и iOS — следующие этапы.
+- `server/cmd/server/main.go` — читает конфиг, открывает БД, запускает миграции, инициализирует `ws.Hub`, `sfu.Manager`, хендлеры, монтирует маршруты, поднимает HTTP(S).
+- `server/cmd/server/config.go` — `Config` struct, загрузка YAML + env overrides, валидация обязательных параметров.
+- `server/cmd/server/calls.go` — `iceServersHandler` (HMAC-подписанные TURN-креды).
+- `server/cmd/server/tls_test.go` — проверка, что TLS конфигурируется только на TLS 1.3.
+- Статика встраивается директивой `//go:embed static`.
 
-## 3. Фактическая структура репозитория
+Middleware-цепочка запроса: `RequestLogger → Recoverer → Timeout(30s) → SecurityHeaders → CORS`. Rate limiters:
 
-На текущий момент в репозитории реально используются:
+- `authLimiter` — 20 req/min per IP на `/api/auth/*`;
+- `botLimiter` — 60 req/min per IP на `/api/bots/*`.
 
-```text
-messenger/
-├── client/                     # React PWA
-│   ├── public/
-│   │   └── push-handler.js
-│   ├── src/
-│   │   ├── api/
-│   │   ├── config/
-│   │   │   └── serverConfig.ts     # multi-server URL management
-│   │   ├── components/
-│   │   │   └── OfflineIndicator/   # UI-баннер offline-состояния
-│   │   ├── crypto/
-│   │   ├── hooks/
-│   │   ├── pages/
-│   │   │   ├── ServerSetupPage.tsx # выбор сервера
-│   │   │   └── AdminPage.tsx       # панель администратора
-│   │   ├── store/                  # Zustand + IDB модули (authStore: role, chatStore: reset)
-│   │   ├── styles/
-│   │   └── types/
-│   ├── package.json
-│   └── vite.config.ts
-├── docs/
-│   ├── architecture.md
-│   ├── SESSION_CONTEXT.md
-│   └── superpowers/
-│       ├── plans/
-│       └── specs/
-├── server/
-│   ├── cmd/server/
-│   │   ├── main.go             # entrypoint, роутинг, static hosting
-│   │   └── config.go           # Config struct, YAML + env
-│   ├── db/
-│   │   ├── schema.go
-│   │   ├── migrate.go
-│   │   └── queries.go
-│   ├── internal/
-│   │   ├── auth/               # JWT, bcrypt, role in claims
-│   │   ├── admin/              # RequireAdmin, admin handlers
-│   │   ├── serverinfo/         # GET /api/server/info
-│   │   ├── chat/
-│   │   ├── keys/
-│   │   ├── media/
-│   │   ├── push/
-│   │   ├── users/
-│   │   └── ws/
-│   ├── static/                 # встроенная статика для single-binary режима
-│   └── go.mod
-└── README.md
-```
+### 2.2 Модули `server/internal/*`
 
-Примечание:
-
-- в репозитории сейчас нет второго фронтенда `frontend/`, хотя он упоминается в некоторых инструкциях;
-- в `server/` лежат локальные файлы SQLite (`messenger.db`, `-wal`, `-shm`) и собранный бинарник `server/bin/server`, то есть репозиторий использовался для локального запуска;
-- `shared/` и `apps/` — native track, `apps/desktop/` уже содержит полноценный MVP;
-- `shared/protocol/` — formal schemas (REST, WebSocket, message envelope);
-- `shared/domain/` — language-neutral contract layer;
-- `shared/native-core/` — реализованный runtime-пакет, source-of-truth для web и native клиентов;
-- `apps/mobile/android/` — ✅ полный MVP: file transfer (XSalsa20/Coil), WebRTC Step A+B (реальный SDP/ICE, video UI), FCM push;
-- `apps/mobile/ios/` — ✅ MVP + APNs push + WebRTC CALLS-B завершён: полный E2E crypto, REST/WS (URLSession), SQLite GRDB v2, все экраны, APNs push, `iOSWebRtcController` + RTCMTLVideoView; `swift test` 8/8.
-
-### Структура `apps/desktop/` (реализовано)
-
-```text
-apps/desktop/
-├── build.gradle.kts               # Compose Desktop 1.7.x, Ktor 3.x, lazysodium-java 5.1.4, SQLDelight 2.x
-├── settings.gradle.kts
-├── gradle/libs.versions.toml
-└── src/main/kotlin/
-    ├── Main.kt
-    ├── config/ServerConfig.kt
-    ├── crypto/
-    │   ├── X3DH.kt                # X3DH initiator + responder (верифицирован через test-vectors)
-    │   ├── Ratchet.kt             # Double Ratchet encrypt/decrypt
-    │   ├── SenderKey.kt           # Группы: encrypt/decrypt через SenderKey
-    │   └── KeyStorage.kt          # PKCS12 (~/.messenger/keystore.p12)
-    ├── db/
-    │   ├── messenger.sq           # 4 таблицы: chat, message, ratchet_session, outbox
-    │   └── DatabaseProvider.kt    # SQLDelight singleton
-    ├── service/
-    │   ├── ApiClient.kt           # Ktor HTTP + Auth bearer (auto-refresh)
-    │   ├── TokenStore.kt          # Хранение JWT в памяти/файле
-    │   ├── MessengerWS.kt         # WebSocket + exponential backoff reconnect
-    │   └── WSOrchestrator.kt      # Диспетчер WS-фреймов (message/ack/typing/read/deleted/edited)
-    ├── store/
-    │   ├── AuthStore.kt           # StateFlow<AuthState>
-    │   └── ChatStore.kt           # StateFlow<List<ChatItem>> + messages + typing
-    ├── viewmodel/
-    │   ├── AppViewModel.kt        # login/logout/sendMessage + WS lifecycle
-    │   ├── ChatListViewModel.kt
-    │   └── ChatWindowViewModel.kt # DB + WS merge, cursor pagination
-    └── ui/
-        ├── App.kt                 # Навигация: ServerSetup → Auth → ChatList → ChatWindow / Profile
-        └── screens/
-            ├── ServerSetupScreen.kt
-            ├── AuthScreen.kt
-            ├── ChatListScreen.kt
-            ├── ChatWindowScreen.kt
-            └── ProfileScreen.kt
-```
-
-Нативные дистрибутивы (собираются на соответствующей ОС):
-- macOS: `./gradlew packageDmg`
-- Windows: `./gradlew packageMsi`
-- Linux: `./gradlew packageDeb`
-
-### Структура `apps/mobile/ios/` (реализовано)
-
-```text
-apps/mobile/ios/
-├── Package.swift                  # SPM: swift-sodium 0.9.1, GRDB.swift 6.27.0; MessengerCrypto + Messenger targets
-├── Sources/
-│   ├── MessengerCrypto/           # Крипто-ядро — компилируется на macOS (swift test)
-│   │   ├── X3DH.swift             # X3DH initiator (Clibsodium direct scalarmult)
-│   │   ├── Ratchet.swift          # Double Ratchet encrypt/decrypt
-│   │   └── SenderKey.swift        # Группы: SenderKey encrypt/decrypt
-│   └── Messenger/                 # Полный app-стек (открывается через Xcode)
-│       ├── App.swift              # NavigationStack + CallOverlay + AppDelegate (#if canImport(UIKit))
-│       ├── crypto/
-│       │   ├── X3DH.swift
-│       │   ├── Ratchet.swift
-│       │   ├── SenderKey.swift
-│       │   ├── KeyStorage.swift   # Keychain / UserDefaults, getOrCreateDeviceId
-│       │   └── SessionManager.swift # Полный X3DH + Double Ratchet, wire format base64(JSON)
-│       ├── db/
-│       │   ├── DatabaseManager.swift # GRDB schema v2 (4 media-колонки), versioned migrations
-│       │   └── ChatStore.swift    # @MainActor ObservableObject, чаты и сообщения
-│       ├── service/
-│       │   ├── ApiClient.swift    # URLSession actor, multipart, auto-refresh; registerNativePushToken
-│       │   ├── WSOrchestrator.swift # WebSocket + exponential backoff
-│       │   └── TokenStore.swift   # Хранение JWT
-│       ├── viewmodel/
-│       │   └── AppViewModel.swift # Связывает все слои, call signaling, onAPNsTokenReceived
-│       └── ui/screens/
-│           ├── ServerSetupScreen.swift
-│           ├── AuthScreen.swift
-│           ├── ChatListScreen.swift
-│           ├── ChatWindowScreen.swift  # MessageBubble, FileCard, TypingIndicator
-│           └── ProfileScreen.swift
-└── Tests/MessengerTests/
-    └── CryptoTests.swift          # 6 тестов: X3DH (2), Ratchet (4) — зелёные
-```
-
-Запуск тестов:
-```bash
-cd apps/mobile/ios && swift test   # 8/8 тестов зелёные
-# Полное приложение: открыть в Xcode → создать iOS App target → добавить Sources/Messenger/
-```
-
-## 4. Технологический стек
-
-### 4.1 Backend
-
-- Go 1.22
-- `github.com/go-chi/chi/v5`
-- `github.com/golang-jwt/jwt/v5`
-- `github.com/gorilla/websocket`
-- `modernc.org/sqlite`
-- `github.com/SherClockHolmes/webpush-go`
-- `golang.org/x/crypto/bcrypt`
-- `gopkg.in/yaml.v3` — парсинг `config.yaml`
-
-### 4.2 Frontend
-
-- React 18
-- TypeScript
-- Vite 5
-- Zustand
-- `libsodium-wrappers`
-- `idb-keyval`
-- `react-router-dom`
-- `date-fns`
-- `vite-plugin-pwa`
-- `vitest` (dev) — тесты
-- `libsodium-wrappers-sumo` (dev) — полная сборка libsodium для тестов (содержит `crypto_auth_hmacsha256`)
-
-## 5. Архитектура верхнего уровня
-
-Система состоит из трёх основных слоёв:
-
-1. HTTP API слой на Go.
-2. WebSocket Hub для realtime-доставки событий.
-3. PWA-клиент, который:
-   - управляет аутентификацией;
-   - хранит локальное состояние чатов;
-   - выполняет шифрование и дешифрование сообщений;
-   - подписывается на push-уведомления;
-   - взаимодействует с REST и WebSocket API.
-
-Потоки данных:
-
-- регистрация и логин идут через REST;
-- список чатов и история сообщений загружаются через REST;
-- отправка сообщений выполняется по WebSocket;
-- сервер сохраняет отдельную копию сообщения для каждого получателя;
-- входящие сообщения приходят по WebSocket в зашифрованном виде;
-- клиент расшифровывает их локально и кладёт в Zustand store;
-- offline-получатели получают Web Push без текста сообщения.
-
-### 5.1 Native track status
-
-Архитектурные решения зафиксированы:
-
-- `Desktop`: `Kotlin + Compose Multiplatform Desktop` ✅ **MVP + file transfer + WebRTC Step A** (`apps/desktop/`)
-- `Android`: `Kotlin + Compose` ✅ **Полный MVP завершён** (`apps/mobile/android/`) — file transfer (XSalsa20, Coil EncryptedMediaFetcher) + WebRTC Step A (сигнализация, CallOverlay) + WebRTC Step B (реальный SDP/ICE: `AndroidWebRtcController`, `SurfaceViewRenderer` video UI)
-- `iOS`: `SwiftUI` + swift-sodium + GRDB ✅ **MVP + APNs + WebRTC CALLS-B завершён** (`apps/mobile/ios/`) — `iOSWebRtcController`, RTCMTLVideoView; `swift test` 8/8
-- локальная БД: `SQLite` (SQLDelight 2.x на desktop, SQLDelight 2.x на Android v2 schema, GRDB на iOS)
-- crypto: `libsodium` family — `lazysodium-java 5.1.4` на JVM/Desktop, `lazysodium-android 5.1.0` (JNI) на Android, `swift-sodium` на iOS
-- cursor-based pagination обязательна для всех клиентов
-
-Дополнительно уже реализован не только контрактный, но и runtime-слой Shared Core:
-
-- `shared/protocol/rest-schema.json`
-- `shared/protocol/ws-schema.json`
-- `shared/protocol/message-envelope.schema.json`
-- `shared/domain/models.md`
-- `shared/domain/repositories.md`
-- `shared/domain/auth-session.md`
-- `shared/domain/websocket-lifecycle.md`
-- `shared/domain/sync-engine.md`
-- `shared/test-vectors/*`
-- `shared/native-core/index.ts`
-- `shared/native-core/package.json`
-- `shared/native-core/auth/*`
-- `shared/native-core/websocket/*`
-- `shared/native-core/messages/*`
-- `shared/native-core/sync/*`
-- `shared/native-core/storage/*`
-- `shared/native-core/crypto/*`
-- `shared/native-core/calls/call-session.ts`
-- `shared/native-core/calls/call-controller.ts`
-- `shared/native-core/calls/web/*`
-- `shared/native-core/calls/web/browser-webrtc-platform.ts`
-- `shared/native-core/websocket/web/ws-frame-types.ts`
-- `shared/native-core/websocket/web/ws-model-types.ts`
-- `shared/native-core/websocket/web/browser-websocket-platform.ts`
-- `shared/native-core/websocket/web/browser-messenger-ws-deps.ts`
-- `shared/native-core/calls/web/call-ws-types.ts`
-
-Это уже меняет runtime-код клиента: `api`, `websocket`, `crypto`, `keystore`, `useMessengerWS`, `useCallHandler`, `useWebRTC`, `callStore` и `CallOverlay` используют shared runtime или thin facades над ним.
-Для call-стека это уже включает и top-level wiring: `App.tsx` владеет `useCallHandler()`, напрямую пробрасывает `initiateCall` в роутинг/UI и передаёт `handleCallFrame` в `useMessengerWS`, без скрытых callback-полей в Zustand.
-Дополнительно realtime-слой уже использует shared-local frame/model contracts, поэтому `shared/native-core/calls/web/*` и `shared/native-core/websocket/web/*` не зависят от `client/src/types` для `WSFrame/WSSendFrame/Chat/Message`. Browser-specific platform wiring тоже частично перенесён в shared: `client/src/api/websocket.ts` и `client/src/hooks/useWebRTC.ts` уже используют shared helpers для `WebSocket`, timers, `RTCPeerConnection` и `getUserMedia`, а `client/src/hooks/useMessengerWS.ts` использует shared helper для browser scheduler и маппинга `ChatSummary -> RealtimeChat`.
-
-### 5.2 Shared Native Core status
-
-На текущий момент `shared/native-core` покрывает следующие runtime-срезы:
-
-- `auth/session-runtime.ts`
-  - login/refresh/restore/logout
-  - хранение session state
-  - device registration
-- `websocket/connection-runtime.ts`
-  - state machine соединения
-  - reconnect/backoff
-  - auth-failure handling
-- `messages/message-repository.ts`
-  - in-memory message repository
-  - page merge
-  - outbox/state update semantics
-- `sync/sync-engine.ts`
-  - reconcile после reconnect
-  - outbox resend
-  - session validation hooks
-- `storage/storage-runtime.ts`
-  - identity/SPK/OPK
-  - ratchet sessions
-  - sender keys
-  - device/settings/push records
-- `crypto/crypto-runtime.ts`
-  - session bootstrap
-  - encrypt/decrypt orchestration
-  - sender keys orchestration
-- `crypto/web/*`
-  - shared web-реализации `x3dh`, `ratchet`, `senderkey`, `session-web`
-- `api/web/browser-api-client.ts`
-  - browser HTTP transport
-  - refresh rotation
-  - authenticated media/ICE flows
-- `websocket/web/browser-websocket-client.ts`
-  - browser realtime transport
-- `websocket/web/browser-websocket-platform.ts`
-  - browser `WebSocket` adapter
-  - browser timer helpers
-- `websocket/web/browser-messenger-ws-deps.ts`
-  - browser helper для маппинга `api.getChats()` в shared realtime model
-  - browser scheduler helper для realtime orchestrator
-- `websocket/web/ws-frame-types.ts`
-  - shared-local realtime frame contract
-- `websocket/web/ws-model-types.ts`
-  - shared-local realtime chat/message model
-- `websocket/web/messenger-ws-orchestrator.ts`
-  - message-flow orchestration
-  - SKDM/prekey/read/typing routing
-- `calls/call-session.ts`
-  - чистая call state machine
-  - `status/callId/chatId/peerId/isVideo/incomingOffer/notification/isMuted/isCameraOff`
-  - platform-neutral transitions без browser API
-- `calls/call-controller.ts`
-  - shared orchestration поверх call session
-  - snapshot/subscription model
-  - scheduler-driven notification cleanup
-- `calls/web/browser-webrtc-runtime.ts`
-  - browser WebRTC peer runtime
-- `calls/web/browser-webrtc-platform.ts`
-  - browser adapter для `RTCPeerConnection`
-  - browser helper для `navigator.mediaDevices.getUserMedia`
-- `calls/web/call-ws-types.ts`
-  - shared-local call signalling contract
-- `calls/web/call-handler-orchestrator.ts`
-  - signalling orchestration для звонков
-
-Следующие шаги для native track:
-
-- **Stage 11C-2**: ✅ Android завершён — Jetpack Compose, Ktor Android engine, lazysodium-android, SQLDelight v2, file transfer, WebRTC Step A+B;
-- **Stage 11C-3**: ⬜ iOS — SwiftUI, URLSession/URLSessionWebSocketTask, swift-sodium, GRDB.
-
-## 6. Backend: точка входа и конфигурация
-
-Файлы:
-- [`server/cmd/server/main.go`](/Users/dim/vscodeproject/messenger/server/cmd/server/main.go)
-- [`server/cmd/server/config.go`](/Users/dim/vscodeproject/messenger/server/cmd/server/config.go)
-
-### 6.1 Конфигурация: файл и переменные окружения
-
-Поддерживается `config.yaml` рядом с бинарником (необязателен). Шаблон: `server/config.yaml.example`. Файл добавлен в `.gitignore` — может содержать `jwt_secret`.
-
-Приоритет: **env-переменная > config.yaml > default**.
-
-Параметры (имена в yaml и соответствующие env):
-
-| yaml | env | default |
+| Пакет | Зона ответственности | Ключевые файлы |
 |---|---|---|
-| `port` | `PORT` | `8080` |
-| `db_path` | `DB_PATH` | `./messenger.db` |
-| `media_dir` | `MEDIA_DIR` | `./media` |
-| `jwt_secret` | `JWT_SECRET` | — (обязателен) |
-| `tls_cert` / `tls_key` | `TLS_CERT` / `TLS_KEY` | — |
-| `allowed_origin` | `ALLOWED_ORIGIN` | — |
-| `behind_proxy` | `BEHIND_PROXY` | `false` |
-| `stun_url` | `STUN_URL` | `stun:stun.l.google.com:19302` |
-| `turn_url` | `TURN_URL` | — |
-| `turn_secret` | `TURN_SECRET` | — |
-| `turn_credential_ttl` | `TURN_CREDENTIAL_TTL` | `86400` |
-| `vapid_private_key` | `VAPID_PRIVATE_KEY` | авто-генерация |
-| `vapid_public_key` | `VAPID_PUBLIC_KEY` | авто-генерация |
-| `server_name` | `SERVER_NAME` | `Messenger` |
-| `server_description` | `SERVER_DESCRIPTION` | `""` |
-| `registration_mode` | `REGISTRATION_MODE` | `open` |
-| `admin_username` | `ADMIN_USERNAME` | — |
-| `admin_password` | `ADMIN_PASSWORD` | — |
-
-`BEHIND_PROXY=true` при запуске за reverse proxy (Cloudflare Tunnel, nginx): включает HSTS, доверяет X-Real-IP/X-Forwarded-For.
-
-Если VAPID-ключи не заданы, сервер генерирует их на старте и выводит в лог. Это удобно для локальной разработки, но ломает уже выданные push-подписки после рестарта.
-
-### 6.2 Инициализация
-
-На старте сервер:
-
-- открывает SQLite через `db.Open`;
-- применяет схему и миграции (#1–13);
-- запускает `EnsureAdminUser` — создаёт bootstrap-admin из конфига, если не существует;
-- создаёт WebSocket Hub;
-- инициализирует хендлеры `auth`, `chat`, `media`, `users`, `keys`, `push`, `serverinfo`, `admin`;
-- поднимает `chi.Router`;
-- раздаёт встроенную статику из `server/static`.
-
-### 6.3 Middleware
-
-Подключены глобально:
-
-- `middleware.Logger`
-- `middleware.Recoverer`
-- `middleware.Timeout(30 * time.Second)`
-- `secmw.SecurityHeaders(isHTTPS || behindProxy)` — CSP, X-Frame-Options, X-Content-Type-Options, HSTS
-- `authLimiter.Middleware()` на `/api/auth/register|login|refresh` — rate limiting 20 req/min per IP
-
-## 7. Backend: HTTP API
-
-### 7.1 Публичные маршруты
-
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `POST /api/auth/refresh`
-- `POST /api/auth/logout`
-- `GET /api/push/vapid-public-key`
-- `GET /api/server/info` — name, description, registrationMode (без JWT)
-- `POST /api/auth/request-register` — заявка на регистрацию (режим approval)
-- `POST /api/auth/password-reset-request` — запрос сброса пароля
-- `GET /ws`
-
-### 7.2 Защищённые маршруты
-
-Под `auth.Middleware`:
-
-- `GET /api/users/search`
-- `GET /api/chats`
-- `POST /api/chats`
-- `GET /api/chats/{chatId}/messages`
-- `POST /api/chats/{chatId}/read`
-- `DELETE /api/messages/{clientMsgId}`
-- `PATCH /api/messages/{clientMsgId}`
-- `GET /api/keys/{userId}`
-- `POST /api/keys/prekeys`
-- `POST /api/keys/register`
-- `POST /api/push/subscribe`
-- `POST /api/media/upload`
-- `GET /api/media/{mediaId}`
-- `PATCH /api/media/{mediaId}`
-
-### 7.3 Маршруты администратора
-
-Под `auth.Middleware` + `admin.RequireAdmin` (role = admin):
-
-- `GET /api/admin/registration-requests`
-- `POST /api/admin/registration-requests/{id}/approve`
-- `POST /api/admin/registration-requests/{id}/reject`
-- `POST /api/admin/invite-codes`
-- `GET /api/admin/invite-codes`
-- `GET /api/admin/users`
-- `POST /api/admin/users/{id}/reset-password`
-- `GET /api/admin/password-reset-requests`
-- `POST /api/admin/password-reset-requests/{id}/resolve`
-
-## 8. Backend: модуль аутентификации
-
-Файлы:
-
-- [`server/internal/auth/handler.go`](/Users/dim/vscodeproject/messenger/server/internal/auth/handler.go)
-- [`server/internal/auth/middleware.go`](/Users/dim/vscodeproject/messenger/server/internal/auth/middleware.go)
-
-### 8.1 Регистрация
-
-`POST /api/auth/register` принимает:
-
-- `username`
-- `displayName`
-- `password`
-- опционально публичные ключи Signal Protocol:
-  - `ikPublic`
-  - `spkId`
-  - `spkPublic`
-  - `spkSignature`
-  - `opkPublics`
-
-Что делает обработчик:
-
-- валидирует обязательные поля;
-- проверяет уникальность `username`;
-- хеширует пароль через `bcrypt`;
-- создаёт пользователя в `users`;
-- если переданы публичные ключи, сохраняет их в `identity_keys` и `pre_keys`;
-- сразу выдаёт access token и refresh cookie.
-
-### 8.2 Логин
-
-`POST /api/auth/login`:
-
-- ищет пользователя по `username`;
-- сравнивает пароль через `bcrypt.CompareHashAndPassword`;
-- возвращает access token и refresh cookie.
-
-### 8.3 Refresh
-
-`POST /api/auth/refresh`:
-
-- читает `refresh_token` из cookie;
-- берёт SHA-256 hash от raw token;
-- ищет запись в таблице `sessions`;
-- проверяет срок действия;
-- удаляет старую refresh-сессию;
-- выдаёт новую пару access/refresh.
-
-Это rotation-поведение, а не простое переиспользование refresh token.
-
-### 8.4 Logout
-
-`POST /api/auth/logout`:
-
-- удаляет refresh-сессию по hash токена;
-- очищает cookie;
-- возвращает `204 No Content`.
-
-### 8.5 Смена пароля
-
-`POST /api/auth/change-password` (требует JWT):
-
-- принимает `currentPassword`, `newPassword` (мин. 8 символов);
-- верифицирует `currentPassword` через `bcrypt.CompareHashAndPassword`;
-- при несовпадении — `403 Forbidden`;
-- хеширует новый пароль;
-- инвалидирует все refresh-сессии пользователя, кроме текущей (`DeleteUserSessionsExcept`);
-- обновляет `password_hash` в `users`;
-- возвращает `204 No Content`.
-
-Клиент после успешной смены выполняет logout (принудительный выход).
-
-### 8.6 JWT middleware
-
-`auth.Middleware`:
-
-- требует `Authorization: Bearer <token>`;
-- валидирует HMAC JWT;
-- извлекает `sub` (userID) и `role`;
-- кладёт `userID` и `role` в `request.Context`;
-- `auth.RoleFromCtx(r)` — хелпер для получения роли (по умолчанию `"user"`).
-
-JWT claims включают: `sub` (userID), `username`, `displayName`, `role`.
-
-### 8.7 Регистрация (расширенные сценарии)
-
-Поведение `POST /api/auth/register` зависит от `registrationMode`:
-
-- **open** — свободная регистрация, invite code не нужен.
-- **invite** — обязателен `inviteCode`; проверяется: существование, не использован, не просрочен; после создания пользователя code помечается как `used_by`.
-- **approval** — регистрация прямым POST запрещена (403); нужно сначала подать заявку через `POST /api/auth/request-register`.
-
-### 8.8 Запрос на регистрацию
-
-`POST /api/auth/request-register` (режим approval):
-
-- принимает `username`, `displayName`, `password`;
-- хеширует пароль, сохраняет заявку со статусом `pending`;
-- возвращает `201 Created`;
-- admin одобряет или отклоняет через admin API.
-
-### 8.9 Сброс пароля
-
-`POST /api/auth/password-reset-request`:
-
-- принимает `username`;
-- создаёт запись в `password_reset_requests` со статусом `pending`;
-- **всегда** возвращает `200 OK` независимо от существования пользователя (no user enumeration);
-- admin устанавливает временный пароль через `POST /api/admin/users/{id}/reset-password` и сообщает его пользователю out-of-band.
-
-## 8a. Backend: модуль администрирования
-
-Файлы:
-- `server/internal/admin/middleware.go` — `RequireAdmin`
-- `server/internal/admin/handler.go` — 9 handler'ов
-
-### Сквозной сценарий: регистрация через заявку (approval mode)
-
-```
-Пользователь                  Сервер                     Администратор
-     │                           │                              │
-     │  POST /auth/request-register                             │
-     │  {username, displayName, password}                       │
-     │──────────────────────────►│                              │
-     │  201 Created              │                              │
-     │◄──────────────────────────│                              │
-     │  (ключи сохранены в IDB)  │                              │
-     │                           │  GET /admin/registration-requests
-     │                           │◄─────────────────────────────│
-     │                           │  [{id, username, status: "pending"}]
-     │                           │──────────────────────────────►│
-     │                           │                              │
-     │                           │  POST /admin/registration-requests/{id}/approve
-     │                           │◄─────────────────────────────│
-     │                           │  (создаёт users запись)      │
-     │                           │  200 OK                      │
-     │                           │──────────────────────────────►│
-     │                           │                              │
-     │  POST /auth/login         │                              │
-     │  {username, password}     │                              │
-     │──────────────────────────►│                              │
-     │  200 {accessToken, role}  │                              │
-     │◄──────────────────────────│                              │
-```
-
-### 8a.1 RequireAdmin
-
-Проверяет роль из `auth.RoleFromCtx(r)`. Если не `"admin"` → `403 {"error": "forbidden"}`.
-
-### 8a.2 Управление заявками на регистрацию
-
-- `GET /api/admin/registration-requests` — список всех заявок.
-- `POST /api/admin/registration-requests/{id}/approve` — одобрить: проверить уникальность username (409 при конфликте), создать пользователя с `role=user`, обновить статус заявки на `approved`.
-- `POST /api/admin/registration-requests/{id}/reject` — обновить статус заявки на `rejected`.
-
-### 8a.3 Инвайт-коды
-
-- `POST /api/admin/invite-codes` — создать код (8-символьный префикс UUID); опциональный `expires_at`.
-- `GET /api/admin/invite-codes` — список всех кодов с полями `id`, `createdBy`, `usedBy`, `expiresAt`.
-
-### 8a.4 Управление пользователями
-
-- `GET /api/admin/users` — список пользователей (id, username, displayName, role, createdAt).
-- `POST /api/admin/users/{id}/reset-password` — принимает `temp_password`, обновляет хеш; admin сам сообщает пользователю временный пароль out-of-band.
-
-### 8a.5 Запросы сброса пароля
-
-- `GET /api/admin/password-reset-requests` — список запросов со статусом `pending`.
-- `POST /api/admin/password-reset-requests/{id}/resolve` — закрыть запрос (установить `status=resolved`).
-
-## 9. Backend: модуль чатов и сообщений
-
-Файл: [`server/internal/chat/handler.go`](/Users/dim/vscodeproject/messenger/server/internal/chat/handler.go)
-
-### 9.1 Получение списка чатов
-
-`GET /api/chats`:
-
-- получает все разговоры пользователя;
-- для каждого чата получает участников;
-- для direct-чата вычисляет имя второго участника, если имя чата не задано;
-- возвращает массив `ChatDTO`.
-
-Ответ содержит:
-
-- `id`
-- `type`
-- `name`
-- `avatarPath`
-- `members`
-- `unreadCount`
-- `updatedAt`
-- `lastMessageText`
-- `lastMessageTs`
-
-Серверная агрегация выполняется через таблицу `chat_user_state`.
-
-### 9.2 Создание чата
-
-`POST /api/chats`:
-
-- поддерживает `type: direct | group`;
-- автоматически добавляет текущего пользователя в состав участников;
-- для `direct` проверяет, не существует ли уже чат с тем же собеседником;
-- создаёт `conversations` и `conversation_members`.
-
-Для direct-чата при повторном запросе может вернуть существующий чат с `200 OK`.
-
-### 9.3 История сообщений
-
-`GET /api/chats/{chatId}/messages?before=<ts>&limit=<n>`:
-
-- проверяет членство пользователя в разговоре;
-- поддерживает курсорную пагинацию через opaque string cursor (base64-encoded timestamp+id);
-- возвращает только сообщения, адресованные текущему пользователю;
-- не возвращает удалённые сообщения;
-- отдаёт `nextCursor` как строку (`MessagesPage.nextCursor: string | undefined`).
-
-### 9.4 Удаление сообщения
-
-`DELETE /api/messages/{clientMsgId}`:
-
-- находит все копии сообщения по `client_msg_id`;
-- проверяет, что инициатор удаления является отправителем;
-- soft-delete выполняется через `db.DeleteMessages`;
-- отправляет в чат WebSocket-событие `message_deleted`.
-
-### 9.5 Редактирование сообщения
-
-`PATCH /api/messages/{clientMsgId}`:
-
-- принимает массив `recipients` с новым ciphertext для каждого пользователя;
-- проверяет авторство;
-- обновляет шифртекст для каждой получательской копии;
-- рассылает `message_edited` точечно каждому получателю.
-
-Сервер не умеет пере-шифровывать сообщение сам и полагается на то, что клиент уже прислал новый шифртекст для каждого участника.
-
-## 10. Backend: WebSocket Hub
-
-Файл: [`server/internal/ws/hub.go`](/Users/dim/vscodeproject/messenger/server/internal/ws/hub.go)
-
-### 10.1 Общая модель
-
-Hub хранит `map[userID]set[*client]`, то есть несколько активных соединений на одного пользователя. Каждый `client` несёт:
-
-- `userID string`
-- `deviceID string` — ID из таблицы `devices`; пустая строка для старых клиентов без явного `?deviceId=`
-- `conn *websocket.Conn`
-- `send chan []byte`
-
-Доступны два метода доставки:
-
-- `Deliver(userID, payload)` — рассылает всем устройствам пользователя (broadcast)
-- `DeliverToDevice(userID, deviceID, payload)` — доставляет только указанному устройству; если устройство офлайн — payload игнорируется
-
-### 10.2 Аутентификация и идентификация устройства
-
-`GET /ws?token=<JWT>&deviceId=<id>`:
-
-- JWT читается из query string `token`; upgrade выполняется всегда;
-- при невалидном токене соединение закрывается кодом `4001 unauthorized`;
-- `deviceId` (опционально) читается из query string; сервер вызывает `GetDeviceByID` и проверяет, что `dev.UserID == userID` из JWT; при несоответствии `deviceID` игнорируется (обратная совместимость), соединение не разрывается.
-
-Браузерский WebSocket API не позволяет передавать произвольные заголовки, поэтому query parameter является фактическим механизмом авторизации.
-
-### 10.3 Поддерживаемые входящие события
-
-Клиент может отправлять:
-
-- `message` — новое сообщение
-- `typing` — индикатор набора
-- `read` — сообщение прочитано
-- `skdm` — Sender Key Distribution Message (для групп)
-- `call_offer` — SDP offer от инициатора звонка
-- `call_answer` — SDP answer от принявшего звонок
-- `ice_candidate` — ICE-кандидат (обе стороны)
-- `call_end` — завершение звонка
-- `call_reject` — отклонение входящего звонка
-
-### 10.4 Обработка `message`
-
-Входящий фрейм `message` содержит массив `recipients`, где каждый элемент:
-
-```json
-{ "userId": "...", "deviceId": "...", "ciphertext": "<base64>" }
-```
-
-`deviceId` в `recipient` может быть пустым (адресовать всем устройствам пользователя) или конкретным (адресовать одному устройству).
-
-При получении `message`:
-
-- проверяется членство отправителя в чате;
-- для каждого элемента `recipients` создаётся отдельная строка в `messages` с полем `destination_device_id`;
-- копия отправителя тоже сохраняется как отдельная запись;
-- отправителю приходит `ack` с `clientMsgId`;
-- если `recipient.DeviceID` задан — доставка через `DeliverToDevice`, иначе через `Deliver` (broadcast);
-- исходящий WS-payload содержит `senderDeviceId` — ID устройства отправителя;
-- если получатель online, сервер помечает сообщение как delivered;
-- если получатель offline и это не self-copy, отправляется Web Push.
-
-Модель хранения: одна логическая отправка порождает N строк `messages` (по одной на каждый элемент `recipients`), связанных через `client_msg_id`.
-
-### 10.5 Обработка `typing`
-
-Сервер рассылает событие `typing` всем участникам разговора, кроме отправителя.
-
-### 10.6 Обработка `read`
-
-При событии `read`:
-
-- вызывается `db.MarkRead(messageID, now)`;
-- событие `read` рассылается остальным участникам чата с полем `userId`;
-- клиент обновляет статус сообщения и при совпадении `userId == currentUser` сбрасывает unread badge.
-
-### 10.7 Обработка `skdm`
-
-При событии `skdm`:
-
-- сервер проверяет членство отправителя в указанном чате;
-- SKDM-ciphertext доставляется точечно каждому из `recipients` по WebSocket;
-- сервер не хранит SKDM — это транзитное событие.
-
-### 10.8 Исходящие события сервера
-
-Клиенту могут приходить:
-
-- `message`
-- `ack`
-- `typing`
-- `read`
-- `message_deleted`
-- `message_edited`
-- `skdm`
-- `prekey_low` (count < 10 — клиент должен пополнить OPK)
-- `prekey_request` (устарел, заменён `prekey_low`)
-- `call_offer`, `call_answer`, `ice_candidate`, `call_end`, `call_reject`, `call_busy` — транзитная сигнализация звонков
-- `error`
-
-Поля события `message` (исходящее):
-
-| Поле | Описание |
+| `admin` | Инвайты, заявки на регистрацию, пользователи (suspend/ban/role), квоты, retention, broadcast, remote-wipe | `handler.go`, `middleware.go`, `handler_test.go`, `invite_test.go` |
+| `auth` | Регистрация/login/logout, JWT + refresh rotation, смена пароля, device-link, `AccountStatusMiddleware` | `handler.go`, `middleware.go`, `lazy_rehash_test.go` |
+| `bots` | Bots API: создание, webhook delivery (HMAC-SHA256, retry 1s/2s/4s), allowlist localhost/RFC-1918 | `handler.go`, `middleware.go`, `webhook.go` |
+| `calls` | 1:1 и групповые звонки: REST `/calls/room/*`, `iceServersHandler` | `handler.go`, `handler_test.go` |
+| `chat` | Чаты direct/group, сообщения, TTL, read markers, edit/delete (soft-delete) | `handler.go` |
+| `clienterrors` | Приём client-side логов ошибок (`POST /api/client-errors`) | `handler.go` |
+| `devices` | Список устройств, отвязка | `handler.go` |
+| `downloads` | Manifest версий, отдача `.dmg/.deb/.msi/.apk`, `GET /api/version` | `handler.go` |
+| `integration` | Интеграционные тесты auth/chat/invite — **без продакшн-кода** | `*_flow_test.go` |
+| `keys` | X3DH bundles, загрузка OPK, регистрация устройства | `handler.go` |
+| `logger` | Инициализация файлового логгера (lumberjack rotation) | `logger.go` |
+| `media` | Upload/download/listing; orphan & retention cleaners | `handler.go`, `cleaner.go` |
+| `middleware` | SecurityHeaders, RequestLogger, Recoverer, RateLimiter, CORS | `security.go`, `logging.go`, `ratelimit_test.go` |
+| `monitoring` | CPU/RAM/Disk через `gopsutil`; snapshot + SSE-стрим для админа | `handler.go` |
+| `password` | bcrypt cost 12 + lazy rehash | `password.go`, `password_test.go` |
+| `push` | Web Push (VAPID) + FCM legacy + APNs JWT | `handler.go` |
+| `serverinfo` | Публичный `GET /api/server/info` (name, description, registration_mode, limits) | `handler.go` |
+| `sfu` | Групповые звонки: `Room`, `participant`, track forwarding через `pion/webrtc` | `manager.go`, `sfu_test.go` |
+| `storage` | Пустой пакет (зарезервирован), в `main.go` не импортируется | — |
+| `users` | Поиск пользователей | `handler.go` |
+| `ws` | WebSocket Hub, комнаты чатов, fan-out, signalling 1:1/SFU, presence | `hub.go`, `hub_test.go`, `hub_calls_test.go` |
+
+---
+
+## 3. Схема БД
+
+### 3.1 Движок
+
+- `modernc.org/sqlite` (pure-Go, без CGO).
+- Pragmas: `journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout=5000`, `SetMaxOpenConns(1)`.
+- Точки входа: `server/db/schema.go` (`Open()`, constant `schema`), `queries.go` (CRUD), `migrate.go` (`RunMigrations`).
+
+### 3.2 Таблицы (базовые, создаются в `schema.go`)
+
+| Таблица | Назначение / ключевые поля |
 |---|---|
-| `type` | `"message"` |
-| `messageId` | серверный UUID (для копии отправителя — `clientMsgId`) |
-| `clientMsgId` | UUID, назначенный клиентом-отправителем |
-| `chatId` | ID разговора |
-| `senderId` | userID отправителя |
-| `senderDeviceId` | deviceID устройства отправителя (пустая строка если неизвестен) |
-| `ciphertext` | зашифрованный payload (base64 или bytes) |
-| `senderKeyId` | ID sender key для групп |
-| `timestamp` | unix ms |
-
-## 11. Backend: модуль ключей E2E
-
-Файл: [`server/internal/keys/handler.go`](/Users/dim/vscodeproject/messenger/server/internal/keys/handler.go)
-
-### 11.1 Получение key bundle
-
-`GET /api/keys/{userId}`:
-
-- вызывает `GetIdentityKeysByUserID` — получает все устройства пользователя;
-- для каждого устройства атомарно извлекает один OPK через `PopPreKey(userID, deviceID)`;
-- возвращает `{ "devices": [ ... ] }` — по одному объекту на активное устройство.
-
-Структура одного элемента `devices`:
-
-```json
-{
-  "deviceId":     "<uuid>",
-  "ikPublic":     "<base64>",
-  "spkId":        42,
-  "spkPublic":    "<base64>",
-  "spkSignature": "<base64>",
-  "opkId":        7,        // только если OPK доступен
-  "opkPublic":    "<base64>"
-}
-```
-
-Если у пользователя нет зарегистрированных ключей — `404 Not Found`.
-
-Это соответствует Signal-подходу (Signal-Server `GET /v2/keys/{identifier}/*`): инициатор X3DH получает bundles для всех устройств и создаёт отдельную сессию на каждое.
-
-### 11.2 Регистрация устройства
-
-`POST /api/keys/register`:
-
-- принимает `deviceName`, `ikPublic`, `spkId`, `spkPublic`, `spkSignature`, `opkPublics`;
-- идемпотентен: если `ikPublic` уже зарегистрирован для данного пользователя, переиспользует существующий `device_id`;
-- создаёт или обновляет запись в `devices` (`last_seen_at` при повторных входах);
-- сохраняет `identity_keys` с device_id;
-- сохраняет OPK с привязкой к устройству через `InsertPreKeysForDevice`;
-- возвращает `{"deviceId": "..."}`.
-
-### 11.3 Загрузка новых prekeys
-
-`POST /api/keys/prekeys`:
-
-- принимает массив новых one-time prekeys;
-- сохраняет их в таблицу `pre_keys`.
-
-### 11.4 Низкий запас prekeys
-
-`checkAndNotifyPrekeys(userID)` вызывается:
-- при выдаче bundle (после `PopPreKey`);
-- при WS-подключении (`ServeWS`).
-
-Если количество свободных OPK < 10, клиенту отправляется `{"type":"prekey_low","count":N}`. Клиент реагирует генерацией 20 новых OPK и загрузкой через `POST /api/keys/prekeys`.
-
-## 12. Backend: модуль пользователей
-
-Файл: [`server/internal/users/handler.go`](/Users/dim/vscodeproject/messenger/server/internal/users/handler.go)
-
-`GET /api/users/search?q=<query>`:
-
-- минимальная длина запроса 2 символа;
-- ищет по `username LIKE %query%`;
-- исключает самого пользователя;
-- возвращает максимум 20 результатов.
-
-Поиск по `display_name` сейчас не реализован, несмотря на placeholder в UI.
-
-## 13. Backend: модуль медиа
-
-Файл: [`server/internal/media/handler.go`](/Users/dim/vscodeproject/messenger/server/internal/media/handler.go)
-
-### 13.1 Upload
-
-`POST /api/media/upload`:
-
-- принимает multipart `file` (клиент загружает зашифрованный blob);
-- опционально принимает `chat_id` для привязки к чату;
-- ограничивает размер до 10 МБ;
-- генерирует UUID `mediaId`;
-- сохраняет файл под именем `{uuid}.bin`;
-- создаёт запись в `media_objects` с `content_type = "application/octet-stream"` (всегда, независимо от содержимого — реальный MIME-тип хранится только в E2E-payload);
-- возвращает `{ mediaId, originalName, contentType: "application/octet-stream" }`.
-
-Клиент шифрует файл через `uploadEncryptedMedia()`: XSalsa20-Poly1305, nonce || ciphertext, случайный media key. Имя файла при загрузке — `'encrypted'`. Ключ встраивается в зашифрованный message payload. Реальный `contentType` (MIME-тип) передаётся в E2E payload и недоступен серверу.
-
-Content sniffing (`http.DetectContentType`) намеренно убран — зашифрованные байты не несут смысловой информации о типе.
-
-### 13.2 Serve
-
-`GET /api/media/{mediaId}`:
-
-- требует валидный JWT (Bearer token);
-- проверяет доступ: загрузчик или участник чата, к которому привязан mediaId;
-- защищён от path traversal;
-- раздаёт zашифрованный blob.
-
-Клиент скачивает ciphertext, расшифровывает локально через `fetchEncryptedMediaBlobUrl()` и создаёт `blob:` URL.
-
-### 13.3 Привязка к чату
-
-`PATCH /api/media/{mediaId}`:
-
-- принимает `chat_id`;
-- обновляет `conversation_id` в `media_objects`;
-- необходимо если upload происходит до отправки сообщения (без `chat_id`).
-
-## 14. Backend: модуль push-уведомлений
-
-Файл: [`server/internal/push/handler.go`](/Users/dim/vscodeproject/messenger/server/internal/push/handler.go)
-
-### 14.1 Получение публичного VAPID-ключа
-
-`GET /api/push/vapid-public-key` возвращает публичный ключ для подписки в браузере.
-
-### 14.2 Сохранение подписки
-
-`POST /api/push/subscribe`:
-
-- принимает `PushSubscriptionJSON`;
-- декодирует `p256dh` и `auth`;
-- сохраняет подписку в `push_subscriptions`.
-
-### 14.3 Отправка уведомлений
-
-`SendNotification`:
-
-- получает все подписки пользователя;
-- формирует `webpush.Subscription`;
-- отправляет payload через `webpush-go`.
-
-Серверный payload не содержит текста сообщения, только тип и `chatId`. Это соответствует приватному сценарию без утечки plaintext в push.
-
-## 15. Backend: база данных
-
-Файлы:
-
-- [`server/db/schema.go`](/Users/dim/vscodeproject/messenger/server/db/schema.go)
-- [`server/db/queries.go`](/Users/dim/vscodeproject/messenger/server/db/queries.go)
-
-### 15.1 Особенности подключения
-
-- SQLite открывается в WAL-режиме;
-- включены `foreign_keys(ON)`;
-- установлен `busy_timeout(5000)`;
-- `db.SetMaxOpenConns(1)` из-за модели записи SQLite.
-
-### 15.2 Таблицы
-
-#### `users`
-
-- `id`
-- `username`
-- `display_name`
-- `password_hash`
-- `created_at`
-- `role` (`user` | `admin`, DEFAULT `user`)
-
-#### `sessions`
-
-Хранит refresh-сессии:
-
-- `id`
-- `user_id`
-- `token_hash`
-- `expires_at`
-
-#### `contacts`
-
-Есть в схеме и query-слое, но в текущем HTTP API не используется.
-
-#### `conversations`
-
-- `id`
-- `type` (`direct` или `group`)
-- `name`
-- `created_at`
-
-#### `conversation_members`
-
-Связь разговоров и участников.
-
-#### `messages`
-
-Основные поля:
-
-- `id`
-- `client_msg_id`
-- `conversation_id`
-- `sender_id`
-- `recipient_id`
-- `destination_device_id` — пустая строка = доставить всем устройствам (обратная совместимость); непустая = адресована конкретному устройству
-- `ciphertext`
-- `sender_key_id`
-- `is_deleted`
-- `edited_at`
-- `created_at`
-- `delivered_at`
-- `read_at`
-
-Смысл модели:
-
-- одна логическая отправка может иметь несколько строк;
-- общая связь между копиями строится через `client_msg_id`;
-- каждая строка привязана к конкретному `recipient_id` (пользователь) и `destination_device_id` (устройство).
-
-#### `devices`
-
-Зарегистрированные устройства пользователей:
-
-- `id` — UUID устройства
-- `user_id`
-- `device_name`
-- `created_at`
-- `last_seen_at`
-
-#### `identity_keys`
-
-Публичные ключи устройства — composite PK `(user_id, device_id)`:
-
-- `user_id`
-- `device_id`
-- `ik_public`
-- `spk_public`
-- `spk_signature`
-- `spk_id`
-- `updated_at`
-
-#### `pre_keys`
-
-One-time prekeys с привязкой к устройству:
-
-- `id`
-- `user_id`
-- `device_id`
-- `key_public`
-- `used`
-
-#### `media_objects`
-
-- `id` (mediaId, UUID)
-- `uploader_id`
-- `conversation_id` (может быть NULL до привязки)
-- `storage_path`
-- `content_type`
-- `size_bytes`
-- `created_at`
-
-#### `chat_user_state`
-
-Состояние чата на пользователя:
-
-- `conversation_id`
-- `user_id`
-- `last_read_message_id`
-- `unread_count`
-
-#### `push_subscriptions`
-
-- `id`
-- `user_id`
-- `endpoint`
-- `p256dh`
-- `auth`
-
-#### `invite_codes`
-
-- `id` — 8-символьный префикс UUID
-- `created_by` — user_id создателя
-- `used_by` — user_id потребителя (NULL пока не использован)
-- `expires_at` — unix ms, 0 = без срока
-
-#### `registration_requests`
-
-- `id`
-- `username`
-- `display_name`
-- `password_hash`
-- `status` (`pending` | `approved` | `rejected`)
-- `created_at`
-
-#### `password_reset_requests`
-
-- `id`
-- `user_id`
-- `temp_password` — устанавливается admin'ом, пустая строка изначально
-- `status` (`pending` | `resolved`)
-- `created_at`
-
-### 15.3 Индексы и миграции
-
-Схема содержит индекс по истории сообщений:
-
-- `idx_messages_conv_time` на `(conversation_id, created_at DESC)`
-
-Versioned migration runner (`server/db/migrate.go`) применяет все непримененные миграции при старте. Статус отслеживается в таблице `schema_migrations`. Поддерживаются однострочные и многошаговые миграции (`Steps []string` для DDL из нескольких операторов в одной транзакции).
-
-Список миграций:
-1. `messages.client_msg_id`
-2. `messages.recipient_id`
-3. `messages.is_deleted`
-4. `messages.edited_at`
-5. `identity_keys.device_id`
-6. `pre_keys.device_id`
-7. пересоздание `identity_keys` с composite PK `(user_id, device_id)`
-8. `messages.destination_device_id TEXT NOT NULL DEFAULT ''`
-9. `users.role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'admin'))`
-10. создание таблицы `invite_codes`
-11. создание таблицы `registration_requests`
-12. создание таблицы `password_reset_requests`
-13. индексы `idx_registration_requests_status`, `idx_password_reset_requests_status`
-
-## 16. Frontend: архитектура приложения
-
-### 16.1 Bootstrap
-
-Файлы:
-
-- [`client/src/main.tsx`](/Users/dim/vscodeproject/messenger/client/src/main.tsx)
-- [`client/src/App.tsx`](/Users/dim/vscodeproject/messenger/client/src/App.tsx)
-
-Приложение:
-
-- монтируется в React root;
-- использует `BrowserRouter`;
-- при наличии авторизации подключает глобальный `useMessengerWS` и `useOfflineSync`;
-- рендерит `<OfflineIndicator />` глобально поверх всех маршрутов.
-
-### 16.2 Роутинг
-
-- `/setup` — выбор и валидация URL сервера (если `serverUrl` не сохранён в localStorage)
-- `/auth` — логин / регистрация / request-register / forgot-password
-- `/` — список чатов
-- `/chat/:chatId` — окно переписки
-- `/profile` — профиль пользователя
-- `/admin` — панель администратора (только для role === 'admin')
-
-Неавторизованный пользователь всегда редиректится на `/auth`. Если serverUrl не установлен — редирект на `/setup`.
-
-### 16.3 Multi-server client
-
-Файл: `client/src/config/serverConfig.ts`
-
-Клиент поддерживает подключение к произвольному серверу через динамический BASE URL:
-
-- `getServerUrl()` — читает URL из localStorage (или `''` если не установлен)
-- `setServerUrl(url)` — сохраняет URL с валидацией через `new URL()` + проверкой `http:/https:` протокола; убирает trailing slash
-- `clearServerUrl()` — удаляет из localStorage
-- `hasServerUrl()` — проверяет наличие
-- `initServerUrl()` — при отсутствии пробует установить `window.location.origin` (только при `http/https` схеме, игнорирует `null`/`file://`)
-
-Все запросы в `client.ts` и URL WS-соединения используют `getServerUrl()` как база. При смене сервера (кнопка в Profile) выполняется: `api.logout()` → `clearServerUrl()` → `chatStore.reset()` → `wsStore.setSend(null)` → navigate(`/setup`).
-
-## 16a. Frontend: страница выбора сервера (ServerSetupPage)
-
-Файл: `client/src/pages/ServerSetupPage.tsx`
-
-Отображается при первом запуске или после команды «Сменить сервер». Пользователь вводит URL сервера и подключается к нему.
-
-**Шаги:**
-
-1. Пользователь вводит URL (например `https://my-server.example.com`).
-2. Нажимает «Подключиться» — клиент вызывает `GET /api/server/info` без JWT.
-3. Если запрос успешен, отображается карточка сервера: название, описание, режим регистрации.
-4. Пользователь нажимает «Продолжить» — URL сохраняется через `setServerUrl()`, редирект на `/auth`.
-5. При ошибке соединения показывается сообщение об ошибке; URL не сохраняется.
-
-**Сброс сервера** (из Profile): `api.logout()` → `clearServerUrl()` → `chatStore.reset()` → `wsStore.setSend(null)` → navigate(`/setup`). Чаты предыдущего сервера очищаются из памяти до входа на новый.
-
-## 16b. Frontend: страница авторизации (AuthPage) — расширенные сценарии
-
-Файл: `client/src/pages/AuthPage.tsx`
-
-AuthPage поддерживает три вкладки: **Войти**, **Регистрация**, **Забыл пароль**.
-
-При открытии страница загружает `GET /api/server/info` для определения `registrationMode` и соответствующей адаптации UI.
-
-### Регистрация с инвайт-кодом (`registrationMode === 'invite'`)
-
-1. Показывается дополнительное поле «Инвайт-код».
-2. Код может быть предзаполнен из URL query param `?invite=<code>`.
-3. При отправке форма передаёт `inviteCode` в `POST /api/auth/register`.
-4. Если код отсутствует, неверен или просрочен — сервер возвращает `403`.
-
-### Запрос на регистрацию (`registrationMode === 'approval'`)
-
-1. Вкладка «Регистрация» показывает форму заявки: username, displayName, password.
-2. При отправке выполняется `POST /api/auth/request-register`.
-3. Клиент генерирует крипто-ключи (Identity Key, Signed PreKey, One-Time PreKeys), но **сохраняет их в IndexedDB только после** `201 Created` от сервера. Это предотвращает mismatch: если сервер откажет, ключей в IndexedDB не будет.
-4. Пользователю показывается сообщение «Заявка отправлена. Ожидайте подтверждения администратора».
-5. После одобрения администратором пользователь может войти обычным способом.
-
-### Восстановление пароля
-
-1. Пользователь переходит на вкладку «Забыл пароль» (ссылка на форме логина).
-2. Вводит username, нажимает «Отправить запрос».
-3. Клиент вызывает `POST /api/auth/password-reset-request`.
-4. **Всегда** отображается сообщение «Запрос отправлен. Обратитесь к администратору» — вне зависимости от наличия пользователя в системе (no user enumeration, даже в catch).
-5. Администратор видит запрос в панели, устанавливает временный пароль и сообщает его пользователю лично.
-
-## 16c. Frontend: панель администратора (AdminPage)
-
-Файл: `client/src/pages/AdminPage.tsx`
-
-Доступна по маршруту `/admin` только для пользователей с `role === 'admin'`. Содержит 4 вкладки.
-
-### Вкладка «Заявки»
-
-Отображает список заявок на регистрацию со статусом `pending`.
-
-Для каждой заявки:
-- username, displayName, дата создания;
-- кнопки **Одобрить** / **Отклонить**.
-
-**Одобрить:** `POST /api/admin/registration-requests/{id}/approve`
-- сервер проверяет уникальность username (409 при конфликте → показывается inline-ошибка);
-- создаёт пользователя с `role=user`;
-- помечает заявку как `approved`.
-
-**Отклонить:** `POST /api/admin/registration-requests/{id}/reject` — помечает заявку как `rejected`.
-
-После каждого действия список заявок обновляется автоматически.
-
-### Вкладка «Пользователи»
-
-Отображает всех пользователей: id, username, displayName, role, дата регистрации.
-
-Кнопка **Сбросить пароль** — открывает inline-форму для ввода временного пароля.
-
-`POST /api/admin/users/{id}/reset-password` с телом `{ "temp_password": "..." }`:
-- обновляет `password_hash` в БД;
-- admin сообщает временный пароль пользователю out-of-band (по телефону, email и т.п.);
-- пользователь входит с временным паролем и должен сменить его.
-
-### Вкладка «Инвайты»
-
-Отображает список инвайт-кодов с полями: код, создан кем, использован кем, срок действия.
-
-Кнопка **Создать** — `POST /api/admin/invite-codes` (опционально: `expires_at` в ms).
-
-Созданный код администратор передаёт пользователю. Пользователь вводит его при регистрации.
-
-### Вкладка «Сброс паролей»
-
-Отображает список запросов сброса пароля со статусом `pending`: username (ищется по user_id), дата создания.
-
-Кнопка **Закрыть** — `POST /api/admin/password-reset-requests/{id}/resolve`:
-- помечает запрос как `resolved`;
-- означает, что администратор уже передал временный пароль пользователю.
-
-### Общие принципы AdminPage UI
-
-- Переключение вкладки автоматически очищает `error` и `successMsg`.
-- Все ошибки API показываются inline (без `alert()`).
-- Успешные действия показывают inline-сообщение об успехе.
-- Данные загружаются при монтировании и перезагружаются после каждой мутации.
-
-## 17. Frontend: REST API клиент
-
-Файл: [`client/src/api/client.ts`](/Users/dim/vscodeproject/messenger/client/src/api/client.ts)
-
-### 17.1 Общая модель
-
-Клиент использует единый helper `req<T>()`, который:
-
-- строит URL как `${getServerUrl()}${path}` — BASE динамически читается из localStorage;
-- автоматически подставляет `Authorization: Bearer <accessToken>`;
-- отправляет `credentials: include` для refresh cookie;
-- при `401` один раз выполняет silent refresh;
-- повторяет исходный запрос после успешного refresh.
-
-### 17.2 Поддерживаемые методы
-
-API-клиент реализует методы:
-
-- `register`
-- `login`
-- `refresh`
-- `logout`
-- `getKeyBundle`
-- `uploadPreKeys`
-- `getChats`
-- `createChat`
-- `getMessages`
-- `uploadMedia` (нешифрованный, устарел)
-- `uploadEncryptedMedia(file, chatId?)` — шифрует XSalsa20-Poly1305, загружает ciphertext, возвращает `{mediaId, mediaKey, originalName, contentType}`
-- `fetchMediaBlobUrl(mediaId)` — загружает с JWT, возвращает кешированный object URL
-- `fetchEncryptedMediaBlobUrl(mediaId, mediaKey, mimeType)` — скачивает, расшифровывает, кеширует blob URL
-- `deleteMessage`
-- `editMessage`
-- `subscribePush`
-- `searchUsers`
-- `getServerInfo` — GET `/api/server/info`, без токена
-- `requestRegister` — POST `/api/auth/request-register`
-- `passwordResetRequest` — POST `/api/auth/password-reset-request`
-
-## 18. Frontend: WebSocket клиент
-
-Файл: [`client/src/api/websocket.ts`](/Users/dim/vscodeproject/messenger/client/src/api/websocket.ts)
-
-`MessengerWS` поддерживает:
-
-- подключение к `/ws?token=<JWT>`;
-- автоматический reconnect с exponential backoff;
-- распознавание auth failure через код `4001`;
-- попытку refresh токена и повторное подключение;
-- callbacks `onConnect`, `onDisconnect`, `onAuthFail`.
-
-## 19. Frontend: Zustand stores
-
-### 19.1 `authStore`
-
-Файл: [`client/src/store/authStore.ts`](/Users/dim/vscodeproject/messenger/client/src/store/authStore.ts)
-
-Хранит:
-
-- `currentUser`
-- `accessToken`
-- `isAuthenticated`
-- `role` (`'admin' | 'user' | null`) — устанавливается из ответа login; включён в `partialize` (persist)
-
-Также реализует:
-
-- `setSession` / `login` — устанавливает `accessToken`, `currentUser`, `role`
-- `logout` — сбрасывает все поля включая `role`
-
-### 19.2 `chatStore`
-
-Файл: [`client/src/store/chatStore.ts`](/Users/dim/vscodeproject/messenger/client/src/store/chatStore.ts)
-
-Хранит:
-
-- `chats`
-- `messages` как словарь `chatId -> Message[]`
-- `typingUsers`
-
-Операции:
-
-- `setChats` — при вызове автоматически сохраняет список в IndexedDB через `saveChats()`
-- `upsertChat` — при изменении `members` группового чата fire-and-forget вызывает `invalidateGroupSenderKey(chatId)`, чтобы следующая отправка создала новый SenderKey
-- `addMessage`
-- `prependMessages`
-- `updateMessageStatus`
-- `deleteMessage`
-- `editMessage`
-- `setTyping`
-- `markRead`
-- `reset()` — сбрасывает `chats: [], messages: {}` при смене сервера
-
-Есть локальная дедупликация сообщений и optimistic update.
-
-### 19.3 Offline-хранилище: `messageDb` и `outboxDb`
-
-Файлы:
-
-- [`client/src/store/messageDb.ts`](/Users/dim/vscodeproject/messenger/client/src/store/messageDb.ts)
-- [`client/src/store/outboxDb.ts`](/Users/dim/vscodeproject/messenger/client/src/store/outboxDb.ts)
-
-**`messageDb`** использует `idb-keyval` (IndexedDB `messenger-data/data`) для персистентности:
-
-- `saveMessages(chatId, msgs)` / `loadMessages(chatId)` — полный массив сообщений на чат (до 200 последних);
-- `appendMessages(chatId, newMsgs)` — дедуплицирующее добавление без перезаписи;
-- `updateMessageStatusInDb(chatId, msgId, status)` — обновление статуса одного сообщения;
-- `saveChats(chats)` / `loadChats()` — список чатов.
-
-**`outboxDb`** хранит исходящие сообщения, которые не удалось отправить из-за offline:
-
-- `OutboxItem` содержит `frame` (уже зашифрованный WSSendFrame), `optimisticMsg` и `enqueuedAt`;
-- `enqueueOutbox` / `loadOutbox` / `removeFromOutbox` / `clearOutbox`.
-
-### 19.3 `wsStore`
-
-Файл: [`client/src/store/wsStore.ts`](/Users/dim/vscodeproject/messenger/client/src/store/wsStore.ts)
-
-Назначение:
-
-- хранить функцию отправки в текущий WebSocket transport;
-- дать UI-компонентам доступ к `send` без прямой зависимости от экземпляра `MessengerWS`.
-
-## 20. Frontend: страницы и UI-компоненты
-
-### 20.1 `AuthPage`
-
-Файл: [`client/src/pages/AuthPage.tsx`](/Users/dim/vscodeproject/messenger/client/src/pages/AuthPage.tsx)
-
-Функции:
-
-- логин и регистрация;
-- генерация локальных identity keys;
-- создание signed prekey и пачки one-time prekeys;
-- отправка публичных ключей при регистрации;
-- сохранение локальных приватных ключей в IndexedDB.
-
-### 20.2 `ChatListPage` и `ChatList`
-
-Файлы:
-
-- [`client/src/pages/ChatListPage.tsx`](/Users/dim/vscodeproject/messenger/client/src/pages/ChatListPage.tsx)
-- [`client/src/components/ChatList/ChatList.tsx`](/Users/dim/vscodeproject/messenger/client/src/components/ChatList/ChatList.tsx)
-
-Функции:
-
-- загрузка списка чатов;
-- переход в чат;
-- отображение времени последней активности;
-- модалка создания нового чата.
-
-### 20.3 `NewChatModal`
-
-Файл: [`client/src/components/NewChatModal/NewChatModal.tsx`](/Users/dim/vscodeproject/messenger/client/src/components/NewChatModal/NewChatModal.tsx)
-
-Поддерживает:
-
-- прямой чат с одним пользователем;
-- групповой чат;
-- поиск пользователей с debounce;
-- выбор нескольких участников;
-- локальный `upsertChat` после создания.
-
-### 20.4 `ChatWindowPage` и `ChatWindow`
-
-Файлы:
-
-- [`client/src/pages/ChatWindowPage.tsx`](/Users/dim/vscodeproject/messenger/client/src/pages/ChatWindowPage.tsx)
-- [`client/src/components/ChatWindow/ChatWindow.tsx`](/Users/dim/vscodeproject/messenger/client/src/components/ChatWindow/ChatWindow.tsx)
-
-Это центральный UI-модуль проекта. Он реализует:
-
-- загрузку истории сообщений по курсору;
-- optimistic sending;
-- очередь отправки при отсутствии активного WS;
-- вложения и предварительное превью изображений;
-- редактирование собственных сообщений;
-- удаление собственных сообщений;
-- context menu;
-- long press на мобильных устройствах;
-- typing indicator;
-- статус `sending/sent/delivered/read/failed`.
-
-Особенности:
-
-- сообщение шифруется отдельно для каждого получателя;
-- для вложения формируется JSON payload с `mediaId`, `originalName`, `mediaType`, `text`;
-- есть fallback на plain base64, если E2E-шифрование не удалось.
-
-### 20.5 `ProfilePage` и `Profile`
-
-Файлы:
-
-- [`client/src/pages/ProfilePage.tsx`](/Users/dim/vscodeproject/messenger/client/src/pages/ProfilePage.tsx)
-- [`client/src/components/Profile/Profile.tsx`](/Users/dim/vscodeproject/messenger/client/src/components/Profile/Profile.tsx)
-
-Показывают:
-
-- `displayName`
-- `username`
-- укороченный публичный identity key
-- кнопку logout
-
-## 21. Frontend: WebSocket orchestration
-
-Файл: [`client/src/hooks/useMessengerWS.ts`](/Users/dim/vscodeproject/messenger/client/src/hooks/useMessengerWS.ts)
-
-Хук:
-
-- создаёт и жизненно циклично обслуживает `MessengerWS`;
-- при входящих `message` определяет тип (direct/group) и вызывает `decryptMessage` или `decryptGroupMessage`;
-- при `message_edited` расшифровывает новый ciphertext;
-- при `message_deleted` удаляет сообщение из стора;
-- при `typing` ставит typing state;
-- при `ack` обновляет статус оптимистичного сообщения;
-- при `read` обновляет статус сообщения; при `userId == currentUser` сбрасывает unread badge;
-- при `skdm` вызывает `handleIncomingSKDM` — сохраняет SenderKey участника;
-- при `prekey_low` вызывает `replenishPreKeys()` — генерирует 20 новых OPK и загружает на сервер.
-
-Также хук:
-
-- при необходимости дозагружает список чатов, если сообщение пришло в неизвестный чат;
-- выполняет logout при безуспешном refresh WebSocket-токена;
-- при расшифровке входящего сообщения вызывает `appendMessages(chatId, [msg])` — сохраняет в IndexedDB для offline-доступа.
-
-## 21.2 `useOfflineSync`
-
-Файл: [`client/src/hooks/useOfflineSync.ts`](/Users/dim/vscodeproject/messenger/client/src/hooks/useOfflineSync.ts)
-
-Хук отслеживает смену `wsSend` с `null` на функцию (WS только что подключился). При восстановлении соединения:
-
-- загружает очередь из `outboxDb`;
-- отправляет каждый кешированный фрейм через `wsSend`;
-- при успешной отправке удаляет элемент из очереди и обновляет статус сообщения.
-
-## 21.3 `useNetworkStatus`
-
-Файл: [`client/src/hooks/useNetworkStatus.ts`](/Users/dim/vscodeproject/messenger/client/src/hooks/useNetworkStatus.ts)
-
-Возвращает `{ isOnline: boolean }`. Слушает `window` события `online`/`offline` и инициализируется из `navigator.onLine`.
-
-## 22. Frontend: push-уведомления
-
-### 22.1 Hook
-
-Файл: [`client/src/hooks/usePushNotifications.ts`](/Users/dim/vscodeproject/messenger/client/src/hooks/usePushNotifications.ts)
-
-Логика:
-
-- проверка `serviceWorker` и `PushManager`;
-- запрос разрешения у пользователя;
-- получение публичного VAPID-ключа;
-- подписка через `registration.pushManager.subscribe`;
-- отправка подписки на сервер через `api.subscribePush`.
-
-### 22.2 Service Worker
-
-Файл: [`client/public/push-handler.js`](/Users/dim/vscodeproject/messenger/client/public/push-handler.js)
-
-Поддерживает:
-
-- показ системных уведомлений;
-- переход в приложение по клику;
-- обработку `pushsubscriptionchange`.
-
-Важно: в `pushsubscriptionchange` fetch на `/api/push/subscribe` не добавляет `Authorization` header. Так как этот маршрут защищён JWT middleware, автоматическое переподключение подписки может не сработать в текущем виде без дополнительной серверной или клиентской логики.
-
-## 23. Frontend: криптография и локальное хранилище
-
-### 23.1 `keystore.ts`
-
-Файл: [`client/src/crypto/keystore.ts`](/Users/dim/vscodeproject/messenger/client/src/crypto/keystore.ts)
-
-Через `idb-keyval` в IndexedDB сохраняются:
-
-- identity key pair (`identity_key`);
-- signed prekey (`signed_prekey`);
-- one-time prekeys (`one_time_prekeys` — массив, `appendOneTimePreKeys` добавляет без перезаписи);
-- ratchet session state (`ratchet:{chatId}`);
-- my SenderKey для группы (`my_sender_key:{chatId}`);
-- peer SenderKey от участника (`peer_sender_key:{chatId}:{senderId}`);
-- device ID (`device_id`);
-- push subscription;
-- время последнего replenish prekeys (`prekey_replenish_ts`) — cooldown 5 минут.
-
-Дополнительные функции:
-- `deleteMySenderKey(chatId)` — удаляет `my_sender_key:{chatId}` (вызывается при смене состава группы);
-- `isPreKeyReplenishOnCooldown()` / `savePreKeyReplenishTime()` — защита от слишком частого пополнения OPK при `prekey_low`.
-
-### 23.2 `x3dh.ts`
-
-Файл: [`client/src/crypto/x3dh.ts`](/Users/dim/vscodeproject/messenger/client/src/crypto/x3dh.ts)
-
-Реализует:
-
-- инициализацию `libsodium`;
-- генерацию DH key pairs;
-- derivation shared secret для initiator/responder;
-- base64 helpers;
-- X3DH handshake primitives.
-
-### 23.3 `ratchet.ts`
-
-Файл: [`client/src/crypto/ratchet.ts`](/Users/dim/vscodeproject/messenger/client/src/crypto/ratchet.ts)
-
-Реализует полный Double Ratchet по спецификации Signal:
-
-- symmetric ratchet (chain key → message key derivation через HMAC-SHA256);
-- DH ratchet при смене ключей (два шага: recv chain + send chain);
-- `initRatchet` следует Signal spec: Alice (initiator) выполняет `DH(aliceKey, bobKey) + KDF` для `sendChainKey`; Bob (responder) стартует с `dhRemotePublic=null` — первое сообщение Alice триггернёт DH ratchet, который даёт Bob и recv, и sendChainKey;
-- кэш skipped message keys: `SkippedKeyEntry { key: string, storedAt: number }`, лимит `MAX_SKIP=100`, TTL 7 дней (`purgeExpiredSkippedKeys` вызывается при decrypt и сериализации);
-- `prevSendCount` (pn) в заголовке для out-of-order доставки;
-- `ratchetEncrypt` / `ratchetDecrypt` (при расшифровке сначала ищет skipped cache);
-- сериализацию/десериализацию состояния для IndexedDB, backward-compat со старым форматом (строка → `{ key, storedAt }`).
-
-### 23.4 `session.ts`
-
-Файл: [`client/src/crypto/session.ts`](/Users/dim/vscodeproject/messenger/client/src/crypto/session.ts)
-
-Orchestration-слой над X3DH, Double Ratchet и Sender Keys:
-
-- `encryptMessage(chatId, recipientId, plaintext)` — direct E2E через X3DH+Ratchet;
-- `decryptMessage(chatId, senderId, ciphertext)` — direct E2E decrypt;
-- `encryptGroupMessage(chatId, myUserId, members, plaintext)` — lazy SKDM при первом сообщении, затем SenderKey encrypt;
-- `decryptGroupMessage(chatId, senderId, ciphertext)` — SenderKey decrypt;
-- `handleIncomingSKDM(chatId, senderId, ciphertext)` — расшифровывает SKDM через E2E сессию, сохраняет peer SenderKey;
-- `tryDecryptPreview(chatId, senderId, ciphertext)` — безопасный декрипт для превью (`lastMessage`): перехватывает ошибки, возвращает `'Зашифрованное сообщение'` при неудаче, `'📎 Вложение'` для медиа;
-- `invalidateGroupSenderKey(chatId)` — удаляет собственный SenderKey из IndexedDB; вызывается из `chatStore.upsertChat` при изменении состава группы, чтобы следующая отправка создала новый SenderKey и разослала SKDM.
-
-Wire payload для direct-сообщений кодируется как `base64(JSON)` и содержит:
-
-- `v` (версия)
-- `ek` (ephemeral key, для первого сообщения)
-- `opkId` (использованный OPK)
-- `ikPub` (public identity key)
-- `msg` (Double Ratchet ciphertext)
-
-Wire payload для групп — `base64(JSON)` с полем `type: "group"`.
-
-### 23.5 `senderkey.ts`
-
-Файл: [`client/src/crypto/senderkey.ts`](/Users/dim/vscodeproject/messenger/client/src/crypto/senderkey.ts)
-
-Реализует Sender Key Protocol для групп:
-
-- `generateSenderKey()` — chain key + Ed25519 signing keypair;
-- `senderKeyEncrypt(state, plaintext)` — AES-CBC + HMAC, продвигает chain;
-- `senderKeyDecrypt(state, payload)` — с поддержкой skipped iteration cache;
-- `createSKDistribution(state)` — создаёт SKDM для передачи участникам;
-- `importSKDistribution(encoded)` — импортирует SKDM от другого участника;
-- сериализация/десериализация для IndexedDB.
-
-## 24. PWA и сборка клиента
-
-Файл: [`client/vite.config.ts`](/Users/dim/vscodeproject/messenger/client/vite.config.ts)
-
-### 24.1 Особенности конфигурации
-
-- alias `@ -> src`
-- кастомный resolver для `libsodium-wrappers`, который принудительно ведёт на CJS-сборку
-- `VitePWA` с `generateSW`
-- `registerType: autoUpdate`
-
-### 24.2 Runtime caching
-
-Настроено кэширование:
-
-- `/api/*` через `NetworkFirst` с `networkTimeoutSeconds: 5` — при плохой сети быстро переходит на кэш
-- `/media/*` через `CacheFirst`
-
-### 24.3 Dev proxy
-
-В dev-режиме клиент проксирует:
-
-- `/api` -> `http://localhost:8080`
-- `/ws` -> `ws://localhost:8080`
-- `/media` -> `http://localhost:8080`
-
-Фактический dev-порт в конфиге: `3000`.
-
-Это расходится с частью документации, где ещё указан `5173`.
-
-## 25. Типы обмена данными
-
-Файл: [`client/src/types/index.ts`](/Users/dim/vscodeproject/messenger/client/src/types/index.ts)
-
-Ключевые типы:
-
-- `User`
-- `Chat`
-- `Message`
-- `PublicKeyBundle`
-- `WSFrame`
-- `WSSendFrame`
-
-Сервер и клиент используют разные DTO-слои:
-
-- на сервере Go-структуры;
-- на клиенте TypeScript-модели;
-- при этом часть полей клиент поддерживает локально, даже если сервер пока их не заполняет.
-
-## 26. Запуск и режимы эксплуатации
-
-### 26.1 Backend
+| `users` | `id, username UNIQUE, display_name, password_hash, role ∈ {user,moderator,admin}, status ∈ {active,suspended,banned}, session_epoch, created_at` |
+| `sessions` | `id, user_id → users, token_hash, expires_at` (refresh tokens) |
+| `contacts` | `(user_id, contact_id)` |
+| `conversations` | `id, type ∈ {direct,group}, name, created_at, default_ttl, max_members` |
+| `conversation_members` | `(conversation_id, user_id)` |
+| `messages` | `id, client_msg_id, conversation_id, sender_id, recipient_id, destination_device_id, ciphertext BLOB, sender_key_id, reply_to_id, is_deleted, edited_at, created_at, delivered_at, read_at, expires_at` |
+| `push_subscriptions` | `id, user_id, endpoint, p256dh BLOB, auth BLOB` (Web Push) |
+| `native_push_tokens` | FCM + APNs токены на устройство |
+| `devices` | `id, user_id, device_name, created_at, last_seen_at` |
+| `device_link_tokens` | QR-pairing, TTL 120s |
+| `identity_keys` | `(user_id, device_id)` PK, `ik_public, spk_public, spk_signature, spk_id, updated_at` |
+| `pre_keys` (OPK) | `id, user_id, device_id, key_public, used` |
+| `chat_user_state` | `(conversation_id, user_id)` → `last_read_message_id, unread_count` |
+| `media_objects` | `id, uploader_id, conversation_id, filename, original_name, content_type, size, client_msg_id, created_at` |
+| `invite_codes` | `code, created_by, used_by, expires_at, revoked_at` |
+| `invite_activations` | IP/UA/activated_at (журнал активаций) |
+| `registration_requests` | `status ∈ {pending,approved,rejected}, reviewed_at, reviewed_by` |
+| `password_reset_requests` | `status ∈ {pending,completed,rejected}, temp_password` |
+| `user_quotas` | `user_id, quota_bytes, used_bytes` |
+| `settings` | `key, value` (retention, max_group_members и т. п.) |
+| `bots` | `id, name, owner_id, token_hash UNIQUE, webhook_url, active, created_at` |
+| `schema_migrations` | `id, applied_at` (трекер версий) |
+
+### 3.3 Миграции (`server/db/migrate.go`)
+
+28 миграций под id 1…28. Применение — `RunMigrations(db)`: создаёт `schema_migrations`, применяет в транзакциях недоставленные записи, поддерживает `Steps []string` для multi-statement DDL; идемпотентно игнорирует `duplicate column name / no such table / already exists` и помечает миграцию как применённую.
+
+Краткий реестр:
+
+| id | Что делает |
+|---:|---|
+| 1 | `messages.client_msg_id` |
+| 2 | `messages.recipient_id NOT NULL DEFAULT ''` |
+| 3 | `messages.is_deleted` |
+| 4 | `messages.edited_at` |
+| 5 | `identity_keys.device_id` |
+| 6 | `pre_keys.device_id` |
+| 7 | Multi-step: пересборка PK identity_keys/pre_keys под `(user_id, device_id)` |
+| 8 | `messages.destination_device_id` |
+| 9 | `users.role` |
+| 10 | `invite_codes` |
+| 11 | `registration_requests` |
+| 12 | `password_reset_requests` |
+| 13 | Multi-step |
+| 14 | `media_objects.client_msg_id` |
+| 15 | `messages.reply_to_id` |
+| 16 | `native_push_tokens` |
+| 17 | `invite_codes.revoked_at` |
+| 18 | Multi-step |
+| 19 | `users.status CHECK(active/suspended/banned)` |
+| 20 | `users.session_epoch` |
+| 21 | `messages.expires_at` |
+| 22 | `conversations.default_ttl` |
+| 23 | `device_link_tokens` |
+| 24 | `user_quotas` |
+| 25 | `settings` |
+| 26 | No-op (`SELECT 1`) |
+| 27 | `conversations.max_members` |
+| 28 | `bots` |
+
+CLI-обёртка: `scripts/db-migrate.sh` (`--db`, `--dry-run`, `--version`, `--rollback N`; `TOTAL_MIGRATIONS=28`).
+
+---
+
+## 4. REST API справочник
+
+Префикс `/api`. Ниже — сгруппированный список. Контракт тел запроса/ответа — `docs/api-reference.md` + `shared/protocol/`.
+
+### 4.1 Публичные (без JWT)
+
+| Метод | Путь | Назначение |
+|---|---|---|
+| GET | `/api/server/info` | Имя/описание/режим регистрации/лимиты |
+| GET | `/api/version` | Текущая и минимальная версии клиента, changelog |
+| POST | `/api/client-errors` | Приём логов ошибок |
+| GET | `/api/push/vapid-public-key` | Публичный VAPID-ключ |
+
+### 4.2 Auth (rate-limited, 20/min per IP)
+
+| Метод | Путь | Назначение |
+|---|---|---|
+| POST | `/api/auth/register` | Открытая регистрация или по инвайту |
+| POST | `/api/auth/login` | Логин → JWT + refresh cookie |
+| POST | `/api/auth/logout` | Инвалидация refresh |
+| POST | `/api/auth/refresh` | Обновление access token |
+| POST | `/api/auth/request-register` | Заявка на регистрацию (mode=approval) |
+| POST | `/api/auth/password-reset-request` | Заявка админу на сброс пароля (no user enumeration) |
+| POST | `/api/auth/device-link-activate` | Активация QR-токена нового устройства |
+
+### 4.3 Authenticated (JWT + `AccountStatusMiddleware`)
+
+| Метод | Путь | Назначение |
+|---|---|---|
+| POST | `/api/auth/change-password` | Смена пароля |
+| POST | `/api/auth/device-link-request` | Выдать QR-токен для нового устройства |
+| GET / DELETE | `/api/devices`, `/api/devices/{deviceId}` | Список/отвязка устройств |
+| GET | `/api/users/search` | Поиск пользователей по username |
+| GET / POST | `/api/chats` | Список/создание чатов |
+| GET | `/api/chats/{id}/messages` | История (opaque cursor) |
+| POST | `/api/chats/{id}/read` | Отметить прочитанным |
+| POST | `/api/chats/{id}/ttl` | TTL чата |
+| POST | `/api/chats/{id}/members` | Добавить участников |
+| GET | `/api/chats/{id}/media` | Список медиа чата |
+| DELETE | `/api/messages/{clientMsgId}` | Удалить сообщение (soft) |
+| PATCH | `/api/messages/{clientMsgId}` | Редактировать |
+| GET | `/api/keys/{userId}` | X3DH bundle |
+| POST | `/api/keys/prekeys` | Пополнить OPK |
+| POST | `/api/keys/register` | Регистрация/обновление device key bundle |
+| POST | `/api/push/subscribe` | Web Push подписка |
+| POST | `/api/push/native/register` | FCM/APNs токен |
+| POST | `/api/media/upload` | Upload ciphertext blob |
+| GET | `/api/media/{id}` | Download ciphertext blob |
+| GET | `/api/calls/ice-servers` | STUN/TURN креды |
+| POST | `/api/calls/room` | Создать SFU-комнату |
+| DELETE | `/api/calls/room/{roomId}` | Закрыть |
+| GET | `/api/calls/room/{roomId}/participants` | Список участников |
+| POST | `/api/calls/room/{roomId}/join` | Присоединиться |
+| POST | `/api/calls/room/{roomId}/leave` | Покинуть |
+| GET | `/api/downloads/manifest` | Манифест native-артефактов |
+| GET | `/api/downloads/{filename}` | Скачать native-артефакт |
+
+### 4.4 Admin (JWT + `RequireAdmin`)
+
+| Метод | Путь |
+|---|---|
+| GET / POST | `/api/admin/registration-requests`, `/{id}/approve`, `/{id}/reject` |
+| GET / POST | `/api/admin/invite-codes`, DELETE `/{code}`, GET `/{code}/activations` |
+| GET | `/api/admin/users` |
+| POST | `/api/admin/users/{id}/reset-password`, `/suspend`, `/unsuspend`, `/ban`, `/revoke-sessions`, `/remote-wipe` |
+| GET / PUT | `/api/admin/users/{id}/quota` |
+| PUT | `/api/admin/users/{id}/role` |
+| GET / PUT | `/api/admin/settings/retention`, `/api/admin/settings/max-group-members` |
+| GET | `/api/admin/password-reset-requests` |
+| POST | `/api/admin/password-reset-requests/{id}/resolve` |
+| GET | `/api/admin/system/stats`, `/api/admin/system/stream` (SSE) |
+
+### 4.5 Bots
+
+Создание/редактирование — через admin-эндпоинты; отправка сообщений ботом — bot-token middleware. Webhook-доставка идёт от сервера к URL бота, `X-Messenger-Signature: HMAC-SHA256(body, bot_secret)`, timeout 5s, retry 1s→2s→4s, URL-allowlist localhost/RFC-1918.
+
+### 4.6 Static
+
+- `GET /assets/*` — embedded (`//go:embed static`).
+- `GET /*` — SPA fallback на `index.html`.
+
+---
+
+## 5. WebSocket
+
+Соединение: `GET /ws?token=<JWT>` (или `Authorization: Bearer ...`). Реализация: `server/internal/ws/hub.go`.
+
+### 5.1 Клиент → сервер (типы фреймов)
+
+| Тип | Назначение |
+|---|---|
+| `message` | Отправка сообщения в чат. Тело включает `chatId` и список `recipients:[{userId, deviceId, ciphertext}]` |
+| `skdm` | Sender Key Distribution Message (рассылка SenderKey внутри группы) |
+| `typing` | Индикатор набора |
+| `read` | Read marker (`chatId, messageId`) |
+| `call_offer` | SDP offer 1:1 |
+| `call_answer` | SDP answer 1:1 |
+| `call_end` / `call_reject` / `call_busy` | Завершение/отказ/занято |
+| `ice_candidate` | ICE-кандидат |
+| `group-call.*` | Сигнализация для SFU (`join`, `leave`, `offer`, `answer`, `ice`) |
+
+Маршрутизация в `hub.go`: `switch msg.Type`. Полный свод входящих веток — `server/internal/ws/hub.go:372…`.
+
+### 5.2 Сервер → клиент
+
+| Тип | Когда |
+|---|---|
+| `message` | Входящее сообщение, `{chatId, messageId, clientMsgId, senderId, ciphertext, senderKeyId, timestamp}` |
+| `ack` | Подтверждение, что сервер принял отправленное сообщение |
+| `message_deleted` | `{chatId, clientMsgId}` |
+| `message_edited` | `{chatId, clientMsgId, ciphertext, editedAt}` |
+| `typing` | `{chatId, userId}` |
+| `read` | `{chatId, messageId, userId}` |
+| `skdm` | Входящий SKDM от участника группы |
+| `prekey_low` | `{count}` — OPK < 10, пополнить через REST |
+| `prekey_request` | Устаревший, оставлен для обратной совместимости |
+| `call_*` | Транзитные signalling-события |
+| `group-call.*` | SFU-сигналы |
+
+### 5.3 Потоки
+
+- Входящий message → хаб кладёт в БД (`messages`), fan-out участникам чата онлайн.
+- 1:1 звонок: хаб транзитно пересылает `call_offer/answer/ice/end/reject/busy` между двумя клиентами, хранит минимальное in-memory состояние звонка.
+- Групповой звонок: `group-call.*` проходит через `sfu.Manager` (см. §7).
+- Presence: `devices.last_seen_at` обновляется в WS и части REST-эндпоинтов.
+
+Тесты: `hub_test.go`, `hub_calls_test.go`.
+
+---
+
+## 6. Web-клиент (`client/`)
+
+### 6.1 Стек
+
+- React 18, TypeScript 5.5, Vite 8 (`vite@^8.0.9` в `package.json`).
+- Zustand 4, React Router v6, `libsodium-wrappers` (+ `-sumo` для тестов).
+- IndexedDB через `idb-keyval`.
+- `vite-plugin-pwa` (generateSW, autoUpdate, 4 МБ лимит кэша, `importScripts: ['/push-sw.js']`).
+- Тесты: Vitest + coverage v8 (threshold 60% lines/functions), Playwright (`npm run test:e2e`).
+- Lint: ESLint, `--max-warnings 0`.
+- Dev-proxy Vite: `/api`, `/ws`, `/media` → `http://localhost:8080`.
+- Прочее: `qrcode.react`, `recharts`, `date-fns`, `clsx`.
+
+### 6.2 Структура `client/src/`
+
+- `api/` — `client.ts` (REST + encrypted media helpers), `websocket.ts`.
+- `config/` — `serverConfig.ts` (multi-server URL), `version.ts`.
+- `crypto/` — `x3dh.ts`, `session.ts`, `ratchet.ts`, `senderkey.ts`, `keystore.ts` (IndexedDB под vault).
+- `store/` (Zustand + IndexedDB):
+  - `authStore` — access token, role, current user.
+  - `callStore` — состояние звонка, participants, peers.
+  - `chatStore` — чаты, их метаданные; `reset()` при смене сервера.
+  - `messageDb`, `outboxDb` — персистенция сообщений и отправленной очереди.
+  - `serverInfoStore` — `/api/server/info` снапшот.
+  - `vaultStore` — passphrase-gate, состояние vault.
+  - `wsStore` — состояние WebSocket (через shared runtime).
+- `hooks/`:
+  - `useMessengerWS` — главный WS-жизненный цикл (использует `shared/native-core/websocket`).
+  - `useCallHandler`, `useWebRTC` — обработка звонков через shared `call-controller`.
+  - `useBrowserWSBindings` — привязка WS-платформы (timers, WebSocket fabric).
+  - `useNetworkStatus`, `useOfflineSync` — offline-очередь.
+  - `usePushNotifications` — подписка на Web Push.
+- `components/` — `CallOverlay`, `ChatList`, `ChatWindow`, `GalleryModal`, `GroupCallView`, `LinkDevice`, `NewChatModal`, `OfflineIndicator`, `PassphraseGate`, `Profile`, `SafetyNumber`, `VoiceMessage`, `VoiceRecorder`.
+- `pages/` — `AdminPage`, `AuthPage`, `ChatListPage`, `ChatWindowPage`, `DownloadsPage`, `LinkDevicePage`, `ProfilePage`, `ServerSetupPage`.
+- `lib/logger.ts`, `styles/globals.css`, `types/index.ts`, `utils/ringtone.ts`.
+- `public/push-handler.js` + `push-sw.js` — Service Worker.
+
+### 6.3 Потоки web-клиента
+
+- Старт: `initServerUrl` → `ServerSetupPage` (если URL не задан) → `AuthPage`.
+- Разблокировка: `PassphraseGate` — до разблокировки vault UI чатов скрыт.
+- WS: `useMessengerWS` подписывается через shared orchestrator; reconnect/backoff внутри `shared/native-core/websocket`.
+- Offline: `outboxDb` буферизует исходящие, `useOfflineSync` переигрывает при возврате сети.
+- Push: Service Worker реагирует на push-payload, показывает уведомление, открывает нужный чат.
+
+---
+
+## 7. Shared / native-core (`shared/native-core/`)
+
+TypeScript-рантайм; source of truth для web и контрактная база для native.
+
+### 7.1 Публичные подсистемы
+
+| Подсистема | Ключевые модули | API (коротко) |
+|---|---|---|
+| `auth` | `session-runtime.ts` | `AuthSessionRuntime`: login, logout, refresh, token state, listeners |
+| `api` | `web/browser-api-client.ts` | `BrowserApiClient`: fetch-обёртка для REST, авто-подстановка JWT, refresh on 401 |
+| `websocket` | `connection-runtime.ts`, `web/*` | `ConnectionRuntime` + orchestrator: коннект, reconnect, ping, маршрутизация фреймов |
+| `messages` | `message-repository.ts` | Персистенция сообщений и outbox |
+| `crypto` | `aesGcm`, `cryptoVault`, `crypto-runtime`, `web-crypto-adapter`, `web/{ratchet-web, senderkey-web, session-web, x3dh-web, web-helpers}`, `seed-vectors`, `test-vector-runner` | X3DH/Double Ratchet/Sender Keys + AES-GCM vault + test-vectors runner |
+| `storage` | `storage-runtime`, `web/{browser-keystore, encryptedStore, vaultMigration}` | Платформонезависимое key-value + шифрованное хранилище |
+| `calls` | `call-controller`, `call-session`, `web/{browser-webrtc-platform, browser-webrtc-runtime, call-handler-orchestrator, call-ws-types}` | Управление звонками 1:1/групповыми, браузерный WebRTC-адаптер |
+| `sync` | `sync-engine.ts` | Фоновая синхронизация сообщений |
+
+Прочее: `index.ts` (публичные экспорты), `module.json`, `package.json`, `README.md`, `tsconfig(.build).json`.
+
+### 7.2 Остальные пакеты `shared/`
+
+- `shared/protocol/` — JSON-схемы REST, WS envelope, message payload.
+- `shared/crypto-contracts/` — `aes-gcm-spec.md`, `interfaces.md`, `README.md`.
+- `shared/domain/` — `auth-session.md`, `events.md`, `interfaces.md`, `models.md`, `repositories.md`, `sync-engine.md`, `websocket-lifecycle.md`.
+- `shared/test-vectors/` — cross-platform векторы (Go/TS/Kotlin/Swift сверяются одним набором).
+
+---
+
+## 8. Native apps
+
+### 8.1 Desktop (`apps/desktop/`)
+
+- Kotlin + Compose Multiplatform Desktop.
+- `build.gradle.kts`, `settings.gradle.kts`.
+- `src/main/kotlin/Main.kt` — `application { Window { App() } }`.
+- CI taskи: `packageDmg`, `packageDeb`, `packageMsi` (matrix: macOS arm64, macOS x86_64, Linux, Windows).
+- Подпись опциональная: macOS (`MACOS_CERTIFICATE_BASE64/PASSWORD` + `MACOS_SIGNING_IDENTITY`), Windows (`WINDOWS_PFX_BASE64/PASSWORD` + `signtool`).
+
+### 8.2 Android (`apps/mobile/android/`)
+
+- Kotlin + Jetpack Compose + SQLDelight.
+- Gradle: plugins — `android-application`, `kotlin-android`, `kotlin-compose`, `kotlin-serialization`, `sqldelight`.
+- `compileSdk=35`, `minSdk=26`, `targetSdk=35`, `versionCode=1`, `versionName=1.0`, `jvmTarget=17`, `applicationId=com.messenger`.
+- Ключевые зависимости: `compose-bom`, `compose-material3`, `ktor-client` (+ `okhttp`, `content-negotiation`, `auth`, `websockets`), `kotlinx-serialization-json`, `lazysodium-android`, `sqldelight-android-driver`, `kotlinx-coroutines`, `coil-compose`.
+- CI job: `assembleRelease` при наличии keystore-secrets, иначе `assembleDebug`.
+- Kotlin-исходники (ChatWindowScreen, MessageBubble, EncryptedMediaFetcher, AppState, ApiClient, ChatWindowViewModel, MessengerApp и др.) добавлялись планами `docs/superpowers/plans/2026-04-13-android-client.md` и `2026-04-14-android-file-transfer.md`. На baseline `60d7c93` точное дерево исходников **сверять через `git ls-tree`** — в отчёте снимка это отмечено как риск.
+
+### 8.3 iOS (`apps/mobile/ios/`)
+
+- SwiftUI + Swift Package Manager.
+- `Package.swift` — манифест SPM.
+- `Sources/Messenger/`: `App.swift` (SwiftUI entry + `AppDelegate` для APNs, WebRTC через `#if canImport(WebRTC)`), `BuildConfig.swift`, `UpdateCheckerService.swift`.
+- `Sources/MessengerCrypto/`: `Ratchet.swift`, `SenderKey.swift`, `X3DH.swift`.
+- Тесты: `Tests/MessengerTests/CryptoTests.swift` (`swift test`).
+- CI job `build-ios-crypto`: только `swift build --product MessengerCrypto -c release`. Полноценный IPA требует Xcode-проекта и Apple signing — **в CI не собирается**.
+
+---
+
+## 9. Crypto-слой
+
+### 9.1 X3DH
+
+- `IK` (Ed25519, долговременная), `SPK` (X25519, подписан IK), `OPK` (X25519, одноразовые).
+- Загрузка на сервер: `POST /api/keys/register` (ik, spk + signature) и `POST /api/keys/prekeys` (список OPK).
+- Получение связки: `GET /api/keys/{userId}` — возвращает IK, SPK + signature, одиночный OPK (если есть). WS `prekey_low` сигнализирует клиенту пополнить OPK, когда запас падает.
+- DH-комбинация: `DH1=DH(IK_A,SPK_B); DH2=DH(EK_A,IK_B); DH3=DH(EK_A,SPK_B); DH4=DH(EK_A,OPK_B)` → `SK=KDF(DH1||DH2||DH3||DH4)`.
+- Реализации: `client/src/crypto/x3dh.ts` через `shared/native-core/crypto/web/x3dh-web.ts`; iOS — `Sources/MessengerCrypto/X3DH.swift`; Android — lazysodium-хелперы.
+
+### 9.2 Double Ratchet
+
+- Symmetric chain: fresh key per message (forward secrecy).
+- DH-ratchet: ротация публичных ключей при получении нового raw-сообщения с другой стороны.
+- Шифр сообщения: XSalsa20-Poly1305 (`crypto_secretbox`).
+- Skipped message keys: `MAX_SKIP=100`, кэш пропущенных ключей для out-of-order.
+- Реализации: `crypto/ratchet.ts` ↔ `shared/native-core/crypto/web/ratchet-web.ts`; iOS — `Ratchet.swift`.
+
+### 9.3 Sender Keys (группы)
+
+- Каждый участник держит собственный `SenderKey` (chain_key + signing pair).
+- `SKDM` рассылается через X3DH/Double Ratchet 1:1 каждому участнику.
+- Групповое сообщение: AES-CBC + HMAC под `SenderKey`; получатели расшифровывают одним ключом.
+- Ротация при изменении состава группы — частично реализована (см. `docs/prd-alignment-progress.md`).
+- Реализации: `crypto/senderkey.ts` ↔ `shared/native-core/crypto/web/senderkey-web.ts`; iOS — `SenderKey.swift`.
+
+### 9.4 AES-GCM vault
+
+- Локальный слой шифрования на устройстве: IK private, ratchet state, sender keys, кэш сообщений.
+- Master-key выводится из passphrase (см. `shared/crypto-contracts/aes-gcm-spec.md`).
+- Рантайм: `shared/native-core/crypto/cryptoVault.ts` + `storage/web/encryptedStore.ts`.
+- Миграция со старых форматов хранения: `storage/web/vaultMigration.ts`.
+
+### 9.5 Key storage
+
+- Web: IndexedDB через `crypto/keystore.ts` поверх `encryptedStore` → AES-GCM vault.
+- Native: lazysodium (Android) / swift-sodium (iOS) + локальная FS / GRDB.
+- Cross-platform consistency проверяется через `shared/test-vectors/`.
+
+---
+
+## 10. Конфигурация ENV
+
+Приоритет: `env > config.yaml > defaults`. Имя файла по умолчанию — `config.yaml` (задано в `main.go`).
+
+### 10.1 Обязательные
+
+| ENV | YAML key | Назначение |
+|---|---|---|
+| `JWT_SECRET` | `jwt_secret` | Подпись JWT. Пустое значение → `log.Fatal` |
+
+### 10.2 Базовые
+
+| ENV | YAML key | Дефолт | Назначение |
+|---|---|---|---|
+| `PORT` | `port` | `8080` | HTTP порт |
+| `DB_PATH` | `db_path` | `./messenger.db` | SQLite файл |
+| `MEDIA_DIR` | `media_dir` | `./media` | Каталог медиа |
+| `DOWNLOADS_DIR` | `downloads_dir` | `./downloads` | Каталог native-артефактов |
+| `SERVER_NAME` | `server_name` | `Messenger` | Публичное имя |
+| `SERVER_DESCRIPTION` | `server_description` | — | Описание |
+| `APP_VERSION` | `app_version` | `dev` | Версия сборки сервера |
+| `MIN_CLIENT_VERSION` | `min_client_version` | `0.0.0` | Минимальная версия клиента |
+| `APP_CHANGELOG` | `app_changelog` | — | Changelog для `/api/version` |
+
+### 10.3 TLS / origins / proxy
+
+| ENV | Дефолт | Назначение |
+|---|---|---|
+| `TLS_CERT`, `TLS_KEY` | — | Прямой TLS (только TLS 1.3) |
+| `ALLOWED_ORIGIN` | — | CORS / WS `CheckOrigin` (список через запятую) |
+| `BEHIND_PROXY` | `false` | Доверие `X-Forwarded-*`, HSTS, расчёт proto/ip |
+
+### 10.4 Регистрация / админ
+
+| ENV | Дефолт | Назначение |
+|---|---|---|
+| `REGISTRATION_MODE` | `open` | `open` / `invite` / `approval`. Невалидное → `log.Fatal` |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | — | Bootstrap админа при пустой БД |
+
+### 10.5 Push
+
+| ENV | Дефолт | Назначение |
+|---|---|---|
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | auto-gen | Web Push (⚠ при пустых генерируются разовые; подписки сломаются после рестарта) |
+| `FCM_LEGACY_KEY` | — | FCM Server Key |
+| `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID` | — | APNs .p8 и метаданные |
+| `APNS_SANDBOX` | `false` | Использовать APNs sandbox |
+
+### 10.6 Звонки (STUN/TURN)
+
+| ENV | Дефолт | Назначение |
+|---|---|---|
+| `STUN_URL` | `stun:stun.l.google.com:19302` | STUN |
+| `TURN_URL` | — | TURN |
+| `TURN_SECRET` | — | HMAC для временных TURN-creds |
+| `TURN_CREDENTIAL_TTL` | `86400` | TTL выдаваемых TURN-creds, сек |
+
+### 10.7 Группы / квоты
+
+| ENV | Дефолт | Назначение |
+|---|---|---|
+| `MAX_GROUP_MEMBERS` | `50` | Максимум в группе (0 → дефолт) |
+| `ALLOW_USERS_CREATE_GROUPS` | `true` | Разрешение создавать группы обычным пользователям |
+| `MAX_UPLOAD_BYTES` | `100<<20` | Лимит одного upload (байт) |
+
+Дополнительно `docker-compose.yml` пробрасывает `TUNNEL_TOKEN` для профиля `cloudflare`.
+
+---
+
+## 11. Запуск и тесты
+
+### 11.1 Сервер
 
 ```bash
 cd server
-go build -o ./bin/messenger ./cmd/server
-JWT_SECRET=your-secret ./bin/messenger
+go run ./cmd/server                 # dev-запуск
+make test                           # go test ./... -race
+make coverage                       # coverage.out + HTML
+make test-integration               # go test ./internal/integration/... -v -race
 ```
 
-### 26.2 Frontend dev
+Миграции применяются автоматически при старте; ручной прогон — `scripts/db-migrate.sh`.
+
+### 11.2 Web-клиент
 
 ```bash
 cd client
 npm install
-npm run dev
+npm run dev                         # Vite dev server (http://localhost:5173)
+npm run build                       # tsc + Vite production build
+npm run preview                     # локальный preview production-сборки
+npm run type-check
+npm run lint                        # --max-warnings 0
+npm run test                        # Vitest (single run), 60% coverage
+npm run test:watch
+npm run test:e2e                    # Playwright
 ```
 
-### 26.3 Single-binary режим
+Dev-proxy Vite пробрасывает `/api`, `/ws`, `/media` на `http://localhost:8080`.
 
-Судя по `README.md`, предполагается:
+### 11.3 Native
 
-1. собрать клиент;
-2. положить `client/dist` в `server/static`;
-3. пересобрать backend;
-4. раздавать UI и API одним Go-бинарником.
+```bash
+# Desktop
+cd apps/desktop && ./gradlew packageDmg   # или packageDeb / packageMsi / run
 
-## 27. Что реализовано хорошо уже сейчас
+# Android
+cd apps/mobile/android && ./gradlew assembleDebug
 
-- простая и рабочая self-hosted модель;
-- единая кодовая база для API, WS и встроенной раздачи клиента;
-- ротация refresh token;
-- отдельный криптографический слой на клиенте;
-- offline push без plaintext-содержимого;
-- локальное IndexedDB-хранилище ключей, ratchet state, истории сообщений и списка чатов;
-- персистентная outbox-очередь исходящих с автоматической повторной отправкой;
-- UI-индикация offline-состояния через `OfflineIndicator`;
-- MVP-поддержка direct и group chat;
-- UI поддерживает редактирование, удаление, вложения и optimistic sending.
+# iOS (только криптопакет в CI)
+cd apps/mobile/ios && swift build --product MessengerCrypto -c release && swift test
+```
 
-## 28. Расхождения со спецификацией и ограничения текущей реализации
+Полный iOS-IPA собирается вне CI через Xcode (см. `docs/ios-update-policy.md`).
 
-Ниже перечислены актуальные расхождения между кодом и ожидаемой целевой архитектурой. Закрытые пункты из этапов 1–5 убраны.
+### 11.4 Docker
 
-### 28.1 Device model (частично закрыт, архитектурный долг остаётся)
+```bash
+docker-compose up                   # messenger на :8080
+docker-compose --profile cloudflare up  # + cloudflared (TUNNEL_TOKEN)
+```
 
-Заложен фундамент multi-device (этапы 3, 7):
+### 11.5 CI (`.github/workflows/build-native.yml`)
 
-- `devices` таблица существует;
-- `identity_keys` получила composite PK `(user_id, device_id)` через migration #7;
-- `UpsertIdentityKey` использует `ON CONFLICT(user_id, device_id)`;
-- `PopPreKey(userID, deviceID)` фильтрует OPK по конкретному устройству;
-- `POST /api/keys/register` идемпотентен: повторный вызов с тем же `ikPublic` возвращает существующий `device_id`.
+Триггеры: push tags `v*`, `workflow_dispatch`.
 
-Остаётся:
+- `resolve-inputs` — вычисление version + server_url (через `scripts/set-server-url.sh`).
+- `build-desktop-macos-arm64`, `-macos-x86_64`, `-linux`, `-windows` — Gradle packageDmg/Deb/Msi + опциональная подпись.
+- `build-android` — assembleRelease/assembleDebug.
+- `build-ios-crypto` — `swift build --product MessengerCrypto`.
+- `test-server` — `go test ./...`.
+- `publish-release` — `softprops/action-gh-release`, только для тегов `v*`.
 
-- `GET /api/keys/:userId` возвращает только первое устройство пользователя (нет GET bundle всех устройств);
-- на клиенте нет per-device ratchet state (один ratchet на `chatId`);
-- WS Hub не различает соединения по `device_id`.
+Java в CI — 17 (temurin).
 
-### 28.2 ~~Sender Key ротация при смене состава группы~~ ✅ Закрыто (этап 8)
+---
 
-`chatStore.upsertChat` сравнивает отсортированные списки `members`. При изменении — fire-and-forget вызов `invalidateGroupSenderKey(chatId)`, который удаляет SenderKey из IndexedDB. Следующая отправка создаст новый ключ и разошлёт SKDM актуальным участникам. Обратный сценарий (новый участник не получает старый SenderKey) обеспечивается самим фактом удаления ключа до следующей отправки.
+## 12. Известные ограничения
 
-### 28.3 Offline history ✅ Реализовано (этап 6)
+1. **SQLite writer concurrency**: `SetMaxOpenConns(1)` и SQLite WAL дают ориентировочно до 50–100 одновременных пользователей. Горизонтальное масштабирование невозможно без миграции на PostgreSQL.
+2. **`server/internal/storage`**: пустой каталог, зарезервирован; в `main.go` не импортируется.
+3. **`pion/dtls@2.2.12`** — vuln GO-2026-4479 (random-nonce AES-GCM). Статус/митигация — `docs/security-audit.md`.
+4. **VAPID-ключи**: при пустых значениях сервер генерирует пару на старте, ключ в лог не сохраняется между рестартами — push-подписки клиентов сломаются. Для продакшена обязательно задать персистентно.
+5. **iOS IPA**: CI собирает только `MessengerCrypto` через SPM; полная сборка IPA вне репозитория (Xcode + Apple signing).
+6. **Desktop WebRTC**: в текущем baseline — stub SDP (ровно как зафиксировано планами фазы). Актуальный статус см. `docs/main/v1-gap-remediation.md`.
+7. **Android Kotlin-исходники**: на baseline `60d7c93` в watched-path видны только `build.gradle.kts`, `settings.gradle.kts`, `README.md`. Дерево фактических Kotlin-файлов сверять через git history, не копировать слепо из планов.
+8. **Vite версия**: в `CLAUDE.md` указано «Vite 5», в `client/package.json` — `vite@^8.0.9`. Источник истины — `package.json`.
+9. **`REGISTRATION_MODE`**: валидные значения — `open` / `invite` / `approval`. Термин `request` (встречается в устаревших доках и `CLAUDE.md`) — устаревший синоним `approval`.
+10. **SFU масштаб**: SFU встроен в основной бинарник (`server/internal/sfu`), без транскодинга. Практический потолок — ≤ 10–15 активных участников на комнату; для большего требуется выделенный SFU (LiveKit и т. п.).
+11. **Bots webhook allowlist**: URL бота должен быть localhost или RFC-1918. Доставка на произвольные хосты будет отклонена (защита от SSRF).
+12. **TLS**: без `TLS_CERT/TLS_KEY` и без `BEHIND_PROXY=true` сервер выдаёт warning; Web Push на iOS 16.4+ требует валидного TLS-сертификата (не самоподписанного).
 
-IndexedDB persistence добавлен через `messageDb.ts` и `outboxDb.ts`. `ChatListPage` и `ChatWindow` применяют IDB-first стратегию: данные рендерятся из кэша до получения ответа сервера. `OfflineIndicator` отображает баннер при отрыве сети. Исходящие сообщения в offline сохраняются в outbox и автоматически отправляются при восстановлении соединения.
+---
 
-### 28.4 Поиск пользователей
+## 13. Ссылки
 
-UI пишет "Поиск по имени или username", но backend ищет только по `username`.
+- `docs/main/architecture.md` — высокоуровневый обзор, диаграммы, потоки данных.
+- `docs/main/v1-gap-remediation.md`, `docs/main/next-session.md` — актуальные статусы.
+- `docs/main/deployment.md`, `docs/main/usersguid.md` — operations и сценарии.
+- `docs/api-reference.md`, `shared/protocol/` — REST/WS контракты.
+- `docs/crypto-rationale.md`, `shared/crypto-contracts/`, `shared/test-vectors/` — крипто.
+- `docs/security-audit.md`, `docs/test-plan.md`, `docs/release-checklist.md` — QA/safety.
+- `docs/privacy-screen-contract.md`, `docs/ios-update-policy.md` — native security (см. `architecture.md` §10).
 
-### 28.5 Push subscription refresh
+---
 
-Сценарий `pushsubscriptionchange` в Service Worker не сможет обновить подписку без JWT-контекста: маршрут `/api/push/subscribe` защищён middleware.
-
-### 28.6 Контакты
-
-Таблица `contacts` и query-функции существуют, но HTTP API для работы с контактами не реализован.
-
-## 28.7 Аудио/видео звонки ✅ Реализованы (этап 9)
-
-Реализованы звонки 1-на-1:
-
-- WS-события сигнализации: `call_offer`, `call_answer`, `ice_candidate`, `call_end`, `call_reject`, `call_busy` — транзитная пересылка в Hub
-- in-memory map активных звонков в Hub
-- `RTCPeerConnection` на клиенте с STUN-конфигурацией (`STUN_URL` из env, по умолчанию Google STUN)
-- UI входящего звонка (ringtone, принять/отклонить), UI активного звонка (камера, микрофон, завершить)
-- TURN: временные credentials через `GET /api/calls/ice-servers` (JWT required); настраивается через `TURN_URL`, `TURN_SECRET`, `TURN_CREDENTIAL_TTL`
-- `CallOverlay` вынесен вне auth-guard — overlay виден поверх всех маршрутов
-- call domain state machine и notification lifecycle вынесены в `shared/native-core/calls/*`
-- `callStore` теперь является adapter-store над shared snapshot, а не источником call business logic
-- legacy bridge callbacks `_callFrameHandler` и `_initiateCall` удалены из `callStore`
-- top-level ownership `call-controller` теперь сосредоточен в `App.tsx`, который напрямую связывает `useCallHandler`, `useMessengerWS` и `CallOverlay`
-- `shared/native-core/calls/web/*` и `shared/native-core/websocket/web/*` используют собственные shared contracts для сигналинга и realtime моделей вместо `client/src/types`
-
-Остаётся: групповые звонки требуют SFU (LiveKit) — отдельный тяжёлый сервис, не входит в текущий монолит.
-
-## 29. Рекомендации по дальнейшему развитию
-
-### 29.1 Приоритет 1 — Device model (частично закрыт)
-
-Фундамент заложен: composite PK в `identity_keys`, `PopPreKey` по device, идемпотентный `POST /api/keys/register`. Остаётся: GET bundle всех устройств, per-device ratchet на клиенте.
-
-### 29.2 ~~Приоритет 2 — Offline history~~ ✅ Закрыто в этапе 6
-
-IndexedDB persistence реализован: `messageDb.ts` сохраняет историю и список чатов, `outboxDb.ts` хранит очередь исходящих, `useOfflineSync` сбрасывает очередь при reconnect, `OfflineIndicator` сигнализирует об offline-состоянии.
-
-### 29.3 ~~Приоритет 3 — Sender Key ротация~~ ✅ Закрыто (этап 8)
-
-Реализовано через `invalidateGroupSenderKey` в `session.ts` + триггер в `chatStore.upsertChat` при сравнении `members`. Следующая отправка автоматически создаёт новый SenderKey и рассылает SKDM.
-
-### 29.4 ~~Тесты~~ ✅ Закрыто (этап 8)
-
-Backend (Go): `auth` (register, login, refresh rotation, change-password, JWT middleware), `keys` (register idempotency, PopPreKey, bundle 404), `chat` (non-member 403, delete/edit authz), `db` (migrations idempotent, migration #7 composite PK), `ws` (invalid token → 4001, valid connect, broadcast delivery).
-
-Frontend (Vitest): `ratchet.test.ts` (11 тестов: round-trip, out-of-order, MAX_SKIP, TTL, serialization), `x3dh.test.ts` (6: handshake с/без OPK, wrong keys), `api/client.test.ts` (9: auto-refresh, dedup parallel 401, skipAuth, 204, ApiError).
-
-### 29.6 Аудио/видео звонки ✅ Закрыто (этап 9)
-
-Звонки 1-на-1, STUN, TURN реализованы. Остаётся: групповые звонки (LiveKit SFU) как отдельный Docker-сервис.
-
-### 29.5 ~~Эксплуатация~~ ✅ Закрыто
-
-- ~~versioned migrations~~ ✅ — `server/db/migrate.go`, migration runner с `schema_migrations`;
-- ~~deployment guide для Cloudflare Tunnel~~ ✅ — `docs/deployment.md`;
-- ~~конфигурационный файл сервера~~ ✅ — `server/cmd/server/config.go` + `config.yaml.example`; приоритет env > yaml > defaults.
-
-## 30. Итог
-
-Проект представляет собой рабочий self-hosted мессенджер с нативными клиентами:
-
-- JWT-аутентификация, SQLite persistence, real-time WebSocket, PWA;
-- локальный E2E-слой (X3DH + Double Ratchet + Sender Keys);
-- медиа, редактирование/удаление сообщений, Web Push;
-- multi-server support, admin panel (roles, invites, approval mode).
-
-Все этапы 1–12 плана `v1-gap-remediation.md` закрыты, включая:
-
-- security headers, rate limiting, bcrypt=12, SameSite=Strict;
-- skipped message keys, Sender Key ротация, encrypted media at rest;
-- IndexedDB offline outbox, cursor pagination, read receipts;
-- полноценная multi-device модель (GET bundle per device, WS hub по device_id, fan-out шифрование);
-- WebRTC звонки 1-на-1 (STUN, TURN через `/api/calls/ice-servers`);
-- `shared/native-core` runtime-пакет, browser и native adapters.
-
-Нативные клиенты:
-
-- **Desktop** (`apps/desktop/`) ✅ — MVP + file transfer (XSalsa20) + WebRTC Step A (stub SDP);
-- **Android** (`apps/mobile/android/`) ✅ — полный MVP + file transfer + WebRTC Step A+B (реальный SDP/ICE, `AndroidWebRtcController`, video UI с `SurfaceViewRenderer`) + FCM push + `ErrorLogger`;
-- **iOS** (`apps/mobile/ios/`) ✅ — полный MVP + APNs push + WebRTC CALLS-B (`iOSWebRtcController`, RTCMTLVideoView); `swift test` 8/8.
-
-Оставшиеся открытые зоны:
-
-- Логирование ошибок: Desktop (5D) и iOS (5E) — `AppErrorLogger` ещё не реализован;
-- групповые звонки (требуют SFU/LiveKit — отдельный сервис).
+*Документ актуален на `60d7c93` (2026-04-21). Основан на `docs/docs-main-update-research.md` и прямом чтении кода репозитория.*

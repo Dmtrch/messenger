@@ -104,6 +104,71 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         authStore.logout()
     }
 
+    /**
+     * Активирует QR/токен привязки нового устройства. Генерирует свежие X3DH-ключи,
+     * отправляет их вместе с токеном на /api/auth/device-link-activate. После успеха
+     * открывается сессия как при обычном login (WS + chats + FCM).
+     */
+    suspend fun activateDeviceLink(token: String, deviceName: String): Result<Unit> {
+        val client = apiClient ?: return Result.failure(IllegalStateException("Server URL not set"))
+        return try {
+            val b64Flag = android.util.Base64.NO_WRAP
+
+            val ikPub = ByteArray(com.goterl.lazysodium.interfaces.Sign.PUBLICKEYBYTES)
+            val ikSec = ByteArray(com.goterl.lazysodium.interfaces.Sign.SECRETKEYBYTES)
+            (sodium as com.goterl.lazysodium.interfaces.Sign.Native).cryptoSignKeypair(ikPub, ikSec)
+
+            val spkPub = ByteArray(com.goterl.lazysodium.interfaces.Box.PUBLICKEYBYTES)
+            val spkSec = ByteArray(com.goterl.lazysodium.interfaces.Box.SECRETKEYBYTES)
+            (sodium as com.goterl.lazysodium.interfaces.Box.Native).cryptoBoxKeypair(spkPub, spkSec)
+            val spkSig = ByteArray(com.goterl.lazysodium.interfaces.Sign.BYTES)
+            (sodium as com.goterl.lazysodium.interfaces.Sign.Native)
+                .cryptoSignDetached(spkSig, spkPub, spkPub.size.toLong(), ikSec)
+
+            val opkSecrets = mutableListOf<ByteArray>()
+            val opkDtos = (1..10).map { idx ->
+                val pub = ByteArray(com.goterl.lazysodium.interfaces.Box.PUBLICKEYBYTES)
+                val sec = ByteArray(com.goterl.lazysodium.interfaces.Box.SECRETKEYBYTES)
+                (sodium as com.goterl.lazysodium.interfaces.Box.Native).cryptoBoxKeypair(pub, sec)
+                opkSecrets.add(sec)
+                com.messenger.service.OpkPublicDto(
+                    id = idx,
+                    key = android.util.Base64.encodeToString(pub, b64Flag),
+                )
+            }
+
+            val spkId = keyStorage.getOrCreateSpkId()
+            val req = com.messenger.service.DeviceLinkActivateRequest(
+                token        = token,
+                deviceName   = deviceName,
+                ikPublic     = android.util.Base64.encodeToString(ikPub, b64Flag),
+                spkId        = spkId,
+                spkPublic    = android.util.Base64.encodeToString(spkPub, b64Flag),
+                spkSignature = android.util.Base64.encodeToString(spkSig, b64Flag),
+                opkPublics   = opkDtos,
+            )
+            val resp = client.activateDeviceLink(req)
+
+            keyStorage.saveKey("ik_pub", ikPub)
+            keyStorage.saveKey("ik_sec", ikSec)
+            keyStorage.saveKey("spk_pub", spkPub)
+            keyStorage.saveKey("spk_sec", spkSec)
+            keyStorage.saveKey("spk_sig", spkSig)
+            opkDtos.zip(opkSecrets).forEach { (dto, sec) ->
+                keyStorage.saveKey("opk_${dto.id}", sec)
+            }
+            keyStorage.saveKey("device_id", resp.deviceId.toByteArray())
+
+            authStore.login(userId = resp.userId, username = resp.username, accessToken = resp.accessToken)
+            startWS(resp.accessToken)
+            loadChats()
+            registerFcmTokenIfAvailable(client)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun startWS(token: String) {
         val client = apiClient ?: return
         val db = dbProvider.database

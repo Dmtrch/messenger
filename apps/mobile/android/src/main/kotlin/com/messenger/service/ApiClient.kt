@@ -63,6 +63,24 @@ import java.util.Base64
     val deviceId: String = "",
     val opkIds: List<Long> = emptyList(),
 )
+@Serializable data class OpkPublicDto(val id: Int, val key: String)
+@Serializable data class DeviceLinkActivateRequest(
+    val token: String,
+    val deviceName: String,
+    val ikPublic: String,
+    val spkId: Int,
+    val spkPublic: String,
+    val spkSignature: String,
+    val opkPublics: List<OpkPublicDto>,
+)
+@Serializable data class DeviceLinkActivateResponse(
+    val accessToken: String,
+    val userId: String,
+    val username: String,
+    val displayName: String? = null,
+    val role: String? = null,
+    val deviceId: String = "",
+)
 @Serializable data class MediaUploadResponse(val mediaId: String)
 data class MediaUploadResult(val mediaId: String, val mediaKey: String)
 @Serializable data class DeviceBundle(
@@ -79,6 +97,73 @@ data class MediaUploadResult(val mediaId: String, val mediaKey: String)
 @Serializable data class SearchUsersResponse(val users: List<UserResultDto>)
 @Serializable data class CreateChatRequest(val type: String, val memberIds: List<String>, val name: String? = null)
 @Serializable data class CreateChatResponse(val chat: ChatSummaryDto)
+
+@Serializable data class DownloadArtifactDto(
+    val platform: String = "",
+    val arch: String = "",
+    val format: String = "",
+    val filename: String,
+    val url: String,
+    val sha256: String = "",
+    @kotlinx.serialization.SerialName("size_bytes") val sizeBytes: Long = 0,
+)
+@Serializable data class DownloadsManifestDto(
+    val version: String = "",
+    val minClientVersion: String = "",
+    val changelog: String = "",
+    val artifacts: List<DownloadArtifactDto> = emptyList(),
+)
+
+@Serializable data class AdminUserDto(
+    val id: String,
+    val username: String,
+    @kotlinx.serialization.SerialName("display_name") val displayName: String = "",
+    val role: String = "user",
+    val status: String = "active",
+    val quotaBytes: Long? = null,
+    val usedBytes: Long? = null,
+)
+@Serializable data class AdminUsersResponse(val users: List<AdminUserDto> = emptyList())
+
+@Serializable data class AdminRegRequestDto(
+    val id: String,
+    val username: String,
+    @kotlinx.serialization.SerialName("display_name") val displayName: String = "",
+    val status: String = "pending",
+    @kotlinx.serialization.SerialName("created_at") val createdAt: Long = 0,
+)
+@Serializable data class AdminRegRequestsResponse(val requests: List<AdminRegRequestDto> = emptyList())
+
+@Serializable data class AdminResetRequestDto(
+    val id: String,
+    @kotlinx.serialization.SerialName("user_id") val userId: String = "",
+    val username: String = "",
+    val status: String = "pending",
+    @kotlinx.serialization.SerialName("created_at") val createdAt: Long = 0,
+)
+@Serializable data class AdminResetRequestsResponse(val requests: List<AdminResetRequestDto> = emptyList())
+
+@Serializable data class AdminInviteCodeDto(
+    val code: String,
+    val createdBy: String = "",
+    val usedBy: String = "",
+    val usedAt: Long = 0,
+    val expiresAt: Long = 0,
+    val revokedAt: Long = 0,
+    val createdAt: Long = 0,
+)
+@Serializable data class AdminInviteCodesResponse(val codes: List<AdminInviteCodeDto> = emptyList())
+
+@Serializable data class AdminRetentionDto(val retentionDays: Int = 0)
+@Serializable data class AdminMaxMembersDto(val maxMembers: Int = 0)
+
+@Serializable data class AdminSystemStatsDto(
+    val cpuPercent: Double = 0.0,
+    val ramUsed: Long = 0,
+    val ramTotal: Long = 0,
+    val diskUsed: Long = 0,
+    val diskTotal: Long = 0,
+)
 
 private val applicationJson = ContentType.Application.Json.toString()
 private const val MAX_UPLOAD_BYTES = 10 * 1024 * 1024  // 10 МБ
@@ -153,6 +238,17 @@ class ApiClient(
             headers { append(HttpHeaders.ContentType, applicationJson) }
             setBody(CreateChatRequest(type, memberIds, name))
         }.body()
+
+    suspend fun activateDeviceLink(req: DeviceLinkActivateRequest): DeviceLinkActivateResponse {
+        val resp = http.post("$baseUrl/api/auth/device-link-activate") {
+            headers { append(HttpHeaders.ContentType, applicationJson) }
+            setBody(req)
+        }
+        if (!resp.status.isSuccess()) error("device-link-activate failed: ${resp.status}")
+        val body: DeviceLinkActivateResponse = resp.body()
+        tokenStore.save(body.accessToken)
+        return body
+    }
 
     suspend fun registerKeys(req: RegisterKeysRequest): RegisterKeysResponse {
         val resp = http.post("$baseUrl/api/keys/register") {
@@ -230,6 +326,126 @@ class ApiClient(
         }
         return plain
     }
+
+    /** Возвращает манифест доступных для скачивания артефактов. */
+    suspend fun getDownloadsManifest(): DownloadsManifestDto =
+        http.get("$baseUrl/api/downloads/manifest").body()
+
+    /** Скачивает артефакт по имени, возвращает его тело как ByteArray. */
+    suspend fun downloadArtifactBytes(filename: String): ByteArray {
+        val resp = http.get("$baseUrl/api/downloads/$filename")
+        if (!resp.status.isSuccess()) error("download failed: ${resp.status}")
+        return resp.body()
+    }
+
+    // ----------------- Admin API -----------------
+
+    suspend fun adminListUsers(): List<AdminUserDto> =
+        http.get("$baseUrl/api/admin/users").body<AdminUsersResponse>().users
+
+    suspend fun adminSuspendUser(id: String)    = adminPostEmpty("/api/admin/users/$id/suspend")
+    suspend fun adminUnsuspendUser(id: String)  = adminPostEmpty("/api/admin/users/$id/unsuspend")
+    suspend fun adminBanUser(id: String)        = adminPostEmpty("/api/admin/users/$id/ban")
+    suspend fun adminRevokeSessions(id: String) = adminPostEmpty("/api/admin/users/$id/revoke-sessions")
+    suspend fun adminRemoteWipe(id: String)     = adminPostEmpty("/api/admin/users/$id/remote-wipe")
+
+    suspend fun adminSetUserRole(id: String, role: String) {
+        val resp = http.put("$baseUrl/api/admin/users/$id/role") {
+            headers { append(HttpHeaders.ContentType, applicationJson) }
+            setBody(kotlinx.serialization.json.buildJsonObject { put("role", kotlinx.serialization.json.JsonPrimitive(role)) })
+        }
+        if (!resp.status.isSuccess()) error("setRole failed: ${resp.status}")
+    }
+
+    suspend fun adminResetUserPassword(id: String, newPassword: String) {
+        val resp = http.post("$baseUrl/api/admin/users/$id/reset-password") {
+            headers { append(HttpHeaders.ContentType, applicationJson) }
+            setBody(kotlinx.serialization.json.buildJsonObject { put("newPassword", kotlinx.serialization.json.JsonPrimitive(newPassword)) })
+        }
+        if (!resp.status.isSuccess()) error("resetPassword failed: ${resp.status}")
+    }
+
+    suspend fun adminListRegistrationRequests(): List<AdminRegRequestDto> =
+        http.get("$baseUrl/api/admin/registration-requests") { parameter("status", "pending") }
+            .body<AdminRegRequestsResponse>().requests
+
+    suspend fun adminApproveRegistration(id: String) = adminPostEmpty("/api/admin/registration-requests/$id/approve")
+    suspend fun adminRejectRegistration(id: String)  = adminPostEmpty("/api/admin/registration-requests/$id/reject")
+
+    suspend fun adminListResetRequests(): List<AdminResetRequestDto> =
+        http.get("$baseUrl/api/admin/password-reset-requests") { parameter("status", "pending") }
+            .body<AdminResetRequestsResponse>().requests
+
+    suspend fun adminResolveReset(id: String, tempPassword: String) {
+        val resp = http.post("$baseUrl/api/admin/password-reset-requests/$id/resolve") {
+            headers { append(HttpHeaders.ContentType, applicationJson) }
+            setBody(kotlinx.serialization.json.buildJsonObject {
+                put("tempPassword", kotlinx.serialization.json.JsonPrimitive(tempPassword))
+            })
+        }
+        if (!resp.status.isSuccess()) error("resolveReset failed: ${resp.status}")
+    }
+
+    private suspend fun adminPostEmpty(path: String) {
+        val resp = http.post("$baseUrl$path") {
+            headers { append(HttpHeaders.ContentType, applicationJson) }
+            setBody("{}")
+        }
+        if (!resp.status.isSuccess()) error("POST $path failed: ${resp.status}")
+    }
+
+    // ----------------- Invite codes -----------------
+
+    suspend fun adminListInviteCodes(): List<AdminInviteCodeDto> =
+        http.get("$baseUrl/api/admin/invite-codes").body<AdminInviteCodesResponse>().codes
+
+    suspend fun adminCreateInviteCode(): AdminInviteCodeDto {
+        val resp = http.post("$baseUrl/api/admin/invite-codes") {
+            headers { append(HttpHeaders.ContentType, applicationJson) }
+            setBody("{}")
+        }
+        if (!resp.status.isSuccess()) error("createInvite failed: ${resp.status}")
+        return resp.body()
+    }
+
+    suspend fun adminRevokeInviteCode(code: String) {
+        val resp = http.delete("$baseUrl/api/admin/invite-codes/${java.net.URLEncoder.encode(code, "UTF-8")}")
+        if (!resp.status.isSuccess()) error("revokeInvite failed: ${resp.status}")
+    }
+
+    // ----------------- Settings -----------------
+
+    suspend fun adminGetRetention(): Int =
+        http.get("$baseUrl/api/admin/settings/retention").body<AdminRetentionDto>().retentionDays
+
+    suspend fun adminSetRetention(days: Int) {
+        val resp = http.put("$baseUrl/api/admin/settings/retention") {
+            headers { append(HttpHeaders.ContentType, applicationJson) }
+            setBody(kotlinx.serialization.json.buildJsonObject {
+                put("retentionDays", kotlinx.serialization.json.JsonPrimitive(days))
+            })
+        }
+        if (!resp.status.isSuccess()) error("setRetention failed: ${resp.status}")
+    }
+
+    suspend fun adminGetMaxGroupMembers(): Int = runCatching {
+        http.get("$baseUrl/api/admin/settings/max-group-members").body<AdminMaxMembersDto>().maxMembers
+    }.getOrDefault(0)
+
+    suspend fun adminSetMaxGroupMembers(value: Int) {
+        val resp = http.put("$baseUrl/api/admin/settings/max-group-members") {
+            headers { append(HttpHeaders.ContentType, applicationJson) }
+            setBody(kotlinx.serialization.json.buildJsonObject {
+                put("maxMembers", kotlinx.serialization.json.JsonPrimitive(value))
+            })
+        }
+        if (!resp.status.isSuccess()) error("setMaxMembers failed: ${resp.status}")
+    }
+
+    // ----------------- System stats -----------------
+
+    suspend fun adminGetSystemStats(): AdminSystemStatsDto =
+        http.get("$baseUrl/api/admin/system/stats").body()
 
     fun wsUrl(token: String): String {
         val wsBase = when {

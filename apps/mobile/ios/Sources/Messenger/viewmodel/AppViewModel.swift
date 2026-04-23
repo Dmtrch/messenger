@@ -92,6 +92,51 @@ final class AppViewModel: ObservableObject {
         chatStore = ChatStore()
     }
 
+    /// Активирует токен привязки: стирает предыдущие локальные ключи, генерирует свежие X3DH-ключи
+    /// и отправляет их вместе с `token`/`deviceName` на `/api/auth/device-link-activate`.
+    /// После успеха открывает сессию аналогично обычному login.
+    func activateDeviceLink(token: String, deviceName: String) async throws {
+        guard let client = apiClient else { throw ApiError.unauthorized }
+
+        // Фреш-генерация ключей для нового устройства (стираем любые остаточные).
+        keyStorage.clearAll()
+        let ik       = keyStorage.getOrCreateIdentityKey()
+        let (spk, sig) = keyStorage.getOrCreateSignedPreKey()
+        let spkId    = keyStorage.getOrCreateSpkId()
+        let opks     = keyStorage.generateOneTimePreKeys(count: 10)
+
+        let req = DeviceLinkActivateRequest(
+            token: token,
+            deviceName: deviceName,
+            ikPublic: Data(ik.publicKey).base64EncodedString(),
+            spkId: spkId,
+            spkPublic: Data(spk.publicKey).base64EncodedString(),
+            spkSignature: Data(sig).base64EncodedString(),
+            opkPublics: opks.enumerated().map { (idx, kp) in
+                OpkPublicDto(id: idx + 1, key: Data(kp.publicKey).base64EncodedString())
+            }
+        )
+        let resp = try await client.activateDeviceLink(req)
+
+        // Сохраняем OPK-секреты под локальными ID (сервер не возвращает opkIds для device-link).
+        opks.enumerated().forEach { (idx, kp) in
+            keyStorage.saveOneTimePreKeySecret(kp.secretKey, id: idx + 1)
+        }
+
+        UserDefaults.standard.set(resp.userId,   forKey: "messenger.userId")
+        UserDefaults.standard.set(resp.username, forKey: "messenger.username")
+        authState = AuthState(isAuthenticated: true, userId: resp.userId,
+                              username: resp.username, accessToken: resp.accessToken)
+        await setupWS()
+        try await loadChats()
+    }
+
+    func changePassword(currentPassword: String, newPassword: String) async throws {
+        guard let client = apiClient else { throw ApiError.unauthorized }
+        try await client.changePassword(currentPassword: currentPassword,
+                                        newPassword: newPassword)
+    }
+
     private func restoreSession() async {
         // Попытка загрузить чаты с текущим токеном; при 401 — предложить логин
         do {
@@ -232,8 +277,24 @@ final class AppViewModel: ObservableObject {
                 bytes: data, filename: filename,
                 contentType: contentType, chatId: chatId, msgId: msgId
             )
-            // TODO: прикрепить mediaId/mediaKey к сообщению перед отправкой
-            _ = result
+            let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+            let record = MessageRecord(
+                id: msgId, clientMsgId: msgId, chatId: chatId,
+                senderId: authState.userId, plaintext: "",
+                timestamp: timestamp, status: "sent", isDeleted: false,
+                mediaId: result.mediaId, mediaKey: result.mediaKey,
+                originalName: filename, contentType: contentType
+            )
+            try? db?.insertMessage(record)
+            await MainActor.run {
+                self.chatStore.addMessage(chatId: chatId, item: MessageItem(
+                    id: msgId, clientMsgId: msgId, chatId: chatId,
+                    senderId: self.authState.userId, plaintext: "",
+                    timestamp: timestamp, status: "sent", isDeleted: false,
+                    mediaId: result.mediaId, mediaKey: result.mediaKey,
+                    originalName: filename, contentType: contentType
+                ))
+            }
         } catch {
             uploadError = error.localizedDescription
         }
@@ -490,7 +551,15 @@ final class AppViewModel: ObservableObject {
 
         c.onLocalVideoReady  = { [weak self] in self?.chatStore.markLocalVideoReady() }
         c.onRemoteVideoReady = { [weak self] in self?.chatStore.markRemoteVideoReady() }
-        c.onError            = { _ in /* TODO: expose error to UI */ }
+        c.onError            = { [weak self] err in
+            Task { @MainActor in
+                guard let self else { return }
+                self.chatStore.setCallError("Ошибка звонка: \(err.localizedDescription)")
+                self.chatStore.clearCall()
+                self.webRtcController?.release()
+                self.webRtcController = nil
+            }
+        }
 
         return c
     }

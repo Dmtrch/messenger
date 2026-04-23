@@ -21,6 +21,8 @@ fun ProfileScreen(
     onBack: () -> Unit,
     onLogout: suspend () -> Unit,
     onChangeServer: () -> Unit,
+    onDownloads: () -> Unit = {},
+    onAdmin: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     Scaffold(
@@ -43,6 +45,8 @@ fun ProfileScreen(
             Text(serverUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
             Spacer(Modifier.height(8.dp))
             OutlinedButton(onClick = onChangeServer, modifier = Modifier.fillMaxWidth()) { Text("Изменить сервер") }
+            OutlinedButton(onClick = onDownloads, modifier = Modifier.fillMaxWidth()) { Text("Загрузки и обновления") }
+            OutlinedButton(onClick = onAdmin, modifier = Modifier.fillMaxWidth()) { Text("Администрирование") }
             AppLockSection()
             PrivacyScreenSection()
             Button(

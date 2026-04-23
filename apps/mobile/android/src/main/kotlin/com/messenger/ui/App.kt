@@ -25,10 +25,13 @@ import kotlinx.coroutines.launch
 sealed class Screen {
     object ServerSetup : Screen()
     object Auth : Screen()
+    object LinkDevice : Screen()
     object ChatList : Screen()
     data class ChatWindow(val chatId: String) : Screen()
     object Profile : Screen()
     object NewChat : Screen()
+    object Downloads : Screen()
+    object Admin : Screen()
 }
 
 @Composable
@@ -91,6 +94,21 @@ fun App(
                     serverUrl = ServerConfig.serverUrl,
                     onLogin = { username, password -> vm.login(username, password) },
                     onChangeServer = { screen = Screen.ServerSetup },
+                    onLinkDevice = { screen = Screen.LinkDevice },
+                )
+            }
+            Screen.LinkDevice -> {
+                LaunchedEffect(authState.isAuthenticated) {
+                    if (authState.isAuthenticated) screen = Screen.ChatList
+                }
+                val defaultName = remember {
+                    "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".take(60)
+                }
+                LinkDeviceScreen(
+                    serverUrl = ServerConfig.serverUrl,
+                    defaultDeviceName = defaultName,
+                    onActivate = { token, deviceName -> vm.activateDeviceLink(token, deviceName) },
+                    onBack = { screen = Screen.Auth },
                 )
             }
             Screen.ChatList -> {
@@ -159,6 +177,16 @@ fun App(
                 onBack = { screen = Screen.ChatList },
                 onLogout = { scope.launch { vm.logout(); screen = Screen.Auth } },
                 onChangeServer = { screen = Screen.ServerSetup },
+                onDownloads = { screen = Screen.Downloads },
+                onAdmin = { screen = Screen.Admin },
+            )
+            Screen.Downloads -> DownloadsScreen(
+                apiClient = vm.apiClient,
+                onBack = { screen = Screen.Profile },
+            )
+            Screen.Admin -> AdminScreen(
+                apiClient = vm.apiClient,
+                onBack = { screen = Screen.Profile },
             )
         }
         if (callState.status != CallStatus.IDLE) {

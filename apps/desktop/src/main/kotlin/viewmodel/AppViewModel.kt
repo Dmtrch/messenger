@@ -73,6 +73,71 @@ class AppViewModel {
         authStore.logout()
     }
 
+    /**
+     * Активирует токен привязки: генерирует свежий набор X3DH-ключей для нового устройства
+     * и регистрирует его через /api/auth/device-link-activate. После успеха — авторизуется
+     * и запускает WS/chats, как при обычном login.
+     */
+    suspend fun activateDeviceLink(token: String, deviceName: String): Result<Unit> {
+        val client = apiClient ?: return Result.failure(IllegalStateException("Server URL not set"))
+        return try {
+            val b64 = java.util.Base64.getEncoder()
+
+            // Идентификационный ключ (sign keypair) — всегда новый для нового устройства.
+            val ikPub = ByteArray(com.goterl.lazysodium.interfaces.Sign.PUBLICKEYBYTES)
+            val ikSec = ByteArray(com.goterl.lazysodium.interfaces.Sign.SECRETKEYBYTES)
+            (sodium as com.goterl.lazysodium.interfaces.Sign.Native).cryptoSignKeypair(ikPub, ikSec)
+
+            // Signed prekey (box keypair) + подпись от ik.
+            val spkPub = ByteArray(com.goterl.lazysodium.interfaces.Box.PUBLICKEYBYTES)
+            val spkSec = ByteArray(com.goterl.lazysodium.interfaces.Box.SECRETKEYBYTES)
+            (sodium as com.goterl.lazysodium.interfaces.Box.Native).cryptoBoxKeypair(spkPub, spkSec)
+            val spkSig = ByteArray(com.goterl.lazysodium.interfaces.Sign.BYTES)
+            (sodium as com.goterl.lazysodium.interfaces.Sign.Native)
+                .cryptoSignDetached(spkSig, spkPub, spkPub.size.toLong(), ikSec)
+
+            // 10 one-time prekeys, их секреты — для последующего responder-flow.
+            val opkSecrets = mutableListOf<ByteArray>()
+            val opkDtos = (1..10).map { idx ->
+                val pub = ByteArray(com.goterl.lazysodium.interfaces.Box.PUBLICKEYBYTES)
+                val sec = ByteArray(com.goterl.lazysodium.interfaces.Box.SECRETKEYBYTES)
+                (sodium as com.goterl.lazysodium.interfaces.Box.Native).cryptoBoxKeypair(pub, sec)
+                opkSecrets.add(sec)
+                service.OpkPublicDto(id = idx, key = b64.encodeToString(pub))
+            }
+
+            val spkId = keyStorage.getOrCreateSpkId()
+            val req = service.DeviceLinkActivateRequest(
+                token        = token,
+                deviceName   = deviceName,
+                ikPublic     = b64.encodeToString(ikPub),
+                spkId        = spkId,
+                spkPublic    = b64.encodeToString(spkPub),
+                spkSignature = b64.encodeToString(spkSig),
+                opkPublics   = opkDtos,
+            )
+            val resp = client.activateDeviceLink(req)
+
+            // Только после успеха сохраняем ключи в хранилище этого устройства.
+            keyStorage.saveKey("ik_pub", ikPub)
+            keyStorage.saveKey("ik_sec", ikSec)
+            keyStorage.saveKey("spk_pub", spkPub)
+            keyStorage.saveKey("spk_sec", spkSec)
+            keyStorage.saveKey("spk_sig", spkSig)
+            opkDtos.zip(opkSecrets).forEach { (dto, sec) ->
+                keyStorage.saveKey("opk_${dto.id}", sec)
+            }
+            keyStorage.saveKey("device_id", resp.deviceId.toByteArray())
+
+            authStore.login(userId = resp.userId, username = resp.username, accessToken = resp.accessToken)
+            startWS(resp.accessToken)
+            loadChats()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun makeController(): DesktopWebRtcController {
         val ctrl = DesktopWebRtcController(
             onIceCandidate    = { signal -> sendIceCandidate(signal) },
@@ -199,17 +264,24 @@ class AppViewModel {
         scope.launch {
             val iceServers = fetchIceServers()
             val ctrl = makeController()
-            val sdp = runCatching {
+            runCatching {
                 ctrl.startOutgoing(callId, isVideo, iceServers)
-            }.getOrElse { "stub-sdp" }
-            sendCallFrame(buildJsonObject {
-                put("type", "call_offer")
-                put("callId", callId)
-                put("chatId", chatId)
-                put("targetId", targetId)
-                put("sdp", sdp)
-                put("isVideo", isVideo)
-            }.toString())
+            }.fold(
+                onSuccess = { sdp ->
+                    sendCallFrame(buildJsonObject {
+                        put("type", "call_offer")
+                        put("callId", callId)
+                        put("chatId", chatId)
+                        put("targetId", targetId)
+                        put("sdp", sdp)
+                        put("isVideo", isVideo)
+                    }.toString())
+                },
+                onFailure = { e ->
+                    chatStore.clearCall()
+                    chatStore.setCallError("Не удалось начать звонок: ${e.message ?: "неизвестная ошибка"}")
+                },
+            )
         }
     }
 
@@ -221,15 +293,27 @@ class AppViewModel {
         scope.launch {
             val iceServers = fetchIceServers()
             val ctrl = makeController()
-            val answerSdp = runCatching {
+            runCatching {
                 ctrl.acceptIncoming(call.callId, offerSdp, call.isVideo, iceServers)
-            }.getOrElse { "stub-sdp" }
-            pendingIncomingOfferSdp = null
-            sendCallFrame(buildJsonObject {
-                put("type", "call_answer")
-                put("callId", call.callId)
-                put("sdp", answerSdp)
-            }.toString())
+            }.fold(
+                onSuccess = { answerSdp ->
+                    pendingIncomingOfferSdp = null
+                    sendCallFrame(buildJsonObject {
+                        put("type", "call_answer")
+                        put("callId", call.callId)
+                        put("sdp", answerSdp)
+                    }.toString())
+                },
+                onFailure = { e ->
+                    pendingIncomingOfferSdp = null
+                    sendCallFrame(buildJsonObject {
+                        put("type", "call_reject")
+                        put("callId", call.callId)
+                    }.toString())
+                    chatStore.clearCall()
+                    chatStore.setCallError("Не удалось принять звонок: ${e.message ?: "неизвестная ошибка"}")
+                },
+            )
         }
     }
 

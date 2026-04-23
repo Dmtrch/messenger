@@ -1,6 +1,6 @@
 # Messenger
 
-Self-hosted end-to-end encrypted chat with a PWA client, Go backend, and native app foundation for desktop and mobile.
+Self-hosted end-to-end encrypted chat with a PWA client, Go backend, and native apps for desktop and mobile.
 
 ![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go) ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react) ![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6?logo=typescript) ![SQLite](https://img.shields.io/badge/SQLite-embedded-003B57?logo=sqlite) ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -160,7 +160,7 @@ CI produces release artifacts for all platforms (DMG, DEB, MSI, APK, IPA) via `.
 
 ## Native Apps
 
-`apps/` provides the foundation for native clients — not yet production-ready, but under active development:
+`apps/` holds the native clients that share the protocol and crypto with the PWA:
 
 - **Desktop** (`apps/desktop/`) — Kotlin Multiplatform + Compose Desktop; CI builds DMG / DEB / MSI
 - **Android** (`apps/mobile/android/`) — Kotlin + Jetpack Compose; CI builds APK

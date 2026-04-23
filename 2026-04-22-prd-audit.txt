@@ -1,0 +1,138 @@
+Аудит соответствия кода PRD
+Дата: 2026-04-22
+
+Итоговая оценка:
+Код соответствует PRD примерно на 65%.
+
+Короткий вывод:
+Проект уже покрывает большую часть MVP-ядра: self-hosted сервер, инвайты, регистрацию, защищённые загрузки, web/desktop/mobile клиенты, базовые чаты, группы, медиа, звонки, E2EE-основу и заметную часть админки. Основные расхождения находятся в безопасности и полноте реализации: нестрогий TTL инвайтов, неполная реализация zero-config и remote wipe на нативных клиентах, отсутствие полноценного key backup/sync для истории на новых устройствах, а также несколько архитектурных решений, конфликтующих с PRD про суверенность данных.
+
+Что соответствует PRD хорошо:
+
+1. Self-hosting и развёртывание
+- Есть Docker-развёртывание и сервер в виде Go-приложения: `docker-compose.yml`, `Dockerfile`, `server/cmd/server/main.go`, `install-server.sh`, `install-server.bat`.
+- Сервер сам отдаёт web-клиент и защищённые дистрибутивы через `/api/downloads/*`: `server/internal/downloads/handler.go`.
+
+2. Инвайты, регистрация, админская генерация ссылок и QR
+- Инвайты создаёт только админ: `server/internal/admin/handler.go`.
+- В web-админке есть QR-код, ссылка, таймер и отзыв инвайта: `client/src/pages/AdminPage.tsx`.
+- Использование, истечение и аудит активаций инвайтов с IP/User-Agent реализованы: `server/internal/auth/handler.go`, `server/db/schema.go`, `server/db/queries.go`.
+
+3. Сценарий “регистрация -> редирект на загрузки”
+- После успешной регистрации web-клиент переводит пользователя на `/downloads`: `client/src/pages/AuthPage.tsx`.
+- Существующий пользователь после логина тоже может зайти на страницу загрузок: `client/src/App.tsx`, `client/src/pages/DownloadsPage.tsx`.
+
+4. Клиенты и автоподхват адреса сервера
+- Web-клиент подхватывает `VITE_SERVER_URL` или `window.location.origin`: `client/src/config/serverConfig.ts`.
+- Android и desktop поддерживают compile-time/default URL и сохранённый URL сервера: `apps/mobile/android/src/main/kotlin/com/messenger/config/ServerConfig.kt`, `apps/desktop/src/main/kotlin/config/ServerConfig.kt`.
+- iOS тоже поддерживает compile-time/default URL: `apps/mobile/ios/Sources/Messenger/BuildConfig.swift`, `apps/mobile/ios/Sources/Messenger/viewmodel/AppViewModel.swift`.
+- Есть flow привязки нового устройства через QR/токен: `client/src/components/LinkDevice/LinkDeviceModal.tsx`, `client/src/pages/LinkDevicePage.tsx`, `server/internal/auth/handler.go`.
+
+5. Базовый функционал мессенджера
+- Личные и групповые чаты есть: `server/internal/chat/handler.go`.
+- Есть статусы доставки и прочтения: `server/db/schema.go`, `server/internal/chat/handler.go`, `server/internal/ws/hub.go`.
+- Есть typing/presence/unread: `server/internal/ws/hub.go`, `client/src/store/chatStore.ts`.
+- Есть редактирование и удаление сообщений “для всех”: `server/internal/chat/handler.go`.
+- Есть вложения, медиа и голосовые сообщения: `server/internal/media/handler.go`, `client/src/components/VoiceRecorder/VoiceRecorder.tsx`, `client/src/components/VoiceMessage/VoiceMessage.tsx`.
+- Есть аудио/видеозвонки и групповые комнаты: `server/internal/calls/handler.go`, `server/internal/sfu/manager.go`, `shared/native-core/calls/*`, `client/src/hooks/useWebRTC.ts`.
+
+6. E2EE-основа
+- Есть X3DH, ratchet и sender keys на web/native сторонах: `client/src/crypto/*`, `shared/native-core/crypto/*`, `apps/mobile/android/src/main/kotlin/com/messenger/crypto/*`, `apps/mobile/ios/Sources/Messenger/crypto/*`, `apps/desktop/src/main/kotlin/crypto/*`.
+- Сервер хранит только ciphertext сообщений и публичный key material: `server/db/schema.go`.
+- Для multi-device есть bundle по устройствам и регистрация prekeys: `server/internal/keys/handler.go`.
+
+7. Существенная часть админки
+- Есть пользователи, статусы `active/suspended/banned`, смена роли, moderator, квоты, retention, password reset requests, invite audit, remote wipe endpoint, revoke sessions, системные метрики: `server/internal/admin/handler.go`, `server/db/schema.go`, `client/src/pages/AdminPage.tsx`.
+
+Что реализовано частично или с отклонением от PRD:
+
+1. TTL инвайтов не “строго 3 минуты”
+- По умолчанию TTL = 180 секунд, но API разрешает диапазон 60..600 секунд: `server/internal/admin/handler.go`.
+- Это противоречит формулировке PRD про строгий TTL 3 минуты.
+
+2. Логика инвайта привязана к моменту регистрации, а не к моменту перехода по ссылке
+- Код проверяет истечение инвайта при регистрации, а не “сжигает” его на первом переходе по ссылке: `server/internal/auth/handler.go`.
+- Формально сценарий “если не перешёл за 3 минуты, токен аннулируется” покрыт не полностью.
+
+3. Zero-config зависит от платформы
+- Web близок к zero-config.
+- Android/desktop/iOS поддерживают вшитый или сохранённый адрес сервера, но при пустом дефолтном URL пользователь идёт через экран ввода адреса: `client/src/pages/ServerSetupPage.tsx`, `apps/mobile/android/src/main/kotlin/com/messenger/config/ServerConfig.kt`, `apps/desktop/src/main/kotlin/config/ServerConfig.kt`, `apps/mobile/ios/Sources/Messenger/BuildConfig.swift`.
+- То есть zero-config есть как возможность, но не как гарантированное поведение для всех сборок.
+
+4. Локальная защита данных на устройствах неоднородна
+- Web хранит сообщения в encrypted IndexedDB: `client/src/store/messageDb.ts`.
+- Ключи на Android и iOS действительно уходят в Keystore/Keychain: `apps/mobile/android/src/main/kotlin/com/messenger/crypto/KeyStorage.kt`, `apps/mobile/ios/Sources/Messenger/crypto/KeyStorage.swift`.
+- Но локальные базы Android/iOS/desktop обычные SQLite без SQLCipher: `apps/mobile/android/src/main/kotlin/com/messenger/db/DatabaseProvider.kt`, `apps/mobile/ios/Sources/Messenger/db/DatabaseManager.swift`, `apps/desktop/src/main/kotlin/db/DatabaseProvider.kt`.
+- PRD явно требует SQLCipher/AES-256 для локального хранилища. Это существенное несоответствие.
+
+5. Remote wipe не выглядит завершённым на всех клиентах
+- Web-клиент явно обрабатывает `remote_wipe` и очищает localStorage/IndexedDB: `client/src/hooks/useMessengerWS.ts`.
+- Для Android/iOS/desktop я не нашёл аналогичной полной обработки wipe-фрейма в WS-оркестраторах; там есть обработка сообщений, read, delete, edit, call, но не wipe: `apps/mobile/android/src/main/kotlin/com/messenger/service/WSOrchestrator.kt`, `apps/mobile/ios/Sources/Messenger/service/WSOrchestrator.swift`, `apps/desktop/src/main/kotlin/service/WSOrchestrator.kt`.
+- Значит PRD-требование про принудительное стирание локальной базы у пользователя закрыто только частично.
+
+6. Визуальная индикация “частного сервера” реализована только частично
+- Сервер отдаёт `name/description/registrationMode`: `server/internal/serverinfo/handler.go`.
+- Экран подключения показывает имя и описание сервера: `client/src/pages/ServerSetupPage.tsx`.
+- Но по коду не видно системного, сквозного UX-уровня “вы на частном сервере [название]” во всех основных экранах, как просит PRD.
+
+Что не соответствует PRD или отсутствует:
+
+1. Нет полноценного key backup / history sync для нового устройства
+- В PRD прямо отмечено, что без key backup история на новом устройстве будет недоступна.
+- В коде есть device linking и генерация новых device keys, но я не нашёл механизма мастер-пароля/резервного копирования ключей/переноса истории между устройствами.
+- Следствие: multi-device есть, но полнота сценария нового устройства по PRD не закрыта.
+
+2. Нет отложенной отправки сообщений
+- Поиск по коду не показывает реализации scheduled messages на уровне чатов/сервера.
+- PRD включает “Отложенная отправка”.
+
+3. Суверенность данных нарушается дефолтами и интеграциями со сторонними сервисами
+- По умолчанию сервер использует `stun.l.google.com`: `server/cmd/server/config.go`.
+- Есть прямая интеграция с FCM и APNs: `server/internal/push/handler.go`, `apps/mobile/android/src/main/kotlin/com/messenger/service/MessengerFirebaseService.kt`.
+- PRD говорит, что данные не должны передаваться на сторонние серверы и push через Google/Apple не должны использоваться без явной proxy-настройки.
+- Текущий код делает это возможным, а STUN Google вообще включён по умолчанию.
+
+4. Групповые звонки по REST не проверяют членство в чате
+- `CreateRoom` и `JoinRoom` в `server/internal/calls/handler.go` требуют аутентификацию, но не проверяют, что пользователь состоит в `chatId`.
+- Для приватного сервера это заметный пробел по безопасности и фактическое расхождение с моделью закрытых комнат из PRD.
+
+5. Локальная база desktop вообще не соответствует требованию hardware-backed storage
+- Desktop хранит ключи в PKCS12-файле рядом с паролем в `~/.messenger`, а не в OS-backed secure storage: `apps/desktop/src/main/kotlin/crypto/KeyStorage.kt`.
+- Это хуже требований PRD по хранению секретов только в защищённом хранилище устройства.
+
+Нейтральные отличия, которые не считаю критичным нарушением PRD:
+
+1. Вместо рекомендованных PostgreSQL + Redis используется SQLite
+- Это отклонение от “рекомендуемого стека”, но не нарушение обязательного функционального требования само по себе: `server/db/schema.go`, `server/db/migrate.go`.
+
+2. Desktop реализован не на Electron/Flutter
+- PRD помечает стек как рекомендуемый, а не обязательный.
+
+Оценка по крупным блокам:
+
+- Инфраструктура и self-hosting: 8/10
+- Инвайты и регистрация: 7/10
+- Дистрибуция клиентов: 8/10
+- Auto-configuration: 7/10
+- Чаты и core messaging: 8/10
+- Медиа и звонки: 7/10
+- Админка и контроль доступа: 8/10
+- Безопасность и суверенность данных: 4/10
+- Multi-device / key backup: 4/10
+
+Главные причины, почему оценка не выше:
+
+1. PRD сильно упирается в безопасность, а именно здесь самые заметные разрывы:
+- нет SQLCipher на нативных клиентах,
+- нет полноценного secure key backup/sync,
+- remote wipe неполон,
+- есть зависимость от Google STUN/FCM и APNs.
+
+2. Есть несколько функциональных несовпадений:
+- TTL инвайта не строго 180 секунд,
+- нет scheduled messages,
+- групповые звонки через REST недостаточно защищены проверкой членства.
+
+Если свести к продуктовой формуле:
+- MVP приватного self-hosted мессенджера уже есть.
+- MVP “по PRD с акцентом на суверенность и жёсткую security-модель” ещё не доведён.

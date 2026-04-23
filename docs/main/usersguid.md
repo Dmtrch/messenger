@@ -1,313 +1,448 @@
-# Руководство пользователя и разработчика Messenger
+# Руководство пользователя Messenger
 
-Этот документ содержит полную инструкцию по развертыванию, настройке и использованию Messenger.
+> Актуально на коммит `60d7c93` (2026-04-21). Охватывает self-hosted развёртывание, веб-клиент, native-приложения и админ-панель. Справочная техническая документация — `docs/main/technical-documentation.md`. Deployment-only материалы — `docs/main/deployment.md`.
 
 ---
 
-## 1. Быстрая установка сервера (рекомендуется)
+## 1. Быстрая установка сервера (Docker)
 
-Для автоматической установки используйте скрипты `install-server.sh` (macOS/Linux) или `install-server.bat` (Windows). Они требуют только **Docker** и выполняют все шаги самостоятельно.
+Автоматические скрипты в корне репозитория делают всё за один запуск: задают вопросы, создают `.env`, генерируют `JWT_SECRET`, запускают контейнер, извлекают VAPID-ключи и сохраняют данные администратора в `server-main.txt`.
 
 ### Требования
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (включает Docker Compose)
-- Доступ в интернет (для загрузки образов)
+- Docker Desktop (Windows, macOS) или Docker Engine + Docker Compose (Linux).
+- Доступ в интернет для скачивания базовых образов.
 
 ### macOS / Linux
 
 ```bash
-# Клонируйте репозиторий
 git clone <repo-url> messenger
 cd messenger
-
-# Сделайте скрипт исполняемым и запустите
 chmod +x install-server.sh
 ./install-server.sh
 ```
 
 ### Windows
 
-```
-1. Клонируйте репозиторий: git clone <repo-url> messenger
-2. Откройте папку messenger в Проводнике
-3. Правая кнопка мыши на install-server.bat → "Запуск от имени администратора"
-```
+1. `git clone <repo-url> messenger`
+2. Открыть папку `messenger` в Проводнике.
+3. Правый клик на `install-server.bat` → «Запуск от имени администратора».
 
-### Что делает скрипт
+### Что будет спрошено
 
-1. Проверяет наличие Docker и Docker Compose
-2. Задаёт интерактивные вопросы: имя сервера, URL, порт, режим регистрации, логин и пароль администратора
-3. Генерирует `JWT_SECRET` криптографически безопасным методом
-4. Создаёт файл `.env` с полной конфигурацией
-5. Собирает и запускает Docker-контейнер
-6. Автоматически извлекает VAPID-ключи из логов первого запуска и сохраняет их в `.env`
-7. Перезапускает сервер с постоянными ключами
-8. Проверяет доступность сервера по HTTP
-9. Записывает файл **`server-main.txt`** — все данные администратора
+- Имя сервера (`SERVER_NAME`) и описание (`SERVER_DESCRIPTION`).
+- Внешний URL и порт.
+- Режим регистрации (см. §4.2).
+- Логин и пароль администратора.
 
-### Файл server-main.txt
+### Что создаст скрипт
 
-После установки в корне проекта появится `server-main.txt`. В нём содержится:
+- `.env` — полный конфигурационный файл.
+- Контейнер `messenger` из `docker-compose.yml`, порт по умолчанию `8080`.
+- `server-main.txt` — памятка с URL, логином/паролем администратора, `JWT_SECRET`, VAPID-ключами и командами управления.
 
-- URL сервера и порт
-- Логин и пароль администратора
-- `JWT_SECRET`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`
-- Параметры WebRTC (STUN/TURN)
-- Команды управления сервером (запуск, остановка, логи, резервное копирование, обновление)
+> `.env` и `server-main.txt` содержат секреты. Храните их вне репозитория.
 
-> **ВНИМАНИЕ**: `server-main.txt` и `.env` содержат секреты. Сохраните их в защищённом месте и не публикуйте в репозитории.
+Подробнее по скрипту — `install-server.md` в корне проекта. Команды управления Docker-контейнером см. в `docs/main/deployment.md`.
 
 ---
 
 ## 2. Ручная установка (для разработчиков)
 
-Если вы не используете Docker, установите инструменты вручную и запустите сервер напрямую.
+Подходит, если нужен dev-режим с Vite hot-reload и возможностью редактировать код.
 
-### Установка инструментов
+### 2.1 Инструменты
 
-#### Windows
-1. **Git**: [git-scm.com](https://git-scm.com/download/win)
-2. **Go 1.22+**: [go.dev](https://go.dev/doc/install) — установщик MSI
-3. **Node.js 20 LTS**: через [nvm-windows](https://github.com/coreybutler/nvm-windows)
-4. **JDK 17**: [Adoptium](https://adoptium.net/) или [Microsoft Build of OpenJDK](https://learn.microsoft.com/en-us/java/openjdk/download)
-5. **C++ Build Tools**: "Desktop development with C++" в Visual Studio Installer (нужно для некоторых зависимостей `node-gyp`)
+- Git.
+- Go 1.23+.
+- Node.js 20 LTS + npm.
+- (Опционально) JDK 17 для native desktop.
 
-#### macOS
+macOS:
+
 ```bash
-# Установка Homebrew (если нет)
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Установка инструментов
-brew install git go node@20 openjdk@17
+brew install git go node openjdk@17
 ```
 
-#### Linux (Ubuntu/Debian)
+Ubuntu/Debian:
+
 ```bash
 sudo apt update
 sudo apt install git golang-go nodejs npm openjdk-17-jdk
-# Для Node.js рекомендуется nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-nvm install 20
 ```
 
-### Компиляция и запуск сервера
+Windows: Git for Windows, MSI установщик Go, Node.js через `nvm-windows`, Adoptium JDK 17.
+
+### 2.2 Запуск в dev-режиме
 
 ```bash
-# Сборка клиента (статика встраивается в бинарник сервера)
+# Терминал 1 — backend
+cd server
+JWT_SECRET=<не_менее_32_символов> go run ./cmd/server
+# слушает http://localhost:8080
+
+# Терминал 2 — frontend
 cd client
 npm install
-npm run build
-cp -R dist/* ../server/cmd/server/static/
-
-# Компиляция и запуск сервера
-cd ../server
-go build -o messenger ./cmd/server
-JWT_SECRET=<ваш_секрет> ./messenger
+npm run dev
+# Vite на http://localhost:5173 с dev-proxy /api /ws /media → :8080
 ```
 
-При первом запуске сервер создаст файл БД и папку `media/`. Если в конфигурации указаны `ADMIN_USERNAME` и `ADMIN_PASSWORD`, будет создан первый администратор.
+Откройте `http://localhost:5173`. Первый экран — «Настройка сервера» (`ServerSetupPage`); для dev-окружения нажмите «Использовать текущий адрес» либо введите `http://localhost:8080`.
+
+### 2.3 Production-бинарник
+
+```bash
+cd client && npm install && npm run build
+cp -R dist/* ../server/cmd/server/static/
+
+cd ../server
+go build -o messenger ./cmd/server
+JWT_SECRET=<секрет> ./messenger
+```
+
+При запуске сервер создаст `messenger.db`, `media/`, `downloads/`. Если заданы `ADMIN_USERNAME` и `ADMIN_PASSWORD` — создастся первый администратор.
 
 ---
 
-## 3. Конфигурация сервера
+## 3. Полный список переменных окружения
 
-Сервер использует иерархическую систему конфигурации: **ENV > `config.yaml` > значения по умолчанию**.
+Приоритет значений: `env > config.yaml > defaults`. Имя файла конфига — `config.yaml`.
 
-### Переменные окружения
+### 3.1 Обязательные
 
-| Переменная | Описание | По умолчанию |
-| :--- | :--- | :--- |
-| `JWT_SECRET` | **Обязательно.** Секрет для подписи JWT-токенов (мин. 32 символа). | — |
-| `PORT` | Порт сервера. | `8080` |
-| `DB_PATH` | Путь к файлу SQLite. | `./messenger.db` |
-| `MEDIA_DIR` | Папка для медиафайлов. | `./media` |
-| `SERVER_NAME` | Отображаемое имя сервера. | `Messenger` |
-| `SERVER_DESCRIPTION` | Описание сервера. | — |
-| `REGISTRATION_MODE` | `open` — свободная, `invite` — по коду, `approval` — по одобрению. | `open` |
-| `ADMIN_USERNAME` | Логин администратора (создаётся при первом запуске). | — |
-| `ADMIN_PASSWORD` | Пароль администратора. | — |
-| `ALLOWED_ORIGIN` | CORS-фильтр для WebSocket и API (например, `https://chat.example.com`). | пусто (всё) |
-| `BEHIND_PROXY` | `true`, если сервер за reverse proxy (Cloudflare Tunnel, nginx). | `false` |
-| `STUN_URL` | STUN-сервер для WebRTC-звонков. | `stun:stun.l.google.com:19302` |
-| `TURN_URL` | TURN-сервер (нужен при строгом NAT/Firewall). | пусто |
-| `TURN_SECRET` | Секрет для генерации временных учётных данных TURN. | пусто |
-| `TURN_CREDENTIAL_TTL` | TTL учётных данных TURN в секундах. | `86400` |
-| `VAPID_PUBLIC_KEY` | Публичный ключ Web Push. | авто-генерация |
-| `VAPID_PRIVATE_KEY` | Приватный ключ Web Push. | авто-генерация |
-| `TLS_CERT` | Путь к TLS-сертификату (при прямом TLS без proxy). | пусто |
-| `TLS_KEY` | Путь к приватному ключу TLS. | пусто |
+| ENV | Назначение |
+|---|---|
+| `JWT_SECRET` | Подпись JWT. Пустое значение — сервер завершится с `log.Fatal`. Минимум 32 символа |
 
-### Сохранение конфигурации через config.yaml
+### 3.2 Базовые
 
-Создайте файл `server/cmd/server/config.yaml` для постоянного хранения настроек:
+| ENV | Дефолт | Назначение |
+|---|---|---|
+| `PORT` | `8080` | HTTP-порт |
+| `DB_PATH` | `./messenger.db` | Файл SQLite |
+| `MEDIA_DIR` | `./media` | Каталог медиа |
+| `DOWNLOADS_DIR` | `./downloads` | Каталог native-артефактов |
+| `SERVER_NAME` | `Messenger` | Публичное имя |
+| `SERVER_DESCRIPTION` | — | Описание |
+| `APP_VERSION` | `dev` | Версия сборки сервера |
+| `MIN_CLIENT_VERSION` | `0.0.0` | Минимальная версия клиента |
+| `APP_CHANGELOG` | — | Changelog для `/api/version` |
+
+### 3.3 TLS / CORS / proxy
+
+| ENV | Дефолт | Назначение |
+|---|---|---|
+| `TLS_CERT`, `TLS_KEY` | — | Прямой TLS (TLS 1.3) |
+| `ALLOWED_ORIGIN` | — | CORS и WS `CheckOrigin` (через запятую) |
+| `BEHIND_PROXY` | `false` | Доверие `X-Forwarded-*`, HSTS |
+
+### 3.4 Регистрация и админ
+
+| ENV | Дефолт | Назначение |
+|---|---|---|
+| `REGISTRATION_MODE` | `open` | `open` / `invite` / `approval`. Другое значение → `log.Fatal` |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | — | Bootstrap первого администратора |
+
+### 3.5 Push
+
+| ENV | Дефолт | Назначение |
+|---|---|---|
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | авто | Web Push. Если пустые — ключи генерируются разово и выводятся в лог; без сохранения подписки сломаются после рестарта |
+| `FCM_LEGACY_KEY` | — | FCM Server Key |
+| `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID` | — | APNs .p8 и метаданные |
+| `APNS_SANDBOX` | `false` | APNs sandbox |
+
+### 3.6 Звонки (STUN/TURN)
+
+| ENV | Дефолт | Назначение |
+|---|---|---|
+| `STUN_URL` | `stun:stun.l.google.com:19302` | STUN-сервер |
+| `TURN_URL` | — | TURN (не обязателен) |
+| `TURN_SECRET` | — | HMAC для временных TURN-creds |
+| `TURN_CREDENTIAL_TTL` | `86400` | TTL TURN-creds, сек |
+
+### 3.7 Группы, квоты, upload
+
+| ENV | Дефолт | Назначение |
+|---|---|---|
+| `MAX_GROUP_MEMBERS` | `50` | Лимит участников группы (`0` = дефолт) |
+| `ALLOW_USERS_CREATE_GROUPS` | `true` | Разрешение создавать группы обычным пользователям |
+| `MAX_UPLOAD_BYTES` | `100<<20` (100 МБ) | Лимит одного media-upload |
+
+### 3.8 Docker-специфичные
+
+- `TUNNEL_TOKEN` — токен Cloudflare Tunnel для профиля `cloudflare` в `docker-compose.yml`.
+
+Пример `config.yaml`:
 
 ```yaml
 port: "8080"
 db_path: "./messenger.db"
-jwt_secret: "ваш_очень_длинный_секрет"
-vapid_public_key: "извлеките_из_логов_первого_запуска"
-vapid_private_key: "извлеките_из_логов_первого_запуска"
+jwt_secret: "замените_на_32+_символа"
+vapid_public_key: "извлечь_из_логов_первого_запуска"
+vapid_private_key: "извлечь_из_логов_первого_запуска"
 registration_mode: "approval"
-server_name: "Мой мессенджер"
+server_name: "Наш мессенджер"
 stun_url: "stun:stun.l.google.com:19302"
-turn_url: "turn:my-turn-server.com:3478"
-turn_secret: "my_shared_secret"
+turn_url: "turn:turn.example.com:3478"
+turn_secret: "shared_secret"
 ```
-
-### VAPID-ключи (Web Push)
-
-При первом запуске сервер автоматически генерирует VAPID-ключи и выводит их в лог:
-
-```
-VAPID_PRIVATE_KEY=<значение>
-VAPID_PUBLIC_KEY=<значение>
-```
-
-Сохраните эти значения в `.env` или `config.yaml`. Если ключи не сохранены, при перезапуске сервера существующие Push-подписки перестанут работать.
-
-> Скрипт `install-server.sh` / `install-server.bat` делает это автоматически.
 
 ---
 
-## 4. Управление сервером (Docker)
+## 4. Первый запуск
 
-```bash
-# Запуск
-docker compose up -d
+### 4.1 Bootstrap администратора
 
-# Остановка
-docker compose stop
+Если на момент первого запуска в БД нет ни одного пользователя, сервер создаёт администратора по `ADMIN_USERNAME` / `ADMIN_PASSWORD`. Войдите этими данными в веб-клиенте и смените пароль через «Профиль → Сменить пароль».
 
-# Перезапуск
-docker compose restart
+Если bootstrap-админ не задан, нужно создать аккаунт через стандартную регистрацию (зависит от `REGISTRATION_MODE`) и затем вручную повысить роль через SQL:
 
-# Просмотр логов
-docker compose logs -f
-
-# Статус контейнеров
-docker compose ps
+```sql
+UPDATE users SET role = 'admin' WHERE username = 'ваш_логин';
 ```
 
-### Резервное копирование
+После этого обязательно разлогиньтесь и войдите заново — роль берётся из JWT.
 
-```bash
-docker compose stop
-docker cp messenger:/data/messenger.db ./backup-$(date +%Y%m%d-%H%M).db
-docker cp messenger:/data/media ./backup-media-$(date +%Y%m%d)   # опционально
-docker compose start
-```
+### 4.2 Режимы регистрации (`REGISTRATION_MODE`)
 
-### Обновление сервера
+| Режим | Поведение |
+|---|---|
+| `open` | Любой желающий регистрируется через `AuthPage` без ограничений |
+| `invite` | Регистрация только по одноразовому коду. Коды создаются администратором в «Админ-панель → Инвайты». Активация транзакционная, истёкшие и отозванные коды отбрасываются |
+| `approval` | Пользователь подаёт заявку через `AuthPage` → «Запросить регистрацию». Заявка попадает в «Админ-панель → Заявки на регистрацию» и требует одобрения |
 
-```bash
-git pull
-docker compose build
-docker compose up -d
-```
+Примечание: в старой документации и некоторых комментариях встречается термин `request` — это устаревший синоним `approval`. Сервер принимает только `approval`.
 
-Миграции базы данных выполняются автоматически при запуске.
+### 4.3 Сброс пароля
+
+Пользователь на `AuthPage` → «Забыли пароль?» → запрос направляется администратору (без утечки факта существования логина). Администратор в панели выдаёт временный пароль, пользователь логинится и меняет его через профиль.
 
 ---
 
-## 5. Настройка звонков (WebRTC)
+## 5. Веб-клиент (PWA)
 
-### STUN и TURN
+Веб-клиент (`client/`) одинаково работает в браузере и в режиме установленного PWA.
 
-- **STUN** (по умолчанию): позволяет устройствам узнать публичный IP. Работает в 70–80% случаев. По умолчанию используется бесплатный сервер Google.
-- **TURN** (рекомендуется для продакшена): необходим при строгих корпоративных Firewall и симметричных NAT. Трафик звонка проходит через ваш TURN-сервер.
+### 5.1 Регистрация и первый вход
 
-### Настройка Coturn (пример)
+1. Открыть URL сервера. Первый экран — `ServerSetupPage`: ввести адрес сервера (используется `/api/server/info` для проверки).
+2. `AuthPage`: вкладки «Вход», «Регистрация», «Инвайт», «Запрос», «Забыли пароль» — набор зависит от `REGISTRATION_MODE`.
+3. При регистрации клиент локально генерирует ключи X3DH (IK, SPK + подпись, OPK-набор) и отправляет публичные части на сервер через `POST /api/keys/register` / `POST /api/keys/prekeys`. Приватные ключи остаются в IndexedDB, зашифрованные vault-ключом.
 
-1. Установите `coturn` на ваш сервер.
-2. В `turnserver.conf` укажите `use-auth-secret` и `static-auth-secret=ВАШ_СЕКРЕТ`.
-3. В конфигурации Messenger задайте:
-   - `TURN_URL`: `turn:your-domain.com:3478` (или `turns:` для TLS)
-   - `TURN_SECRET`: тот же секрет, что и в `static-auth-secret`
-4. Клиент автоматически получает временные учётные данные через `/api/calls/ice-servers` при начале звонка.
+### 5.2 Passphrase gate
+
+После логина веб-клиент просит passphrase. Это ключ шифрования локального vault (AES-GCM поверх IndexedDB) — под ним хранятся приватные ключи X3DH/Ratchet/SenderKey и кэш сообщений. Пока vault не разблокирован, UI чатов скрыт.
+
+- На ранее использованном устройстве — введите passphrase, заданный при регистрации.
+- На новом устройстве — passphrase создаётся при первом входе.
+- Забытая passphrase эквивалентна потере ключей: vault придётся обнулить, старые сообщения станут нерасшифруемыми.
+
+### 5.3 Чаты 1:1 и групповые
+
+- Список чатов: `ChatListPage` слева/сверху в зависимости от ширины экрана.
+- Создание: кнопка «Новый чат» → `NewChatModal` (поиск по username через `GET /api/users/search`).
+- Группа: в `NewChatModal` включить «Группа», добавить участников, задать имя.
+- Просмотр: `ChatWindowPage` (история, ввод, прикрепление медиа, запись голосового).
+- Удаление сообщения — меню сообщения → «Удалить» (soft-delete, рассылается всем получателям).
+- Редактирование — меню сообщения → «Редактировать» (broadcast новому получателю).
+- Read markers и индикатор набора — автоматически.
+
+### 5.4 Медиа и галерея
+
+- Прикрепление файлов и изображений — через кнопку-скрепку в `ChatWindow`.
+- Файлы шифруются XSalsa20-Poly1305 на клиенте, upload — ciphertext only (`POST /api/media/upload`). Ключ расшифровки вложен в E2E-payload сообщения.
+- Галерея чата: кнопка «Медиа» в заголовке → `GalleryModal` со списком из `GET /api/chats/{id}/media`.
+- Лимит одного файла — `MAX_UPLOAD_BYTES` (по умолчанию 100 МБ). Квоты на пользователя управляются администратором.
+
+### 5.5 Голосовые сообщения
+
+- Запись: нажать и удерживать кнопку микрофона в `ChatWindow` (`VoiceRecorder`).
+- После отпускания — аудио кодируется браузером, шифруется как обычное медиа и отправляется.
+- Воспроизведение: `VoiceMessage` с прогрессом и кнопкой паузы.
+
+Требуется разрешение на микрофон в браузере/ОС.
+
+### 5.6 Аудио/видео-звонки
+
+- 1:1 звонок: кнопка звонка в заголовке `ChatWindow` → `CallOverlay`. Клиент получает ICE-серверы через `GET /api/calls/ice-servers` и инициирует WebRTC через shared `call-controller`.
+- Групповой звонок: в групповом чате — кнопка звонка → `GroupCallView`. Серверная часть использует SFU (`server/internal/sfu`): комната создаётся через `POST /api/calls/room`, участники присоединяются через WS `group-call.join` и REST `POST /api/calls/room/{id}/join`. Практический потолок — ≤ 10–15 активных участников.
+- Для звонков за симметричным NAT требуется TURN (см. §3.6 и `docs/main/deployment.md`).
+
+### 5.7 Привязка устройства (multi-device)
+
+- На исходном устройстве: «Профиль → Устройства → Привязать новое устройство» (`LinkDevicePage` → `LinkDevice`). Сервер выдаёт QR-токен (TTL 120s).
+- На новом устройстве: «Привязать это устройство» → отсканировать/ввести токен. Клиент генерирует собственный набор X3DH-ключей и регистрирует себя через `POST /api/auth/device-link-activate`.
+- История сообщений на новом устройстве изначально пуста: ключи Double Ratchet у старых устройств. Новые сообщения расшифровываются автоматически после обмена ключами.
+
+### 5.8 Безопасность сессии: Safety Number
+
+Модуль `SafetyNumber` показывает отпечаток пары IK (локального и собеседника). Используйте при первом звонке или сомнениях, что собеседник — тот, за кого себя выдаёт: сверьте числа по другому каналу.
+
+### 5.9 Профиль
+
+Страница `ProfilePage`:
+
+- Смена display name и аватара.
+- Смена пароля (`POST /api/auth/change-password`).
+- Список устройств с возможностью отвязать (`DELETE /api/devices/{id}`).
+- Включение биометрической защиты и privacy screen (только на native-клиентах).
+- Логаут — `POST /api/auth/logout`, инвалидирует refresh-токен.
+
+### 5.10 Offline
+
+- `OfflineIndicator` в верхней части показывает, что сеть недоступна.
+- Исходящие сообщения буферизуются в IndexedDB (`outboxDb`). При возврате сети `useOfflineSync` их переигрывает.
+- Push-уведомления приходят даже при закрытом клиенте при условии, что VAPID-ключи задействованы (см. §3.5).
 
 ---
 
-## 6. Сборка для продакшена (без Docker)
+## 6. Native-приложения
 
-В режиме продакшена сервер раздаёт статические файлы клиента встроенными в бинарник — один файл содержит и бэкенд, и фронтенд.
+Устанавливаются из артефактов, публикуемых в `/api/downloads/manifest` + `/api/downloads/{filename}` (админ-панель → «Релизы»).
 
-```bash
-# 1. Сборка клиента
-cd client
-npm install
-npm run build
+### 6.1 Desktop (Compose Multiplatform)
 
-# 2. Копирование статики в сервер
-rm -rf ../server/cmd/server/static/*
-cp -R dist/* ../server/cmd/server/static/
+- Платформы: macOS (arm64, x86_64), Windows, Linux.
+- Пакеты: `.dmg`, `.msi`, `.deb`. Сборка в CI из тегов `v*`, опциональная подпись macOS (`MACOS_SIGNING_IDENTITY`) и Windows (`signtool`).
+- Первый запуск — экран «Настройка сервера», аналог web-клиента.
+- Пароль vault: на desktop используется собственный passphrase-gate (ОС-биометрика напрямую не задействована).
+- Privacy screen: overlay при потере фокуса окна (см. `docs/privacy-screen-contract.md`). Ограничения — `docs/privacy-screen-desktop-limitations.md`.
+- Обновления: приложение запрашивает `GET /api/version` + `GET /api/downloads/manifest`, показывает changelog и ссылку на новый артефакт. Установка ручная — скачать и запустить новый пакет.
 
-# 3. Компиляция автономного бинарника
-cd ../server
-go build -o messenger_prod ./cmd/server
-```
+### 6.2 Android (Kotlin + Compose)
 
-Запуск: `./messenger_prod` (Windows: `messenger_prod.exe`)
+- Пакет: APK (`assembleRelease` при заданном keystore, иначе `assembleDebug`).
+- Установка: скачать APK → разрешить «Установка из неизвестных источников» → открыть файл. Для обновлений клиент использует системный `PackageInstaller`.
+- Биометрика: `BiometricPrompt` (класс BIOMETRIC_STRONG), fallback на PIN/pattern устройства. Экран `BiometricGateScreen` — блокирует запуск и возврат из фона.
+- Privacy screen: `FLAG_SECURE` блокирует app switcher, screen recording и скриншоты системы (см. `docs/privacy-screen-contract.md`). Флаг `privacyScreenEnabled` в SharedPrefs.
+- Push: FCM (токен регистрируется через `POST /api/push/native/register`).
 
----
+### 6.3 iOS (SwiftUI)
 
-## 7. Настольные приложения (Desktop)
+- Полноценный IPA **не собирается в CI** — только криптопакет `MessengerCrypto` через SPM. Дистрибуция: TestFlight или App Store (см. `docs/ios-update-policy.md`).
+- Установка с произвольной ссылки запрещена iOS. Обновления — через TestFlight/App Store.
+- Биометрика: `LAContext` → Face ID / Touch ID / passcode, экран `BiometricGateView`.
+- Privacy screen: blur-overlay при `scenePhase == .inactive/.background` + реакция на `UIScreen.capturedDidChangeNotification`. Не блокирует OS screenshot hotkey (ограничение платформы).
+- Push: APNs (токен регистрируется через `POST /api/push/native/register`).
 
-Настольное приложение использует **Compose Multiplatform** (Kotlin) и собирается под каждую платформу.
+### 6.4 Общие свойства native
 
-### Команды сборки (из папки `apps/desktop`)
-
-```bash
-./gradlew run          # Запуск в режиме разработки
-./gradlew clean build  # Сборка
-```
-
-### Сборка инсталляторов
-
-- **Windows**: `./gradlew packageMsi` → `build/compose/binaries/main/msi`
-- **macOS**: `./gradlew packageDmg` → `build/compose/binaries/main/dmg`
-- **Linux**: `./gradlew packageDeb` → `build/compose/binaries/main/deb`
-
-### Первый запуск
-
-1. Запустите инсталлятор и установите приложение.
-2. При первом запуске появится экран **"Настройка сервера"**.
-3. Введите URL вашего сервера (например, `https://messenger.mycompany.com`).
-4. Приложение сохранит адрес локально. После этого будет доступен экран входа/регистрации.
+- Vault работает так же, как в web: AES-GCM поверх локального хранилища, passphrase либо биометрика (если включена).
+- Те же X3DH/Double Ratchet/Sender Keys, сверяются с web через `shared/test-vectors/`.
+- Первый экран — «Настройка сервера». URL можно «запечь» в CI через `scripts/set-server-url.sh`.
 
 ---
 
-## 8. Использование системы
+## 7. Администрирование
 
-### Возможности
+Все инструменты — в `AdminPage` (доступ при `role=admin`). REST-эквиваленты — `docs/main/technical-documentation.md` §4.4.
 
-- **E2E-шифрование**: все сообщения шифруются на клиенте (X3DH + Double Ratchet). Сервер хранит только зашифрованные данные.
-- **Групповые чаты**: защищённые групповые переписки.
-- **Медиафайлы**: передача изображений и файлов.
-- **Звонки**: аудио и видео через WebRTC.
-- **Push-уведомления**: работают в PWA и нативных приложениях.
+### 7.1 Пользователи
 
-### Где хранятся данные
+- Список пользователей, поиск.
+- Действия: `reset-password` (выдать временный пароль), `suspend` / `unsuspend`, `ban`, `revoke-sessions` (инвалидирует все JWT через `session_epoch`), `remote-wipe` (выход со всех устройств + требование перезайти).
+- Изменение роли: `user`, `moderator`, `admin`.
+- Квота на пользователя: `GET/PUT /api/admin/users/{id}/quota` (суммарный лимит медиа в байтах).
 
-**Сервер** (`messenger.db` и `media/`):
-- Хеши паролей, список пользователей, публичные ключи устройств (PreKeys)
-- Зашифрованные сообщения и метаданные чатов
-- Бинарные медиафайлы
-- Данные хранятся бессрочно, пока не удалены пользователем или администратором
+### 7.2 Инвайты
 
-**Клиент** (браузер/Desktop):
-- **Приватные ключи шифрования** — хранятся в зашифрованном виде в IndexedDB (браузер) или защищённом хранилище ОС (Desktop). На сервер **никогда не передаются**.
-- **Кэш сообщений** — хранится локально для быстрого доступа.
+- «Инвайт-коды»: создание, список, удаление, просмотр активаций (IP/UA/время — журнал в `invite_activations`).
+- Инвайт одноразовый: активация транзакционная, отозванные (`revoked_at`) и истёкшие (`expires_at`) отклоняются.
 
-### Регистрация и вход
+### 7.3 Заявки на регистрацию
 
-- **Новый пользователь**: нажмите "Зарегистрироваться", введите логин/пароль. Клиент генерирует криптографические ключи и отправляет только их публичные части на сервер.
-- **Существующий пользователь на новом устройстве**:
-  1. Войдите со своим логином и паролем.
-  2. Сервер зарегистрирует новое устройство.
-  3. История сообщений изначально будет недоступна — ключи хранятся на старых устройствах. Новые сообщения станут расшифровываться автоматически после первого обмена ключами с другими участниками.
+- При `REGISTRATION_MODE=approval` заявки пользователей попадают в раздел «Заявки на регистрацию».
+- Действия: одобрить (пользователь создаётся), отклонить (заявка помечается `rejected`).
 
-### Восстановление пароля
+### 7.4 Сбросы паролей
 
-Если пароль забыт, можно запросить сброс у администратора через экран входа (если разрешено в конфигурации).
+- Список запросов сброса. Для pending-запроса админ выдаёт временный пароль (`reset-password`), и запрос помечается resolved.
 
-> **Внимание**: потеря приватных ключей (например, удаление данных браузера) делает старые сообщения нерасшифруемыми. Используйте функцию "Экспорт ключей" для резервного копирования (в разработке).
+### 7.5 Настройки сервера
+
+- «Retention» — срок автоматического удаления сообщений.
+- «Max group members» — лимит участников группы.
+
+### 7.6 Мониторинг
+
+- Подраздел «Система»: CPU %, RAM used/total, Disk used/total (через `gopsutil`).
+- Snapshot — `GET /api/admin/system/stats`, real-time — `GET /api/admin/system/stream` (SSE). UI рисует графики через `recharts`.
+
+### 7.7 Боты
+
+- Создание бота: имя + owner → сервер возвращает токен (единственный раз).
+- Webhook URL бота должен быть localhost или RFC-1918 (защита от SSRF). Запросы подписываются HMAC-SHA256, retry 1s→2s→4s, timeout 5s.
+- Приём сообщений ботом — через bot-token middleware.
+
+### 7.8 Downloads / релизы
+
+- «Релизы» отображает артефакты из `DOWNLOADS_DIR`: `.dmg`, `.deb`, `.msi`, `.apk`, — доступные клиентам через `/api/downloads/manifest`.
+
+---
+
+## 8. FAQ и troubleshooting
+
+### Веб-клиент спрашивает passphrase каждый раз — это нормально?
+
+Да. Passphrase не сохраняется на диск. Если хотите автоматическую разблокировку, поставьте native-приложение с биометрикой.
+
+### После рестарта сервера не приходят push-уведомления
+
+Вы не сохранили VAPID-ключи. Задайте `VAPID_PUBLIC_KEY` и `VAPID_PRIVATE_KEY` в `.env` (скрипт `install-server.sh` делает это автоматически). Существующие подписки, созданные под старыми ключами, придётся переоформить.
+
+### Звонок не соединяется за корпоративным файрволом
+
+Нужен TURN. Поднимите coturn, задайте `TURN_URL` и `TURN_SECRET`. Креды клиентам выдаются автоматически через `/api/calls/ice-servers`.
+
+### В групповом звонке видео «сыпется» у всех
+
+Превышен практический потолок SFU (~10–15 активных участников в одной комнате). Выделенный SFU-сервис (LiveKit) в текущей архитектуре не поддержан.
+
+### Сообщения не расшифровываются на новом устройстве
+
+Это ожидаемо: ключи Double Ratchet у старых устройств. История восстановится только после первого обмена ключами с активными собеседниками. Для переноса без истории используйте «Привязать устройство» (§5.7).
+
+### «Не удалось подключиться к серверу»
+
+1. Проверьте URL на `ServerSetupPage` — он должен отвечать `GET /api/server/info`.
+2. Убедитесь, что `ALLOWED_ORIGIN` включает домен клиента.
+3. При reverse proxy проверьте, что `BEHIND_PROXY=true` и proxy пропускает `Upgrade: websocket`.
+4. Для iOS/Android: сервер должен быть доступен по валидному TLS-сертификату (не самоподписанному).
+
+### Забыта passphrase vault
+
+Восстановление невозможно. Сбросьте vault — в `ProfilePage` выйти из аккаунта и очистить данные браузера для домена; затем войти заново и создать новую passphrase. Вся история и приватные ключи будут потеряны.
+
+### Я случайно удалил пользователя — как восстановить?
+
+Удаление пользователя полностью убирает его из БД, публичные ключи и сообщения-копии на его адрес тоже. Единственный путь — восстановление из backup'а SQLite (см. `docs/main/deployment.md`).
+
+### iOS не предлагает обновление через `UpdateCheckerService`
+
+На iOS прямая sideload-установка запрещена. Приложение покажет changelog и попросит обновиться через TestFlight или App Store — см. `docs/ios-update-policy.md`.
+
+### Admin-панель не открывается
+
+Откройте JWT — убедитесь, что `role=admin`. Для пользователя, повышенного через SQL, нужен логаут + повторный вход, чтобы токен перевыпустился с новой ролью.
+
+### Webhook бота не срабатывает
+
+Проверьте, что URL — localhost или RFC-1918 (10/8, 172.16/12, 192.168/16). Другие адреса отклоняются защитой от SSRF. Также смотрите логи сервера — отказы фиксируются `bots` модулем.
+
+---
+
+## 9. Ссылки
+
+- `docs/main/deployment.md` — развёртывание, TLS, proxy, миграции, backup.
+- `docs/main/architecture.md` — как устроены E2E, SFU, vault, native security.
+- `docs/main/technical-documentation.md` — REST/WS контракты, схема БД, ENV.
+- `install-server.md` — детали автоматических скриптов установки.
+- `docs/privacy-screen-contract.md`, `docs/privacy-screen-desktop-limitations.md` — контракт privacy screen.
+- `docs/ios-update-policy.md` — политика обновлений iOS.
+
+---
+
+*Документ актуален на `60d7c93` (2026-04-21).*

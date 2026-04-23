@@ -12,6 +12,10 @@ final class ChatStore: ObservableObject {
     @Published private(set) var messages: [String: [MessageItem]] = [:]
     @Published private(set) var typing: [String: Set<String>] = [:]
     @Published private(set) var callState = CallState()
+    @Published var callError: String? = nil
+
+    func setCallError(_ message: String) { callError = message }
+    func clearCallError() { callError = nil }
 
     // MARK: - Chats
 

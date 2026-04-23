@@ -2,17 +2,17 @@
 package com.messenger
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
 import android.view.WindowManager
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.messenger.store.BiometricLockStore
 import com.messenger.store.PrivacyScreenStore
 import com.messenger.ui.App
 import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         BiometricLockStore.init(applicationContext)

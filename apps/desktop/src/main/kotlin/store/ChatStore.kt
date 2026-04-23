@@ -1,10 +1,20 @@
 package store
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class ChatStore {
+    private val storeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val typingTimers = java.util.concurrent.ConcurrentHashMap<Pair<String, String>, Job>()
+    private val typingTimeoutMs = 5_000L
+
     private val _chats = MutableStateFlow<List<ChatItem>>(emptyList())
     val chats: StateFlow<List<ChatItem>> = _chats.asStateFlow()
 
@@ -16,6 +26,12 @@ class ChatStore {
 
     private val _call = MutableStateFlow(CallState())
     val call: StateFlow<CallState> = _call.asStateFlow()
+
+    private val _callError = MutableStateFlow<String?>(null)
+    val callError: StateFlow<String?> = _callError.asStateFlow()
+
+    fun setCallError(message: String) { _callError.value = message }
+    fun clearCallError() { _callError.value = null }
 
     fun setChats(list: List<ChatItem>) { _chats.value = list }
 
@@ -47,11 +63,17 @@ class ChatStore {
         _messages.value = updated
     }
 
-    // TODO: MVP — индикатор печати не истекает автоматически; вызывать onTypingStop вручную или через таймер.
     fun onTyping(chatId: String, userId: String) {
         val current = _typing.value.toMutableMap()
         current[chatId] = (current[chatId] ?: emptySet()) + userId
         _typing.value = current
+
+        val key = chatId to userId
+        typingTimers[key]?.cancel()
+        typingTimers[key] = storeScope.launch {
+            delay(typingTimeoutMs)
+            onTypingStop(chatId, userId)
+        }
     }
 
     fun onTypingStop(chatId: String, userId: String) {
@@ -59,6 +81,7 @@ class ChatStore {
         val updated = (current[chatId] ?: emptySet()) - userId
         if (updated.isEmpty()) current.remove(chatId) else current[chatId] = updated
         _typing.value = current
+        typingTimers.remove(chatId to userId)?.cancel()
     }
 
     fun onRead(chatId: String, messageId: String) {

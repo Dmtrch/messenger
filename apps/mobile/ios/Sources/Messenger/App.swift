@@ -144,6 +144,17 @@ struct RootView: View {
         .onChange(of: scenePhase) { newPhase in
             isObscured = (newPhase != .active)
         }
+        .alert("Ошибка звонка",
+               isPresented: Binding(
+                   get: { vm.chatStore.callError != nil },
+                   set: { if !$0 { vm.chatStore.clearCallError() } }
+               ),
+               presenting: vm.chatStore.callError
+        ) { _ in
+            Button("OK", role: .cancel) { vm.chatStore.clearCallError() }
+        } message: { msg in
+            Text(msg)
+        }
 #if canImport(UIKit)
         .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in
             if privacyStore.privacyScreenEnabled {

@@ -37,6 +37,12 @@ struct AuthScreen: View {
                     }
                     .disabled(username.isEmpty || password.isEmpty || isLoading)
                 }
+
+                Section {
+                    NavigationLink("Привязать это устройство по токену") {
+                        LinkDeviceScreen()
+                    }
+                }
             }
             .navigationTitle("Вход")
         }
