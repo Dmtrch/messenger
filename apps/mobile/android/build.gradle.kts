@@ -78,10 +78,9 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("org.webrtc:google-webrtc:1.0.32006")
     implementation("androidx.biometric:biometric:1.2.0-alpha05")
-    // FCM — для push-уведомлений. Требует google-services.json в корне модуля.
-    // Без него Firebase инициализируется gracefully (не крашит). Плагин google-services
-    // добавить вручную когда будет готов google-services.json:
-    //   plugins { id("com.google.gms.google-services") }
+    // FCM — для push-уведомлений. Плагин com.google.gms.google-services
+    // подключается автоматически при наличии google-services.json
+    // (см. блок `buildscript` и `apply(plugin = ...)` выше).
     implementation("com.google.firebase:firebase-messaging:24.0.0")
     // TODO: re-enable when Google Maven is accessible (googleapis CDN 404 in this dev environment)
     // implementation(libs.security.crypto)
