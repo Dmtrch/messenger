@@ -18,6 +18,9 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var authState  = AuthState()
     @Published private(set) var isServerConfigured = false
     @Published              var uploadError: String? = nil
+    /// Chat-id из APNs-push при клике по уведомлению. RootView подписывается
+    /// и выполняет переход, затем сбрасывает в nil.
+    @Published              var pendingChatId: String? = nil
 
     // MARK: - Sub-components (ленивая инициализация после configureServer)
 
@@ -82,6 +85,7 @@ final class AppViewModel: ObservableObject {
                               username: resp.username, accessToken: resp.accessToken)
         await setupWS()
         await registerKeysIfNeeded()
+        await registerApnsTokenIfAvailable()
         try await loadChats()
     }
 
@@ -419,6 +423,17 @@ final class AppViewModel: ObservableObject {
         Task {
             try? await client.registerNativePushToken(platform: "apns", token: token, deviceId: deviceId)
         }
+    }
+
+    /// Переотправляет сохранённый APNs-токен после login — симметрия с Android.
+    /// didRegisterForRemoteNotifications приходит только при первой регистрации /
+    /// смене токена, поэтому после чистой установки токен уже может лежать в UserDefaults.
+    private func registerApnsTokenIfAvailable() async {
+        guard let client = apiClient,
+              let token  = UserDefaults.standard.string(forKey: "messenger.apns.token"),
+              !token.isEmpty else { return }
+        let deviceId = keyStorage.getOrCreateDeviceId()
+        try? await client.registerNativePushToken(platform: "apns", token: token, deviceId: deviceId)
     }
 
     // MARK: - Key registration

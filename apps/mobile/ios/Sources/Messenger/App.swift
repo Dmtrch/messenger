@@ -48,10 +48,27 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                                  withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])
     }
+
+    // Deep-link по клику. Сервер должен класть chatId в payload.data.
+    // RootView подпишется на AppViewModel.pendingChatId и выполнит переход.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 didReceive response: UNNotificationResponse,
+                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        let userInfo = response.notification.request.content.userInfo
+        if let chatId = userInfo["chatId"] as? String {
+            DispatchQueue.main.async { [weak self] in
+                self?.appViewModel?.pendingChatId = chatId
+            }
+        }
+        completionHandler()
+    }
 }
 #endif
 
 struct MessengerApp: App {
+    #if canImport(UIKit)
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    #endif
     @StateObject private var vm = AppViewModel()
 
     init() {
@@ -64,6 +81,9 @@ struct MessengerApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(vm)
+                #if canImport(UIKit)
+                .onAppear { appDelegate.appViewModel = vm }
+                #endif
         }
     }
 }
