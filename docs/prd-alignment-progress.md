@@ -5,6 +5,8 @@
 
 Статусы: `pending` · `in_progress` · `blocked` · `done` · `skipped`.
 
+**Последнее обновление:** 2026-04-23. Добавлен блок Post-release (Фаза 5) с native-парити (Admin/Downloads/LinkDevice × 3 платформы) и устранением native-заглушек.
+
 ## Фаза 0. Подготовка
 
 | ID | Задача | Статус | Дата | Примечание |
@@ -88,7 +90,7 @@
 | ID | Задача | Статус | Дата | Примечание |
 |---|---|---|---|---|
 | P2-LOC-1 | PWA passphrase/WebAuthn PRF + wrap idb-keyval | done | 2026-04-18 | `1a` `cryptoVault.ts`: PBKDF2 (600k iter, SHA-256) → AES-256-GCM-256, salt в localStorage, nonce 12b prepended. `1b` `encryptedStore.ts`: encrypt/decrypt обёртка над idb-keyval UseStore. `1c` `browser-keystore.ts`: все операции через encryptedSet/Get/Del. `1d` `PassphraseGate.tsx`: экран создания/разблокировки vault + CSS. `1e` `App.tsx`: guard — authenticated+locked → PassphraseGate. `1f` `Profile.tsx`: VaultPasswordSection — смена пароля vault + re-encrypt. `1g` `vaultMigration.ts`: миграция незашифрованных IDB-данных при первом unlock. WebAuthn PRF — не реализован (оставлен на будущее). |
-| P2-LOC-2 | Native SQLCipher (Android/iOS/Desktop) + OS-keystore | skipped | 2026-04-18 | Нативные приложения не в production scope текущего релиза. Высокий риск (3 платформы × нативный код, лицензия SQLCipher). Вернуться при выходе нативных клиентов в prod. **Подзадачи для справки:** `2a` Desktop: `sqldelight-sqlcipher-driver` + OS-keystore (macOS Keychain / DPAPI / libsecret). `2b` Desktop: `KeyStorage.kt` → хранить мастер-ключ через Credential Manager. `2c` Android: `android-database-sqlcipher` + Android Keystore. `2d` iOS: SQLCipher SPM/pod + SecureEnclave/Keychain. |
+| P2-LOC-2 | Native SQLCipher (Android/iOS/Desktop) + OS-keystore | pending | 2026-04-23 | **Переоткрыто**: native-клиенты переведены в production (коммит `51c4762`), отметка «не в production scope» больше не применима. Vault (AES-GCM через passphrase) реализован в коммите `60d7c93` — базовая защита есть. SQLCipher остаётся желательным для полного шифрования локальной БД. Подзадачи: `2a` Desktop — `sqldelight-sqlcipher-driver` + OS-keystore (Keychain/DPAPI/libsecret). `2b` Desktop `KeyStorage.kt` — мастер-ключ через Credential Manager. `2c` Android — `android-database-sqlcipher` + Android Keystore. `2d` iOS — SQLCipher SPM + SecureEnclave/Keychain. |
 | P2-LOC-3 | Encrypted media blobs + zeroing out | done | 2026-04-18 | `3a` auto-revoke blob URL через 60с (`setTimeout` + `mediaBlobCache.delete`). `3b` `AuthImage` revoke на unmount + `AuthFileLink` revoke после `a.click()`. `3c` `combined.fill(0)` + `key.fill(0)` после расшифровки в `fetchEncryptedMediaBlobUrl`. `3d` `messageDb.ts` переключён на `encryptedSet`/`encryptedGet` (AES-256-GCM через vault key). TypeScript ✅. |
 
 ### 2.4 Privacy Tools нативных
@@ -150,6 +152,56 @@
 | V-3 | Обновление документации (README, docs, PRD-vs-impl) | done | 2026-04-20 | `3a` `README.md` — badges, 15 фич, ASCII-архитектура, Docker/dev quick start, env vars таблица. `3b` `docs/deployment.md` — 28 env vars, TLS (прямой/Nginx/Caddy/Cloudflare), VAPID, SQLite VACUUM INTO, security checklist 10 пунктов. `3c` `docs/api-reference.md` — 60+ эндпоинтов (auth, chats, media, keys, calls, bots, admin, WS фреймы). `3d` `docs/prd-vs-impl.md` — 47/50 задач выполнено (94%), delta, known limitations. |
 | V-4 | Скрипт миграций БД (`server/db/migrate.go`) | done | 2026-04-21 | `4a` `migrate.go`: migration 7 — `CREATE TABLE IF NOT EXISTS identity_keys_new`; добавлена обработка `"already exists"` в список idempotent-ошибок. `4b` `scripts/db-migrate.sh`: `--version`, `--dry-run`, `--rollback N` (с подтверждением), `--db PATH`; требует `sqlite3`. `4c` `server/db/migrate_test.go`: 5 новых тестов (Migration24..28) + `legacySchema` helper; все 10 db-тестов PASS. |
 | V-5 | Релиз 1.0-PNM (сборка и публикация бинарей) | done | 2026-04-21 | `5a` CHANGELOG.md → [1.0.0] 2026-04-21 (все фазы PRD); package.json 0.1.0→1.0.0; android appVersion "1.0"→"1.0.0"; iOS BuildConfig добавлен `appVersion`. `5b` CI workflow: job `publish-release` → `draft:true`, `tag_name`, release body с таблицей артефактов; `docs/release-tag-instructions.md`. `5c` Dockerfile: non-root user `messenger`, `/data`+`/data/media` с chown, `VOLUME ["/data"]`, HEALTHCHECK wget, LABEL, убран двойной go mod tidy. docker-compose.yml: healthcheck. `5d` `docs/release-checklist.md`: 7 разделов — pre-release, backup (VACUUM INTO/tar/volume), deploy, rollback, monitoring, key rotation (JWT/VAPID/TLS), post-deploy verification. Go build ✅, TS ✅, YAML ✅. Для публикации: `git tag -a v1.0.0 -m "Release v1.0.0" && git push origin v1.0.0`. |
+
+---
+
+## Фаза 5. Post-release: native-client parity
+
+> Добавлено 2026-04-23 на основе коммитов `60d7c93` (фаза 1 native: биометрика/vault), `53693f6` (декомпозиция P2-EPH в native) и `51c4762` (Admin/Downloads/LinkDevice × 3 + устранение заглушек).
+
+### 5.1 Устранение native-заглушек
+
+| ID | Задача | Статус | Дата | Примечание |
+|---|---|---|---|---|
+| PR-NAT-1 | Desktop: убрать `stub-sdp` в WebRTC | done | 2026-04-23 | `apps/desktop/.../viewmodel/AppViewModel.kt` — ошибка SDP прокидывается в UI, звонок не стартует с заглушкой. |
+| PR-NAT-2 | Android: убрать plain-base64 fallback в `SessionManager` | done | 2026-04-23 | `apps/mobile/android/.../crypto/SessionManager.kt` — при отсутствии сессии отправка запрещена. |
+| PR-NAT-3 | Desktop: typing-indicator auto-reset таймер | done | 2026-04-23 | `apps/desktop/.../store/ChatStore.kt` — `typingTimers` + `typingTimeoutMs = 5_000L`. |
+| PR-NAT-4 | iOS: ошибки `changePassword` в UI | done | 2026-04-23 | `apps/mobile/ios/.../viewmodel/AppViewModel.swift` + `ui/screens/ProfileScreen.swift` — прокидывание async-ошибок. |
+| PR-NAT-5 | iOS: `ApiClient.changePassword` реализован | done | 2026-04-23 | `apps/mobile/ios/.../service/ApiClient.swift`. |
+| PR-NAT-6 | iOS: `mediaId`/`mediaKey` прикрепляются к сообщению | done | 2026-04-23 | `AppViewModel.swift` — поля передаются в `sendMessage`. |
+| PR-NAT-7 | Desktop: macOS Touch ID через JNA + LAContext | pending | — | `apps/desktop/.../ui/screens/BiometricGateScreen.kt:14`. Опционально, P3. См. `docs/remaining-work-plan.md` #4. |
+
+### 5.2 Native-паритет экранов с PWA
+
+| ID | Задача | Статус | Дата | Примечание |
+|---|---|---|---|---|
+| PR-SCR-1 | `AdminScreen` × 3 платформы (Users/Requests/Resets/Invites/Settings/System) | done | 2026-04-23 | 6 табов: Desktop/Android — `ScrollableTabRow`; iOS — сегментированный Picker. Coverage: CRUD пользователей, инвайт-коды, retention/max-members, system stats (CPU/RAM/Disk). |
+| PR-SCR-2 | `DownloadsScreen` × 3 платформы | done | 2026-04-23 | Manifest из `/api/downloads/manifest`, скачивание: Desktop → `~/Downloads`, Android → `getExternalFilesDir(DIRECTORY_DOWNLOADS)` + `FileProvider` + `ACTION_VIEW` для APK, iOS → `FileManager.documentDirectory` + `UIActivityViewController`. |
+| PR-SCR-3 | `LinkDeviceScreen` × 3 платформы | done | 2026-04-23 | Активация устройства по токену, привязка к аккаунту через `POST /api/auth/device-link-activate`. |
+
+### 5.3 Остаточные замечания (детализированы в `docs/remaining-work-plan.md`)
+
+| ID | Задача | Статус | Дата | Приоритет | Примечание |
+|---|---|---|---|---|---|
+| PR-PUSH-1 | Android: восстановить FCM-сервис (регистрация токена + notifications) | pending | — | P0 | `FcmService.kt` удалён в `51c4762`. Сервер принимает `POST /api/push/native/register`. План: `remaining-work-plan.md` #1. |
+| PR-PUSH-2 | iOS: реализовать APNs (AppDelegate, регистрация токена, foreground/background presentation) | pending | — | P0 | Нет `AppDelegate` с remote notifications. План: `remaining-work-plan.md` #2. |
+| PR-DOCS-1 | Финализация `docs/main/*` по чеклисту `docs-main-update-plan.md` | in_progress | 2026-04-23 | P1 | 4 файла переработаны, осталась сверка внутренних ссылок + ENV-переменных против `config.go`. |
+| PR-TEST-1 | Minimal test-harness для native (Desktop Kotlin Test / Android JUnit / iOS XCTest) | pending | — | P1 | Таргеты и команды: `docs/test-plan.md` §2–§4. |
+| PR-REL-1 | Актуализировать `release-checklist.md` под native-артефакты (DMG/DEB/MSI/APK/IPA) | pending | — | P2 | Проверить, что в процессе релиза есть smoke-run каждого артефакта. |
+
+### 5.4 Сводный статус (2026-04-23)
+
+| Категория | Всего | Done | Pending | Skipped |
+|---|---|---|---|---|
+| Фаза 0 | 3 | 3 | 0 | 0 |
+| Фаза 1 (Gatekeeping) | 16 | 16 | 0 | 0 |
+| Фаза 2 (Privacy + Multi-device) | 14 | 13 | 1 (P2-LOC-2 переоткрыт) | 0 |
+| Фаза 3 (Scaling) | 15 | 15 | 0 | 0 |
+| Фаза 4 (Release) | 5 | 5 | 0 | 0 |
+| **Фаза 5 (Post-release parity)** | **15** | **10** | **5** | **0** |
+| **Итого** | **68** | **62** | **6** | **0** |
+
+Сравнение с предыдущей версией документа (2026-04-20): было 47/50 done (94%). Сейчас 62/68 done (91%) — метрика снизилась из-за расширения scope (native-клиенты переведены в production и добавлены 15 новых задач, из которых 5 ещё не выполнены).
 
 ---
 
