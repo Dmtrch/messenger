@@ -164,6 +164,14 @@ struct RootView: View {
         .onChange(of: scenePhase) { newPhase in
             isObscured = (newPhase != .active)
         }
+        .onChange(of: vm.pendingChatId) { chatId in
+            guard let chatId else { return }
+            navigateToPendingChat(chatId: chatId)
+        }
+        .onChange(of: vm.chatStore.chats) { _ in
+            guard let chatId = vm.pendingChatId else { return }
+            navigateToPendingChat(chatId: chatId)
+        }
         .alert("Ошибка звонка",
                isPresented: Binding(
                    get: { vm.chatStore.callError != nil },
@@ -182,6 +190,13 @@ struct RootView: View {
             }
         }
 #endif
+    }
+
+    private func navigateToPendingChat(chatId: String) {
+        guard vm.authState.isAuthenticated, !vm.chatStore.chats.isEmpty else { return }
+        let name = vm.chatStore.chats.first(where: { $0.id == chatId })?.name ?? "Чат"
+        navPath.append(AppRoute.chat(id: chatId, name: name))
+        vm.pendingChatId = nil
     }
 }
 
