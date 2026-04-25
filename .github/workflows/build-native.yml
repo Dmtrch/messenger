@@ -275,7 +275,43 @@ jobs:
           echo "Total coverage: ${COVERAGE}%"
           awk -v cov="${COVERAGE}" 'BEGIN { if (cov+0 < 50) { print "Coverage too low: " cov "%"; exit 1 } }'
 
-# ── Release ────────────────────────────────────────────────────────────────────
+# ── Native Tests ────────────────────────────────────────────────────────────────────────
+
+  test-desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Run Desktop unit tests
+        working-directory: apps/desktop
+        run: ./gradlew test
+
+  test-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Run Android unit tests
+        working-directory: apps/mobile/android
+        run: ./gradlew testDebugUnitTest
+
+  test-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run iOS SPM tests
+        working-directory: apps/mobile/ios
+        run: swift test
+
+# ── Release ──────────────────────────────────────────────────────────────────────────────
 
   publish-release:
     needs:
@@ -287,6 +323,9 @@ jobs:
       - build-android
       - build-ios-crypto
       - test-server
+      - test-desktop
+      - test-android
+      - test-ios
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
