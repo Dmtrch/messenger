@@ -5,7 +5,7 @@
 
 Статусы: `pending` · `in_progress` · `blocked` · `done` · `skipped`.
 
-**Последнее обновление:** 2026-04-23. Добавлен блок Post-release (Фаза 5) с native-парити (Admin/Downloads/LinkDevice × 3 платформы) и устранением native-заглушек.
+**Последнее обновление:** 2026-04-25. Закрыты PR-PUSH-1 (FCM Android), PR-PUSH-2 (APNs iOS), PR-TEST-1 (native unit-тесты), PR-REL-1 (release-checklist). Итого 66/68 done (97%).
 
 ## Фаза 0. Подготовка
 
@@ -183,11 +183,11 @@
 
 | ID | Задача | Статус | Дата | Приоритет | Примечание |
 |---|---|---|---|---|---|
-| PR-PUSH-1 | Android: восстановить FCM-сервис (регистрация токена + notifications) | pending | — | P0 | `FcmService.kt` удалён в `51c4762`. Сервер принимает `POST /api/push/native/register`. План: `remaining-work-plan.md` #1. |
-| PR-PUSH-2 | iOS: реализовать APNs (AppDelegate, регистрация токена, foreground/background presentation) | pending | — | P0 | Нет `AppDelegate` с remote notifications. План: `remaining-work-plan.md` #2. |
+| PR-PUSH-1 | Android: восстановить FCM-сервис (регистрация токена + notifications) | done | 2026-04-25 | P0 | `MessengerFirebaseService`, runtime-permission, prime-токен — реализованы в `a09eecf`. Smoke-тест требует реального Firebase-проекта. |
+| PR-PUSH-2 | iOS: реализовать APNs (AppDelegate, регистрация токена, foreground/background presentation) | done | 2026-04-25 | P0 | `AppDelegate` с `@UIApplicationDelegateAdaptor`, deep-link через `pendingChatId` — реализованы в `778dfee`. Xcode-проект и `.p8` ключ — на стороне владельца. |
 | PR-DOCS-1 | Финализация `docs/main/*` по чеклисту `docs-main-update-plan.md` | in_progress | 2026-04-23 | P1 | 4 файла переработаны, осталась сверка внутренних ссылок + ENV-переменных против `config.go`. |
-| PR-TEST-1 | Minimal test-harness для native (Desktop Kotlin Test / Android JUnit / iOS XCTest) | pending | — | P1 | Таргеты и команды: `docs/test-plan.md` §2–§4. |
-| PR-REL-1 | Актуализировать `release-checklist.md` под native-артефакты (DMG/DEB/MSI/APK/IPA) | pending | — | P2 | Проверить, что в процессе релиза есть smoke-run каждого артефакта. |
+| PR-TEST-1 | Minimal test-harness для native (Desktop Kotlin Test / Android JUnit / iOS XCTest) | done | 2026-04-25 | P1 | Desktop: 11 тестов (`./gradlew test`); Android: 5 тестов (`./gradlew testDebugUnitTest`); iOS: 12 DtoDecodingTests (`swift test`). CI jobs в `build-native.yml`. |
+| PR-REL-1 | Актуализировать `release-checklist.md` под native-артефакты (DMG/DEB/MSI/APK/IPA) | done | 2026-04-25 | P2 | Добавлены шаги: `npm run test`, `./gradlew test`, `./gradlew testDebugUnitTest`, `swift test`, уточнение GO-2026-4479. |
 
 ### 5.4 Сводный статус (2026-04-23)
 
@@ -198,10 +198,10 @@
 | Фаза 2 (Privacy + Multi-device) | 14 | 13 | 1 (P2-LOC-2 переоткрыт) | 0 |
 | Фаза 3 (Scaling) | 15 | 15 | 0 | 0 |
 | Фаза 4 (Release) | 5 | 5 | 0 | 0 |
-| **Фаза 5 (Post-release parity)** | **15** | **10** | **5** | **0** |
-| **Итого** | **68** | **62** | **6** | **0** |
+| **Фаза 5 (Post-release parity)** | **15** | **13** | **1** | **0** |
+| **Итого** | **68** | **66** | **1** | **0** |
 
-Сравнение с предыдущей версией документа (2026-04-20): было 47/50 done (94%). Сейчас 62/68 done (91%) — метрика снизилась из-за расширения scope (native-клиенты переведены в production и добавлены 15 новых задач, из которых 5 ещё не выполнены).
+Сравнение с предыдущей версией документа (2026-04-23): было 62/68 done (91%). Сейчас 66/68 done (97%) — закрыты PR-PUSH-1 (FCM), PR-PUSH-2 (APNs), PR-TEST-1 (native tests), PR-REL-1 (release-checklist). Осталось: PR-DOCS-1 (in_progress, финализация docs/main/*) и PR-NAT-7 (Touch ID, опционально P3).
 
 ---
 

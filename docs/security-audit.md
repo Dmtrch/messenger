@@ -1,7 +1,7 @@
 # Security Audit — Messenger v1.0
 
 **Дата первичного аудита:** 2026-04-20  
-**Дата последнего повторного прогона:** 2026-04-23  
+**Дата последнего повторного прогона:** 2026-04-25  
 **Инструменты:** govulncheck, npm audit, OWASP ручная проверка, trivy  
 **Статус:** все находки задокументированы; критичные исправлены; GO-2026-4479 без патча upstream
 
@@ -11,6 +11,7 @@
 |------|--------|-------------|-----------|-----------------|
 | 2026-04-20 | `4cf2feb` | 1 known (GO-2026-4479) | 0 | 0 |
 | 2026-04-23 | `d7f41fa` | 1 known (GO-2026-4479) | 0 (prod 54, dev 553) | 0 |
+| 2026-04-25 | `778dfee` | 1 known (GO-2026-4479) | 0 | 0 |
 
 ---
 
@@ -90,7 +91,7 @@ TypeScript type-check: PASS. Production build: PASS.
 - **temp_password plaintext** (`db/schema.go`): временный пароль хранится открытым текстом для отображения администратору. Требует отдельного дизайн-решения (шифрование или удаление после первого входа).
 - **Rate limiting WS**: WebSocket `/ws` не имеет rate limit на соединения. При горизонтальном масштабировании in-memory limiter неэффективен.
 - **Referrer-Policy / Permissions-Policy** заголовки отсутствуют — незначительный пропуск.
-- **Push-уведомления на native**: `FcmService.kt` удалён в коммите `51c4762` (2026-04-23), APNs-интеграция iOS отсутствует. Сервер по-прежнему принимает `POST /api/push/native/register`, но клиенты токен не регистрируют. Риск: нет — ответственность на плане `docs/remaining-work-plan.md` (#1, #2). После реализации FCM/APNs требуется отдельная проверка: валидация server key, хранение токенов, TLS pinning (если применимо).
+- **Push-уведомления на native**: FCM (Android) реализован в коммите `a09eecf` (`MessengerFirebaseService`, runtime-permission, примирование токена); APNs (iOS) реализован в `778dfee` (`AppDelegate`, `@UIApplicationDelegateAdaptor`, deep-link). Оба клиента регистрируют токен через `POST /api/push/native/register`. Требует dev-окружения для smoke-теста: `google-services.json` (Android), `.p8` ключ + Xcode-проект (iOS). TLS pinning не реализован — риск принятый.
 
 ---
 

@@ -7,9 +7,13 @@
 ## 1. Pre-release Checklist
 
 - [ ] `cd server && go test ./...` — все тесты проходят
+- [ ] `cd client && npm run test` — Vitest unit-тесты проходят
 - [ ] `cd client && npm run type-check` — TypeScript компилируется без ошибок
 - [ ] `cd client && npm run lint` — lint чистый (zero warnings)
-- [ ] `cd server && govulncheck ./...` — нет известных уязвимостей
+- [ ] `cd apps/desktop && ./gradlew test` — Desktop Kotlin unit-тесты проходят
+- [ ] `cd apps/mobile/android && ./gradlew testDebugUnitTest` — Android unit-тесты проходят
+- [ ] `cd apps/mobile/ios && swift test` — iOS SPM unit-тесты проходят (MessengerCrypto + DTO)
+- [ ] `cd server && govulncheck ./...` — нет известных уязвимостей (GO-2026-4479 pion/dtls — мониторинг, патча upstream нет)
 - [ ] CHANGELOG.md обновлён
 - [ ] Версии синхронизированы: `client/package.json`, `apps/desktop/build.gradle.kts`, `apps/mobile/android/build.gradle.kts`, `apps/mobile/ios/Sources/Messenger/BuildConfig.swift`
 - [ ] `.env.example` актуален (новые переменные добавлены)

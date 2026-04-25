@@ -171,8 +171,8 @@ Both Go and TypeScript consumers must pass all vectors before merge. New crypto 
 |---|---|---|
 | WebSocket flows not covered by integration tests | Hub disconnect, message routing, presence — untested | Add `httptest`-based WS tests in V-1b |
 | E2E requires running server | Can't run in pure unit CI job | Use `go run` server setup in Playwright `globalSetup.ts` |
-| Native unit-тесты отсутствуют | Регрессии в Desktop/Android/iOS ловятся только вручную | `docs/remaining-work-plan.md` #5 — создать минимальный набор (ApiClient, SessionManager, AppViewModel, DTO decode) до выпуска v1.1 |
+| ~~Native unit-тесты отсутствуют~~ | ~~Регрессии в Desktop/Android/iOS ловятся только вручную~~ | ✅ Закрыто 2026-04-25 (`docs/remaining-work-plan.md` #5): Desktop (`./gradlew test`, 11 тестов), Android (`./gradlew testDebugUnitTest`, 5 тестов), iOS (`swift test`, 12 DtoDecodingTests). CI jobs добавлены в `build-native.yml`. |
 | Media upload E2E — missing | File send/receive flow not exercised | Planned post V-1 |
 | Call signaling (WebRTC) — partial | SFU unit-tested; browser WebRTC not testable in Playwright without mediapipe | Mock ICE in E2E; real call test manual only |
-| Push-уведомления native — не покрыты | FcmService удалён, APNs не реализован — негде проверять регистрацию токена | Будут добавлены после `#1/#2` из `remaining-work-plan.md` |
+| Push-уведомления native — не покрыты автотестами | FCM (Android, `a09eecf`) и APNs (iOS, `778dfee`) реализованы; регистрация токена — `POST /api/push/native/register` | Smoke-тест требует реального устройства + `google-services.json` / `.p8` ключа. Автотест — будущая работа. |
 | iOS XCUITest в CI | Требует macOS-агента + Xcode | Остаётся manual smoke до появления macOS runner в workflow |
