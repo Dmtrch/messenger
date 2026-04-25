@@ -130,18 +130,24 @@ Proxy должен:
 | ENV | Назначение в деплое |
 |---|---|
 | `JWT_SECRET` | Обязателен. Пустое → `log.Fatal`. Сгенерировать: `openssl rand -hex 32` |
+| `PORT` | HTTP-порт сервера. Default `8080` |
+| `DB_PATH` | Путь к SQLite. Default `./messenger.db`. В docker — `/data/messenger.db` |
+| `MEDIA_DIR` | Каталог медиа-файлов. Default `./media`. В docker — `/data/media` |
+| `DOWNLOADS_DIR` | Каталог артефактов для `/downloads` (Desktop/Android/iOS installers). Опционально |
 | `ALLOWED_ORIGIN` | CORS + WS `CheckOrigin`. Ровно тот домен, с которого открывается клиент |
 | `BEHIND_PROXY` | `true` за Cloudflare/nginx/caddy. Включает доверие `X-Forwarded-*`, HSTS |
 | `TLS_CERT`, `TLS_KEY` | Прямой TLS без proxy |
+| `SERVER_NAME`, `SERVER_DESCRIPTION` | Метаданные в `/api/server/info` (отображаются клиентам на `/setup`). Default `Messenger` / `""` |
 | `REGISTRATION_MODE` | `open` / `invite` / `approval`. Невалидное → `log.Fatal` |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | Bootstrap первого админа при пустой БД |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Web Push (см. §5). Обязательно фиксировать в `.env` |
 | `STUN_URL`, `TURN_URL`, `TURN_SECRET`, `TURN_CREDENTIAL_TTL` | Звонки (см. §6) |
-| `FCM_LEGACY_KEY`, `APNS_*` | Push для Android/iOS (см. §5.2) |
+| `FCM_LEGACY_KEY` | Firebase Server Key для Android push (см. §5.2) |
+| `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_SANDBOX` | APNs p8-авторизация для iOS push (см. §5.2). `APNS_SANDBOX=true` при разработке |
 | `MAX_UPLOAD_BYTES` | Лимит одного медиа-файла. По умолчанию 100 МБ |
 | `MAX_GROUP_MEMBERS`, `ALLOW_USERS_CREATE_GROUPS` | Политика групп |
 | `APP_VERSION`, `MIN_CLIENT_VERSION`, `APP_CHANGELOG` | Метаданные `/api/version` |
-| `TUNNEL_TOKEN` | Профиль `cloudflare` в `docker-compose.yml` |
+| `TUNNEL_TOKEN` | Профиль `cloudflare` в `docker-compose.yml` (читается только cloudflared-контейнером) |
 
 Пример `.env`:
 

@@ -560,7 +560,7 @@ Java в CI — 17 (temurin).
 3. **`pion/dtls@2.2.12`** — vuln GO-2026-4479 (random-nonce AES-GCM). Статус/митигация — `docs/security-audit.md`.
 4. **VAPID-ключи**: при пустых значениях сервер генерирует пару на старте, ключ в лог не сохраняется между рестартами — push-подписки клиентов сломаются. Для продакшена обязательно задать персистентно.
 5. **iOS IPA**: CI собирает только `MessengerCrypto` через SPM; полная сборка IPA вне репозитория (Xcode + Apple signing).
-6. **Desktop WebRTC**: в текущем baseline — stub SDP (ровно как зафиксировано планами фазы). Актуальный статус см. `docs/main/v1-gap-remediation.md`.
+6. **Desktop WebRTC**: в текущем baseline — stub SDP (ровно как зафиксировано планами фазы). Актуальный статус см. `docs/prd-alignment-progress.md`.
 7. **Android Kotlin-исходники**: на baseline `60d7c93` в watched-path видны только `build.gradle.kts`, `settings.gradle.kts`, `README.md`. Дерево фактических Kotlin-файлов сверять через git history, не копировать слепо из планов.
 8. **Vite версия**: в `CLAUDE.md` указано «Vite 5», в `client/package.json` — `vite@^8.0.9`. Источник истины — `package.json`.
 9. **`REGISTRATION_MODE`**: валидные значения — `open` / `invite` / `approval`. Термин `request` (встречается в устаревших доках и `CLAUDE.md`) — устаревший синоним `approval`.
@@ -573,7 +573,7 @@ Java в CI — 17 (temurin).
 ## 13. Ссылки
 
 - `docs/main/architecture.md` — высокоуровневый обзор, диаграммы, потоки данных.
-- `docs/main/v1-gap-remediation.md`, `docs/main/next-session.md` — актуальные статусы.
+- `docs/prd-alignment-progress.md` — статус фаз PRD; `docs/remaining-work-plan.md` — текущие приоритеты.
 - `docs/main/deployment.md`, `docs/main/usersguid.md` — operations и сценарии.
 - `docs/api-reference.md`, `shared/protocol/` — REST/WS контракты.
 - `docs/crypto-rationale.md`, `shared/crypto-contracts/`, `shared/test-vectors/` — крипто.

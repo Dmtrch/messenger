@@ -107,69 +107,70 @@ git diff --name-only <baseline_sha>..HEAD -- \
 ### #2 A1 — переработка `architecture.md`
 
 Обязательные разделы:
-- [ ] Обзор системы (PWA + native apps + self-hosted сервер)
-- [ ] Стек технологий (server/client/native/shared)
-- [ ] Логические слои и их границы
-- [ ] Компонентная диаграмма (схема взаимодействия)
-- [ ] Потоки данных: аутентификация, отправка/получение сообщений, звонки 1:1 и групповые (SFU), медиа, vault, linking устройств
-- [ ] E2E-модель: X3DH, Double Ratchet, vault-шифрование AES-GCM
-- [ ] SFU/звонки: `server/internal/sfu`, `server/internal/calls`, группы
-- [ ] Bots API + webhooks
-- [ ] Monitoring
-- [ ] Native security: biometric lock, privacy screen, update checker
-- [ ] Безопасность платформы (JWT, CORS, CSP, proxy trust)
-- [ ] Связи с другими доками
+- [x] Обзор системы (PWA + native apps + self-hosted сервер)
+- [x] Стек технологий (server/client/native/shared)
+- [x] Логические слои и их границы
+- [x] Компонентная диаграмма (схема взаимодействия)
+- [x] Потоки данных: аутентификация, отправка/получение сообщений, звонки 1:1 и групповые (SFU), медиа, vault, linking устройств
+- [x] E2E-модель: X3DH, Double Ratchet, vault-шифрование AES-GCM
+- [x] SFU/звонки: `server/internal/sfu`, `server/internal/calls`, группы
+- [x] Bots API + webhooks
+- [x] Monitoring
+- [x] Native security: biometric lock, privacy screen, update checker
+- [x] Безопасность платформы (JWT, CORS, CSP, proxy trust)
+- [x] Связи с другими доками (ссылки исправлены: v1-gap-remediation → prd-alignment-progress, next-session → remaining-work-plan)
 
 ### #3 A2 — переработка `technical-documentation.md`
 
 Обязательные разделы:
-- [ ] Назначение документа и область применения
-- [ ] Server: модули с функциями, зоны ответственности
-- [ ] Схема БД: таблицы, индексы, миграции
-- [ ] REST API справочник (в паре с `docs/api-reference.md`)
-- [ ] WebSocket фреймы (структура + потоки)
-- [ ] Client: stores, components, pages, hooks
-- [ ] Shared/native-core: API пакетов
-- [ ] Native apps: desktop (Compose), android (Compose), ios (SwiftUI) — ключевые экраны и сервисы
-- [ ] Crypto-слой: X3DH, Double Ratchet, AES-GCM vault, key storage
-- [ ] Конфигурация ENV (полный список)
-- [ ] Запуск и тесты
-- [ ] Известные ограничения
+- [x] Назначение документа и область применения
+- [x] Server: модули с функциями, зоны ответственности
+- [x] Схема БД: таблицы, индексы, миграции
+- [x] REST API справочник (в паре с `docs/api-reference.md`)
+- [x] WebSocket фреймы (структура + потоки)
+- [x] Client: stores, components, pages, hooks
+- [x] Shared/native-core: API пакетов
+- [x] Native apps: desktop (Compose), android (Compose), ios (SwiftUI) — ключевые экраны и сервисы
+- [x] Crypto-слой: X3DH, Double Ratchet, AES-GCM vault, key storage
+- [x] Конфигурация ENV (полный список)
+- [x] Запуск и тесты
+- [x] Известные ограничения (ссылка §12.6 исправлена: v1-gap-remediation → prd-alignment-progress)
 
 
 ### #6 C — переработка `usersguid.md`
 
-- [ ] Быстрая установка сервера (Docker)
-- [ ] Ручная установка (для разработчиков)
-- [ ] Полный список ENV
-- [ ] Первый запуск: admin-bootstrap, режимы регистрации
-- [ ] Веб-клиент: регистрация, чаты 1:1 и групповые, звонки, голосовые сообщения, галерея медиа, passphrase gate, привязка устройств, профиль
-- [ ] Native-приложения (desktop/android/ios): установка, биометрика, privacy screen, обновления
-- [ ] Администрирование: панель, инвайты, заявки на регистрацию
-- [ ] FAQ / troubleshooting
+- [x] Быстрая установка сервера (Docker)
+- [x] Ручная установка (для разработчиков)
+- [x] Полный список ENV
+- [x] Первый запуск: admin-bootstrap, режимы регистрации
+- [x] Веб-клиент: регистрация, чаты 1:1 и групповые, звонки, голосовые сообщения, галерея медиа, passphrase gate, привязка устройств, профиль
+- [x] Native-приложения (desktop/android/ios): установка, биометрика, privacy screen, обновления
+- [x] Администрирование: панель, инвайты, заявки на регистрацию
+- [x] FAQ / troubleshooting
 
 ### #7 D — переработка `deployment.md`
 
-- [ ] Предусловия (Docker, домен, сертификаты)
-- [ ] Docker Compose: развёртывание, переменные
-- [ ] Dockerfile: multi-stage сборка
-- [ ] VAPID keys (persistence)
-- [ ] STUN/TURN конфигурация
-- [ ] SFU для групповых звонков
-- [ ] `BEHIND_PROXY` и reverse-proxy (Cloudflare Tunnel)
-- [ ] Bots webhook endpoint
-- [ ] Миграции БД: `scripts/db-migrate.sh`, `server/Makefile`
-- [ ] Health/monitoring endpoints
-- [ ] Ссылки на `docs/release-checklist.md` и `docs/release-tag-instructions.md`
-- [ ] Backup/restore SQLite
+- [x] Предусловия (Docker, домен, сертификаты)
+- [x] Docker Compose: развёртывание, переменные
+- [x] Dockerfile: multi-stage сборка
+- [x] VAPID keys (persistence)
+- [x] STUN/TURN конфигурация
+- [x] SFU для групповых звонков
+- [x] `BEHIND_PROXY` и reverse-proxy (Cloudflare Tunnel)
+- [x] Bots webhook endpoint
+- [x] Миграции БД: `scripts/db-migrate.sh`, `server/Makefile`
+- [x] Health/monitoring endpoints
+- [x] Ссылки на `docs/release-checklist.md` и `docs/release-tag-instructions.md`
+- [x] Backup/restore SQLite
+- [x] ENV-таблица расширена: PORT, DB_PATH, MEDIA_DIR, DOWNLOADS_DIR, SERVER_NAME/DESCRIPTION, FCM/APNs split
 
 ### #8 Финальная проверка и сводка
 
-- [ ] Согласованность внутренних ссылок между файлами `docs/main/`
-- [ ] Соответствие путей фактической структуре
-- [ ] Соответствие ENV-переменных коду (`server/cmd/server/config.go`)
-- [ ] Обновить `docs/main/next-session.md` с результатами работы (если нужно)
-- [ ] Короткий отчёт: что изменилось по каждому файлу, diff-метрики
+- [x] Согласованность внутренних ссылок между файлами `docs/main/` (v1-gap-remediation/next-session убраны отовсюду)
+- [x] Соответствие путей фактической структуре
+- [x] Соответствие ENV-переменных коду (`server/cmd/server/config.go`)
+- [x] `docs/main/next-session.md` и `docs/main/v1-gap-remediation.md` удалены; ссылки переведены на `docs/remaining-work-plan.md` и `docs/prd-alignment-progress.md`
+- [x] Изменения зафиксированы коммитом `docs: финализировать docs/main/ — синхронизация с текущим состоянием кода`
 
 ---
 
@@ -181,6 +182,14 @@ git diff --name-only <baseline_sha>..HEAD -- \
 
 - Создан этот файл плана.
 - Ничего из чеклиста ещё не выполнено.
+
+### Сессия 2026-04-25 — Финализация плана
+
+- Все пункты #2/#3/#6/#7/#8 отмечены выполненными.
+- `architecture.md`, `technical-documentation.md`: исправлены ссылки с удалённых `v1-gap-remediation.md` / `next-session.md` на `docs/prd-alignment-progress.md` / `docs/remaining-work-plan.md`.
+- `deployment.md`: расширена ENV-таблица (PORT, DB_PATH, MEDIA_DIR, DOWNLOADS_DIR, SERVER_NAME, APNS split).
+- `usersguid.md`: не требовал правок — устаревших ссылок нет.
+- Файл-снимок `docs/docs-main-update-research.md` не создавался — снимок не нужен, все doc-файлы актуализированы напрямую.
 
 ### Сессия 2026-04-21 — Переход на работу через файл-снимок
 

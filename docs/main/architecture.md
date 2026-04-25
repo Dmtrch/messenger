@@ -204,7 +204,7 @@ call_end | call_reject | call_busy
 
 ICE-серверы отдаются через `GET /api/calls/ice-servers` (STUN из env + при наличии TURN — временные креды: HMAC(username=ts, secret), TTL `TURN_CREDENTIAL_TTL`).
 
-Client-side: web использует `RTCPeerConnection`; Android — `AndroidWebRtcController` + `SurfaceViewRenderer`; iOS — `iOSWebRtcController` + `RTCMTLVideoView`; Desktop — stub SDP (ровно как зафиксировано в planах фазы; актуальный статус см. `docs/main/v1-gap-remediation.md`).
+Client-side: web использует `RTCPeerConnection`; Android — `AndroidWebRtcController` + `SurfaceViewRenderer`; iOS — `iOSWebRtcController` + `RTCMTLVideoView`; Desktop — stub SDP (ровно как зафиксировано в планах фазы; актуальный статус платформ см. `docs/prd-alignment-progress.md`).
 
 ### 5.5 Групповые звонки (SFU)
 
@@ -393,8 +393,8 @@ Vault на всех платформах остаётся зашифрованн
 | Документ | Роль |
 |---|---|
 | `docs/main/technical-documentation.md` | Справочник по модулям/схеме БД/REST/WS, детализация §3–§5 |
-| `docs/main/v1-gap-remediation.md` | Статус закрытия PRD-разрывов; содержит актуальный статус платформ |
-| `docs/main/next-session.md` | Текущие приоритеты и блокеры |
+| `docs/prd-alignment-progress.md` | Статус закрытия PRD-разрывов; актуальный статус платформ по фазам |
+| `docs/remaining-work-plan.md` | Текущие приоритеты и блокеры |
 | `docs/main/usersguid.md` | Пользовательские сценарии |
 | `docs/main/deployment.md` | Развёртывание, ENV, proxy, миграции |
 | `docs/api-reference.md` | Автогенерируемые REST/WS контракты |
