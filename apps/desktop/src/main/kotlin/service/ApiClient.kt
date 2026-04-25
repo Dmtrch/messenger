@@ -18,10 +18,12 @@ import com.goterl.lazysodium.SodiumJava
 import com.goterl.lazysodium.interfaces.SecretBox
 import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.headers
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.Headers
@@ -358,8 +360,7 @@ class ApiClient(
     suspend fun adminRemoteWipe(id: String)           = adminPostEmpty("/api/admin/users/$id/remote-wipe")
 
     suspend fun adminSetUserRole(id: String, role: String) {
-        val resp = http.request("$baseUrl/api/admin/users/$id/role") {
-            method = io.ktor.http.HttpMethod.Put
+        val resp = http.put("$baseUrl/api/admin/users/$id/role") {
             headers { append(HttpHeaders.ContentType, applicationJson) }
             setBody(kotlinx.serialization.json.buildJsonObject { put("role", kotlinx.serialization.json.JsonPrimitive(role)) })
         }
