@@ -1454,6 +1454,13 @@ func EnsureAdminUser(database *sql.DB, username, passwordHash string) error {
 	return CreateUser(database, u)
 }
 
+// HasAdminUser возвращает true если в БД существует хотя бы один пользователь с ролью admin.
+func HasAdminUser(database *sql.DB) (bool, error) {
+	var count int
+	err := database.QueryRow(`SELECT COUNT(*) FROM users WHERE role='admin'`).Scan(&count)
+	return count > 0, err
+}
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 func GetSetting(db *sql.DB, key string) (string, error) {
@@ -1675,4 +1682,18 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// CountMessages возвращает общее количество сообщений в БД.
+func CountMessages(database *sql.DB) (int64, error) {
+	var n int64
+	err := database.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&n)
+	return n, err
+}
+
+// CountConversations возвращает общее количество чатов (диалогов и групп).
+func CountConversations(database *sql.DB) (int64, error) {
+	var n int64
+	err := database.QueryRow(`SELECT COUNT(*) FROM conversations`).Scan(&n)
+	return n, err
 }

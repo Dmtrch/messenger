@@ -21,7 +21,7 @@ type SystemStats struct {
 	DiskTotal  uint64  `json:"diskTotal"`
 }
 
-func collectStats() (SystemStats, error) {
+func CollectStats() (SystemStats, error) {
 	var s SystemStats
 
 	cpuPct, err := cpu.Percent(200*time.Millisecond, false)
@@ -45,7 +45,7 @@ func collectStats() (SystemStats, error) {
 }
 
 func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
-	stats, err := collectStats()
+	stats, err := CollectStats()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -69,7 +69,7 @@ func (h *Handler) StreamStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	send := func() {
-		stats, err := collectStats()
+		stats, err := CollectStats()
 		if err != nil {
 			return
 		}

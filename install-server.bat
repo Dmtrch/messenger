@@ -11,6 +11,7 @@ chcp 65001 >nul 2>&1
 :: Результат:
 ::   • Сервер запущен в Docker
 ::   • Файл server-main.txt — все данные для администратора
+:::   • Admin-панель сервера доступна по адресу /admin/
 :: =============================================================================
 
 title Messenger Server Installer
@@ -351,6 +352,17 @@ echo.
 echo   База данных: /data/messenger.db  (volume: messenger_data)
 echo   Медиафайлы:  /data/media         (volume: messenger_data)
 echo.
+echo -- Панель администратора ---------------------------------------------------
+echo.
+echo   URL:          !SERVER_URL_DISPLAY!/admin/
+echo   Локально:     http://localhost:!PORT!/admin/
+echo.
+echo   Первый вход: откройте URL выше в браузере.
+echo   При первом запуске без admin_username/admin_password в .env
+echo   появится форма создания аккаунта администратора.
+echo   Логин:    !ADMIN_USER!
+echo   Пароль:   !ADMIN_PASS!
+echo.
 echo -- Управление сервером -----------------------------------------------------
 echo.
 echo   Запуск:      docker compose up -d
@@ -393,6 +405,7 @@ echo.
 echo    Сервер:       !SERVER_URL_DISPLAY!
 echo    Локально:     http://localhost:!PORT!
 echo    Администратор: !ADMIN_USER!
+echo    Admin-панель:  !SERVER_URL_DISPLAY!/admin/
 echo    Статус:       !SERVER_STATUS!
 echo.
 echo    Данные администратора: server-main.txt

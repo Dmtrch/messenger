@@ -115,6 +115,14 @@ func main() {
 		BehindProxy:      cfg.BehindProxy,
 	}
 	adminHandler := &admin.Handler{DB: database, Hub: hub, DefaultMaxGroupMembers: cfg.MaxGroupMembers}
+	adminUIHandler := &admin.UIHandler{
+		DB:                     database,
+		Sessions:               admin.NewStoreWithGC([]byte(cfg.JWTSecret)),
+		RegistrationMode:       cfg.RegistrationMode,
+		DBPath:                 cfg.DBPath,
+		StartTime:              time.Now(),
+		DefaultMaxGroupMembers: cfg.MaxGroupMembers,
+	}
 	chatHandler := &chat.Handler{DB: database, Hub: hub, MediaDir: cfg.MediaDir, MaxGroupMembers: cfg.MaxGroupMembers, AllowUsersCreateGroups: cfg.AllowUsersCreateGroups}
 	mediaHandler := &media.Handler{MediaDir: cfg.MediaDir, DB: database, MaxUploadBytes: cfg.MaxUploadBytes}
 	downloadsHandler := &downloads.Handler{
@@ -257,6 +265,29 @@ func main() {
 	})
 
 	r.Get("/ws", hub.ServeWS)
+
+	// Admin web UI (server-side rendered, separate from API and PWA)
+	r.Route("/admin", func(r chi.Router) {
+		r.Get("/setup", adminUIHandler.Setup)
+		r.Post("/setup", adminUIHandler.Setup)
+		r.Get("/login", adminUIHandler.Login)
+		r.Post("/login", adminUIHandler.Login)
+		r.Get("/logout", adminUIHandler.Logout)
+		r.Group(func(r chi.Router) {
+			r.Use(adminUIHandler.RequireUIAuth)
+			r.Get("/", adminUIHandler.Dashboard)
+			r.Post("/ui/invites/create", adminUIHandler.CreateInvite)
+			r.Post("/ui/invites/{code}/revoke", adminUIHandler.RevokeInvite)
+			r.Post("/ui/users/{id}/reset-password", adminUIHandler.ResetPassword)
+			r.Post("/ui/users/{id}/delete", adminUIHandler.DeleteUser)
+			r.Post("/ui/users/{id}/ban", adminUIHandler.BanUser)
+			r.Post("/ui/users/{id}/unban", adminUIHandler.UnbanUser)
+			r.Post("/ui/requests/{id}/approve", adminUIHandler.ApproveRequest)
+			r.Post("/ui/requests/{id}/reject", adminUIHandler.RejectRequest)
+			r.Get("/ui/settings", adminUIHandler.Settings)
+			r.Post("/ui/settings", adminUIHandler.Settings)
+		})
+	})
 
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {

@@ -188,10 +188,11 @@ vapid_private_key: ""
 
 ---
 
-## Шаг 8. Создать директории
+## Шаг 8. Создать директории и разрешить скрипты управления
 
 ```bash
 mkdir -p server/media
+chmod +x server-ctl.sh
 ```
 
 ---
@@ -296,11 +297,17 @@ cat /tmp/messenger.log
 listening on :8080
 ```
 
+**Либо используй скрипт управления (работает на Linux и macOS):**
+```bash
+./server-ctl.sh status
+./server-ctl.sh logs
+```
+
 ---
 
 ## Шаг 12. Проверить доступность сервера
 
-Проверь изнутри:
+Проверь API:
 ```bash
 curl -s http://localhost:<ПОРТ>/api/server/info | head -c 200
 ```
@@ -311,6 +318,17 @@ curl -s http://localhost:<ПОРТ>/api/server/info | head -c 200
 ```bash
 curl -s http://<ПУБЛИЧНЫЙ_IP>:<ПОРТ>/api/server/info | head -c 200
 ```
+
+Проверь панель администратора (должна вернуть HTML-страницу входа или дашборда):
+```bash
+curl -s -o /dev/null -w "%{http_code}" http://localhost:<ПОРТ>/admin/
+```
+
+Ожидаемый HTTP-код: `200` или `302` (редирект на `/admin/login`).
+
+Открой панель в браузере: `http://<ПУБЛИЧНЫЙ_IP>:<ПОРТ>/admin/`
+- Если `admin_username`/`admin_password` указаны в `config.yaml` — войди с ними.
+- Если поля оставлены пустыми — сервер покажет страницу `/admin/setup` для создания первого администратора.
 
 Если внешний запрос не проходит — проверь firewall (шаг 5) и убедись, что хостинг-провайдер не блокирует порт.
 
@@ -325,7 +343,7 @@ curl -s http://<ПУБЛИЧНЫЙ_IP>:<ПОРТ>/api/server/info | head -c 200
 ║           СЕРВЕР MESSENGER ЗАПУЩЕН               ║
 ╠══════════════════════════════════════════════════╣
 ║ URL сервера:  http://<IP>:<ПОРТ>                 ║
-║ Панель admin: http://<IP>:<ПОРТ>  (роль admin)   ║
+║ Панель admin: http://<IP>:<ПОРТ>/admin/          ║
 ╠══════════════════════════════════════════════════╣
 ║ Логин администратора:  admin                     ║
 ║ Пароль администратора: <ПАРОЛЬ>                  ║
@@ -335,7 +353,14 @@ curl -s http://<ПУБЛИЧНЫЙ_IP>:<ПОРТ>/api/server/info | head -c 200
 ║ Медиафайлы:         server/media/                ║
 ║ Конфигурация:       server/config.yaml           ║
 ╠══════════════════════════════════════════════════╣
-║ Для просмотра логов:                             ║
+║ Управление сервером:                             ║
+║   ./server-ctl.sh start   — запуск               ║
+║   ./server-ctl.sh stop    — остановка            ║
+║   ./server-ctl.sh restart — перезапуск           ║
+║   ./server-ctl.sh logs    — просмотр логов       ║
+║   ./server-ctl.sh status  — статус               ║
+╠══════════════════════════════════════════════════╣
+║ Для просмотра логов (systemd):                   ║
 ║   sudo journalctl -u messenger -f                ║
 ║ Для перезапуска:                                 ║
 ║   sudo systemctl restart messenger               ║
@@ -345,6 +370,9 @@ curl -s http://<ПУБЛИЧНЫЙ_IP>:<ПОРТ>/api/server/info | head -c 200
   1. Открой Messenger (web, desktop или mobile)
   2. На экране настройки сервера введи: http://<IP>:<ПОРТ>
   3. Зарегистрируйся или войди под учётными данными admin
+  4. Панель администратора: http://<IP>:<ПОРТ>/admin/
+     • Если admin_username/admin_password не заданы в config.yaml,
+       перейди на /admin/setup для создания первого администратора.
 ```
 
 ---
@@ -590,6 +618,12 @@ Get-Content "server\messenger.log" -Tail 20
 
 Убедись, что в логе есть строка `listening on :<ПОРТ>` и нет `FATAL`.
 
+**Либо используй скрипт управления:**
+```batch
+server-ctl.bat status
+server-ctl.bat logs
+```
+
 ---
 
 ### W-10. Проверить доступность
@@ -605,6 +639,15 @@ Invoke-WebRequest -Uri "http://${publicIP}:${port}/api/server/info" -UseBasicPar
 ```
 
 Ожидаемый ответ — JSON с `server_name` и `registration_mode`.
+
+Проверь панель администратора (ожидаемый HTTP-код: 200 или 302):
+```powershell
+(Invoke-WebRequest -Uri "http://localhost:$port/admin/" -UseBasicParsing).StatusCode
+```
+
+Открой в браузере: `http://<publicIP>:$port/admin/`
+- Если `admin_username`/`admin_password` заданы в config.yaml — войди с ними.
+- Если оставлены пустыми — сервер перенаправит на `/admin/setup` для создания первого администратора.
 
 Если внешний запрос не проходит:
 1. Убедись, что правило firewall создано (шаг W-5).
@@ -622,7 +665,7 @@ Invoke-WebRequest -Uri "http://${publicIP}:${port}/api/server/info" -UseBasicPar
 ║        СЕРВЕР MESSENGER ЗАПУЩЕН (Windows)        ║
 ╠══════════════════════════════════════════════════╣
 ║ URL сервера:  http://<IP>:<ПОРТ>                 ║
-║ Панель admin: http://<IP>:<ПОРТ>  (роль admin)   ║
+║ Панель admin: http://<IP>:<ПОРТ>/admin/          ║
 ╠══════════════════════════════════════════════════╣
 ║ Логин администратора:  admin                     ║
 ║ Пароль администратора: <ПАРОЛЬ>                  ║
@@ -630,6 +673,13 @@ Invoke-WebRequest -Uri "http://${publicIP}:${port}/api/server/info" -UseBasicPar
 ║ Режим регистрации:  open                         ║
 ║ Конфигурация:  server\config.yaml                ║
 ║ Лог сервера:   server\messenger.log              ║
+╠══════════════════════════════════════════════════╣
+║ Управление сервером (server-ctl.bat):            ║
+║   server-ctl.bat start   — запуск                ║
+║   server-ctl.bat stop    — остановка             ║
+║   server-ctl.bat restart — перезапуск            ║
+║   server-ctl.bat logs    — просмотр логов        ║
+║   server-ctl.bat status  — статус                ║
 ╠══════════════════════════════════════════════════╣
 ║ Управление сервисом (PowerShell admin):          ║
 ║   Start-Service MessengerServer                  ║
@@ -642,6 +692,9 @@ Invoke-WebRequest -Uri "http://${publicIP}:${port}/api/server/info" -UseBasicPar
   1. Открой Messenger (web, desktop или mobile)
   2. На экране настройки сервера введи: http://<IP>:<ПОРТ>
   3. Зарегистрируйся или войди под учётными данными admin
+  4. Панель администратора: http://<IP>:<ПОРТ>/admin/
+     • Если admin_username/admin_password не заданы в config.yaml,
+       перейди на /admin/setup для создания первого администратора.
 ```
 
 ---

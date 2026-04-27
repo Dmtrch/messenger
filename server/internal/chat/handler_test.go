@@ -56,7 +56,7 @@ func withChiParam(r *http.Request, key, value string) *http.Request {
 }
 
 func newHandler(database *sql.DB) *chat.Handler {
-	return &chat.Handler{DB: database, Hub: nil}
+	return &chat.Handler{DB: database, Hub: nil, AllowUsersCreateGroups: true}
 }
 
 func postJSON(handler http.HandlerFunc, userID string, body any) *httptest.ResponseRecorder {

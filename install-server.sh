@@ -9,6 +9,7 @@
 # Результат:
 #   • Сервер запущен в Docker
 #   • Файл server-main.txt — все данные для администратора
+#   • Admin-панель сервера доступна по адресу /admin/
 # =============================================================================
 set -euo pipefail
 
@@ -296,6 +297,17 @@ cat > server-main.txt <<EOF
   База данных: /data/messenger.db  (volume: messenger_data)
   Медиафайлы:  /data/media         (volume: messenger_data)
 
+── Панель администратора ────────────────────────────────────────────────────
+
+  URL:         ${SERVER_URL_DISPLAY}/admin/
+  Локально:    http://localhost:${PORT}/admin/
+
+  Первый вход: откройте URL выше в браузере.
+  При первом запуске без admin_username/admin_password в .env
+  появится форма создания аккаунта администратора.
+  Логин:   ${ADMIN_USER}
+  Пароль:  ${ADMIN_PASS}
+
 ── Управление сервером ───────────────────────────────────────────────────────
 
   Запуск:      docker compose up -d
@@ -338,6 +350,7 @@ echo ""
 echo -e "  Сервер:      ${CYAN}${SERVER_URL_DISPLAY}${NC}"
 echo -e "  Локально:    ${CYAN}http://localhost:${PORT}${NC}"
 echo -e "  Администратор: ${BOLD}${ADMIN_USER}${NC}"
+echo -e "  Admin-панель: ${CYAN}${SERVER_URL_DISPLAY}/admin/${NC}"
 echo -e "  Статус:      ${GREEN}${SERVER_STATUS}${NC}"
 echo ""
 echo -e "  Данные администратора сохранены в: ${BOLD}server-main.txt${NC}"

@@ -1,6 +1,6 @@
 # Техническая документация Messenger
 
-> Актуально на коммит `60d7c93` (2026-04-21). Источник истины — код и `docs/docs-main-update-research.md`. При расхождениях приоритет у кода. Документ парный с `docs/main/architecture.md` (высокоуровневый обзор) и `docs/api-reference.md` (контракты).
+> Актуально на коммит `3c9b58d` (2026-04-27). Источник истины — код и `docs/docs-main-update-research.md`. При расхождениях приоритет у кода. Документ парный с `docs/main/architecture.md` (высокоуровневый обзор) и `docs/api-reference.md` (контракты).
 
 ---
 
@@ -25,7 +25,7 @@
 
 ### 2.1 Входная точка
 
-- `server/cmd/server/main.go` — читает конфиг, открывает БД, запускает миграции, инициализирует `ws.Hub`, `sfu.Manager`, хендлеры, монтирует маршруты, поднимает HTTP(S).
+- `server/cmd/server/main.go` — читает конфиг, открывает БД, запускает миграции, инициализирует `ws.Hub`, `sfu.Manager`, хендлеры, монтирует маршруты, поднимает HTTP(S). Маршрутная группа `/admin` монтирует server-side rendered панель администратора (`admin.UIHandler`) с сессионной аутентификацией (отдельно от JWT API).
 - `server/cmd/server/config.go` — `Config` struct, загрузка YAML + env overrides, валидация обязательных параметров.
 - `server/cmd/server/calls.go` — `iceServersHandler` (HMAC-подписанные TURN-креды).
 - `server/cmd/server/tls_test.go` — проверка, что TLS конфигурируется только на TLS 1.3.
@@ -40,7 +40,7 @@ Middleware-цепочка запроса: `RequestLogger → Recoverer → Timeo
 
 | Пакет | Зона ответственности | Ключевые файлы |
 |---|---|---|
-| `admin` | Инвайты, заявки на регистрацию, пользователи (suspend/ban/role), квоты, retention, broadcast, remote-wipe | `handler.go`, `middleware.go`, `handler_test.go`, `invite_test.go` |
+| `admin` | Инвайты, заявки на регистрацию, пользователи (suspend/ban/role), квоты, retention, broadcast, remote-wipe; server-side rendered admin web UI | `handler.go`, `middleware.go`, `handler_test.go`, `invite_test.go`, `ui_handler.go`, `session.go` |
 | `auth` | Регистрация/login/logout, JWT + refresh rotation, смена пароля, device-link, `AccountStatusMiddleware` | `handler.go`, `middleware.go`, `lazy_rehash_test.go` |
 | `bots` | Bots API: создание, webhook delivery (HMAC-SHA256, retry 1s/2s/4s), allowlist localhost/RFC-1918 | `handler.go`, `middleware.go`, `webhook.go` |
 | `calls` | 1:1 и групповые звонки: REST `/calls/room/*`, `iceServersHandler` | `handler.go`, `handler_test.go` |
@@ -53,7 +53,7 @@ Middleware-цепочка запроса: `RequestLogger → Recoverer → Timeo
 | `logger` | Инициализация файлового логгера (lumberjack rotation) | `logger.go` |
 | `media` | Upload/download/listing; orphan & retention cleaners | `handler.go`, `cleaner.go` |
 | `middleware` | SecurityHeaders, RequestLogger, Recoverer, RateLimiter, CORS | `security.go`, `logging.go`, `ratelimit_test.go` |
-| `monitoring` | CPU/RAM/Disk через `gopsutil`; snapshot + SSE-стрим для админа | `handler.go` |
+| `monitoring` | CPU/RAM/Disk через `gopsutil`; snapshot + SSE-стрим для админа. `CollectStats()` экспортирована и используется в admin web UI | `handler.go` |
 | `password` | bcrypt cost 12 + lazy rehash | `password.go`, `password_test.go` |
 | `push` | Web Push (VAPID) + FCM legacy + APNs JWT | `handler.go` |
 | `serverinfo` | Публичный `GET /api/server/info` (name, description, registration_mode, limits) | `handler.go` |
@@ -138,6 +138,14 @@ Middleware-цепочка запроса: `RequestLogger → Recoverer → Timeo
 
 CLI-обёртка: `scripts/db-migrate.sh` (`--db`, `--dry-run`, `--version`, `--rollback N`; `TOTAL_MIGRATIONS=28`).
 
+Вспомогательные функции `server/db/queries.go` (добавлены):
+
+| Функция | Назначение |
+|---|---|
+| `HasAdminUser(db)` | Проверяет, есть ли хотя бы один пользователь с `role='admin'` (используется admin web UI для роутинга на `/admin/setup`) |
+| `CountMessages(db)` | Возвращает общее количество строк в `messages` (дашборд admin UI) |
+| `CountConversations(db)` | Возвращает общее количество чатов/групп в `conversations` (дашборд admin UI) |
+
 ---
 
 ## 4. REST API справочник
@@ -197,7 +205,29 @@ CLI-обёртка: `scripts/db-migrate.sh` (`--db`, `--dry-run`, `--version`, `
 | GET | `/api/downloads/manifest` | Манифест native-артефактов |
 | GET | `/api/downloads/{filename}` | Скачать native-артефакт |
 
-### 4.4 Admin (JWT + `RequireAdmin`)
+### 4.4 Admin Web UI (`/admin/*`)
+
+Server-side rendered панель на основе `admin.UIHandler`. Аутентификация — cookie-сессии (`admin.Store`), не JWT. Маршруты:
+
+| Метод | Путь | Назначение |
+|---|---|---|
+| GET / POST | `/admin/setup` | Создание первого администратора (доступно только при отсутствии admin-пользователей в БД) |
+| GET / POST | `/admin/login` | Вход в панель |
+| GET | `/admin/logout` | Выход |
+| GET | `/admin/` | Дашборд (метрики CPU/RAM/Disk, счётчики пользователей/сообщений/чатов) |
+| POST | `/admin/ui/invites/create` | Создать инвайт-код |
+| POST | `/admin/ui/invites/{code}/revoke` | Отозвать инвайт-код |
+| POST | `/admin/ui/users/{id}/reset-password` | Сбросить пароль пользователя |
+| POST | `/admin/ui/users/{id}/delete` | Удалить пользователя |
+| POST | `/admin/ui/users/{id}/ban` | Заблокировать |
+| POST | `/admin/ui/users/{id}/unban` | Разблокировать |
+| POST | `/admin/ui/requests/{id}/approve` | Одобрить заявку на регистрацию |
+| POST | `/admin/ui/requests/{id}/reject` | Отклонить заявку |
+| GET / POST | `/admin/ui/settings` | Настройки сервера |
+
+Все маршруты кроме `/setup` и `/login` требуют сессии (`admin.RequireUIAuth`).
+
+### 4.5 Admin REST (JWT + `RequireAdmin`)
 
 | Метод | Путь |
 |---|---|
@@ -212,11 +242,11 @@ CLI-обёртка: `scripts/db-migrate.sh` (`--db`, `--dry-run`, `--version`, `
 | POST | `/api/admin/password-reset-requests/{id}/resolve` |
 | GET | `/api/admin/system/stats`, `/api/admin/system/stream` (SSE) |
 
-### 4.5 Bots
+### 4.6 Bots
 
 Создание/редактирование — через admin-эндпоинты; отправка сообщений ботом — bot-token middleware. Webhook-доставка идёт от сервера к URL бота, `X-Messenger-Signature: HMAC-SHA256(body, bot_secret)`, timeout 5s, retry 1s→2s→4s, URL-allowlist localhost/RFC-1918.
 
-### 4.6 Static
+### 4.7 Static
 
 - `GET /assets/*` — embedded (`//go:embed static`).
 - `GET /*` — SPA fallback на `index.html`.
@@ -582,4 +612,4 @@ Java в CI — 17 (temurin).
 
 ---
 
-*Документ актуален на `60d7c93` (2026-04-21). Основан на `docs/docs-main-update-research.md` и прямом чтении кода репозитория.*
+*Документ актуален на `3c9b58d` (2026-04-27). Основан на `docs/docs-main-update-research.md` и прямом чтении кода репозитория.*
