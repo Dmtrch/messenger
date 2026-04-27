@@ -133,6 +133,7 @@ JWT_SECRET=${JWT_SECRET}
 # ── База данных и хранилище ────────────────────────────────────────────────────
 DB_PATH=/data/messenger.db
 MEDIA_DIR=/data/media
+DOWNLOADS_DIR=/data/downloads
 PORT=${PORT}
 
 # ── Сервер ────────────────────────────────────────────────────────────────────
@@ -161,6 +162,29 @@ STUN_URL=stun:stun.l.google.com:19302
 TURN_URL=${TURN_URL}
 TURN_SECRET=${TURN_SECRET_VAL}
 TURN_CREDENTIAL_TTL=86400
+
+# ── Push-уведомления для мобильных (опционально) ─────────────────────────────
+# Android FCM: укажите Server Key из Firebase Console
+#FCM_LEGACY_KEY=
+# iOS APNs: загрузите .p8 ключ из Apple Developer Portal
+#APNS_KEY_PATH=/data/apns.p8
+#APNS_KEY_ID=
+#APNS_TEAM_ID=
+#APNS_BUNDLE_ID=com.messenger
+#APNS_SANDBOX=true
+
+# ── Политики групп и загрузок (опционально, используются значения по умолчанию)
+#MAX_GROUP_MEMBERS=50
+#ALLOW_USERS_CREATE_GROUPS=true
+#MAX_UPLOAD_BYTES=104857600
+
+# ── Метаданные приложения (для /api/version, опционально) ─────────────────────
+#APP_VERSION=1.0.0
+#MIN_CLIENT_VERSION=0.0.0
+#APP_CHANGELOG=
+
+# ── Cloudflare Tunnel (только при запуске с профилем cloudflare) ──────────────
+#TUNNEL_TOKEN=
 EOF
 
 success ".env создан"

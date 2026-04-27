@@ -1,0 +1,11 @@
+{
+  "aps": {
+    "alert": {
+      "title": "Новое сообщение",
+      "body": "Тестовое push-уведомление"
+    },
+    "sound": "default",
+    "badge": 1
+  },
+  "chatId": "REPLACE_WITH_REAL_CHAT_ID"
+}

@@ -147,6 +147,7 @@ openssl rand -hex 32
 port: "<ПОРТ>"
 db_path: "./messenger.db"
 media_dir: "./media"
+downloads_dir: "./downloads"
 jwt_secret: "<JWT_SECRET из шага 6>"
 allowed_origin: "http://<ПУБЛИЧНЫЙ_IP>:<ПОРТ>"
 behind_proxy: false
@@ -160,12 +161,30 @@ admin_username: "admin"
 admin_password: "<ПАРОЛЬ_АДМИНИСТРАТОРА>"
 vapid_public_key: ""
 vapid_private_key: ""
+
+# Push-уведомления для мобильных (опционально):
+# fcm_legacy_key: ""
+# apns_key_path: ""
+# apns_key_id: ""
+# apns_team_id: ""
+# apns_bundle_id: "com.messenger"
+# apns_sandbox: true
+
+# Политики групп и загрузок (опционально):
+# max_group_members: 50
+# allow_users_create_groups: true
+# max_upload_bytes: 104857600
+
+# Метаданные приложения (опционально):
+# app_version: "1.0.0"
+# min_client_version: "0.0.0"
 ```
 
 Примечания:
 - `registration_mode`: `open` — регистрация открыта; `invite` — только по инвайт-коду; `approval` — с одобрения администратора.
 - `behind_proxy`: установи `true`, если сервер работает за Cloudflare или nginx.
-- Поля FCM/APNs оставь пустыми — нужны только для мобильных push-уведомлений.
+- `downloads_dir`: папка для хранения загруженных файлов (отдельно от медиа).
+- Поля FCM/APNs раскомментируй при подключении мобильных push-уведомлений.
 
 ---
 
@@ -466,6 +485,7 @@ $config = @"
 port: "$port"
 db_path: "./messenger.db"
 media_dir: "./media"
+downloads_dir: "./downloads"
 jwt_secret: "$jwtSecret"
 allowed_origin: "http://${publicIP}:${port}"
 behind_proxy: false
@@ -479,6 +499,23 @@ admin_username: "admin"
 admin_password: "$adminPassword"
 vapid_public_key: ""
 vapid_private_key: ""
+
+# Push-уведомления для мобильных (опционально):
+# fcm_legacy_key: ""
+# apns_key_path: ""
+# apns_key_id: ""
+# apns_team_id: ""
+# apns_bundle_id: "com.messenger"
+# apns_sandbox: true
+
+# Политики групп и загрузок (опционально):
+# max_group_members: 50
+# allow_users_create_groups: true
+# max_upload_bytes: 104857600
+
+# Метаданные приложения (опционально):
+# app_version: "1.0.0"
+# min_client_version: "0.0.0"
 "@
 
 Set-Content -Path "server\config.yaml" -Value $config -Encoding UTF8

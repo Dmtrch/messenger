@@ -164,6 +164,7 @@ echo.
 echo # -- База данных и хранилище -----------------------------------------------
 echo DB_PATH=/data/messenger.db
 echo MEDIA_DIR=/data/media
+echo DOWNLOADS_DIR=/data/downloads
 echo PORT=!PORT!
 echo.
 echo # -- Сервер ----------------------------------------------------------------
@@ -192,6 +193,27 @@ echo STUN_URL=stun:stun.l.google.com:19302
 echo TURN_URL=!TURN_URL!
 echo TURN_SECRET=!TURN_SECRET_VAL!
 echo TURN_CREDENTIAL_TTL=86400
+echo.
+echo # -- Push-уведомления для мобильных (опционально) -------------------------
+echo #FCM_LEGACY_KEY=
+echo #APNS_KEY_PATH=/data/apns.p8
+echo #APNS_KEY_ID=
+echo #APNS_TEAM_ID=
+echo #APNS_BUNDLE_ID=com.messenger
+echo #APNS_SANDBOX=true
+echo.
+echo # -- Политики групп и загрузок (опционально) ------------------------------
+echo #MAX_GROUP_MEMBERS=50
+echo #ALLOW_USERS_CREATE_GROUPS=true
+echo #MAX_UPLOAD_BYTES=104857600
+echo.
+echo # -- Метаданные приложения (опционально) ----------------------------------
+echo #APP_VERSION=1.0.0
+echo #MIN_CLIENT_VERSION=0.0.0
+echo #APP_CHANGELOG=
+echo.
+echo # -- Cloudflare Tunnel (только при запуске с профилем cloudflare) ---------
+echo #TUNNEL_TOKEN=
 ) > ".env"
 
 echo  [OK]   .env создан
