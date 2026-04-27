@@ -2,6 +2,7 @@ package admin
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"math/rand"
@@ -17,16 +18,19 @@ import (
 	"github.com/messenger/server/db"
 	"github.com/messenger/server/internal/monitoring"
 	"github.com/messenger/server/internal/password"
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 // UIHandler serves the server-side rendered admin panel (no JS framework).
 type UIHandler struct {
-	DB                    *sql.DB
-	Sessions              *Store
-	RegistrationMode      string // "open" | "invite" | "approval"
-	DBPath                string
-	StartTime             time.Time
+	DB                     *sql.DB
+	Sessions               *Store
+	RegistrationMode       string // "open" | "invite" | "approval"
+	DBPath                 string
+	StartTime              time.Time
 	DefaultMaxGroupMembers int
+	BehindProxy            bool
+	AllowedOrigin          string
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -485,7 +489,7 @@ tr:hover td{background:#1e293b}
   <div class="new-invite">
     <div style="color:#86efac;font-size:.85rem;margin-bottom:.4rem">Новый инвайт создан</div>
     <div class="code">{{.NewInvite.URL}}</div>
-    <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data={{.NewInvite.URLEncoded}}" alt="QR" width="150" height="150">
+    {{if .NewInvite.QRBase64}}<img src="data:image/png;base64,{{.NewInvite.QRBase64}}" alt="QR" width="200" height="200">{{end}}
   </div>
   {{end}}
 
@@ -607,6 +611,15 @@ type inviteRow struct {
 type newInviteInfo struct {
 	URL        string
 	URLEncoded string
+	QRBase64   string
+}
+
+func generateQRBase64(data string) string {
+	png, err := qrcode.Encode(data, qrcode.Medium, 200)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(png)
 }
 
 type dashData struct {
@@ -668,11 +681,27 @@ func (h *UIHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine server base for invite URLs.
-	scheme := "https"
-	if r.TLS == nil {
-		scheme = "http"
+	// Priority: explicit AllowedOrigin → X-Forwarded-* (behind proxy) → r.TLS + r.Host
+	var serverBase string
+	if h.AllowedOrigin != "" {
+		serverBase = h.AllowedOrigin
+	} else if h.BehindProxy {
+		proto := r.Header.Get("X-Forwarded-Proto")
+		if proto == "" {
+			proto = "https"
+		}
+		host := r.Header.Get("X-Forwarded-Host")
+		if host == "" {
+			host = r.Host
+		}
+		serverBase = fmt.Sprintf("%s://%s", proto, host)
+	} else {
+		scheme := "https"
+		if r.TLS == nil {
+			scheme = "http"
+		}
+		serverBase = fmt.Sprintf("%s://%s", scheme, r.Host)
 	}
-	serverBase := fmt.Sprintf("%s://%s", scheme, r.Host)
 
 	data := dashData{
 		Tab:              tab,
@@ -752,6 +781,7 @@ func (h *UIHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		data.NewInvite = &newInviteInfo{
 			URL:        invURL,
 			URLEncoded: url.QueryEscape(invURL),
+			QRBase64:   generateQRBase64(invURL),
 		}
 	}
 

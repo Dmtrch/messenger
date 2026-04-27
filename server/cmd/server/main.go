@@ -122,6 +122,8 @@ func main() {
 		DBPath:                 cfg.DBPath,
 		StartTime:              time.Now(),
 		DefaultMaxGroupMembers: cfg.MaxGroupMembers,
+		BehindProxy:            cfg.BehindProxy,
+		AllowedOrigin:          cfg.AllowedOrigin,
 	}
 	chatHandler := &chat.Handler{DB: database, Hub: hub, MediaDir: cfg.MediaDir, MaxGroupMembers: cfg.MaxGroupMembers, AllowUsersCreateGroups: cfg.AllowUsersCreateGroups}
 	mediaHandler := &media.Handler{MediaDir: cfg.MediaDir, DB: database, MaxUploadBytes: cfg.MaxUploadBytes}
