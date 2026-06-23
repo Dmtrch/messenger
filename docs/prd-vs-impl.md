@@ -4,7 +4,7 @@
 
 - **Total tasks completed:** 47 / 50
 - **Date:** 2026-04-20
-- **Source:** `docs/prd-alignment-progress.md`
+- **Source:** git history (прежний трекер `docs/prd-alignment-progress.md` удалён как отработанный)
 
 ---
 
