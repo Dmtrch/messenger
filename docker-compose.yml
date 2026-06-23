@@ -5,6 +5,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        BUILDPLATFORM: ${BUILDPLATFORM:-linux/amd64}
+        TARGETOS: ${TARGETOS:-linux}
+        TARGETARCH: ${TARGETARCH:-amd64}
     container_name: messenger
     restart: unless-stopped
     env_file:

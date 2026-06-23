@@ -1,20 +1,23 @@
-# Stage 1: Build client
-FROM node:20-alpine AS client-builder
+# Stage 1: Build client (always on host platform)
+FROM --platform=$BUILDPLATFORM node:20-alpine AS client-builder
 WORKDIR /app
 COPY client/package*.json ./
 RUN npm install
 COPY client/ .
 RUN npm run build
 
-# Stage 2: Build server
-FROM golang:1.22-alpine AS server-builder
+# Stage 2: Build server (cross-compile for target platform)
+FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS server-builder
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 WORKDIR /app
 COPY server/go.mod server/go.sum ./
 RUN go mod download
 COPY server/ .
 # Copy built client into the directory adjacent to main.go for go:embed
 COPY --from=client-builder /app/dist ./cmd/server/static
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/messenger ./cmd/server
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -ldflags="-s -w" -o /bin/messenger ./cmd/server
 
 # Stage 3: Final image
 FROM alpine:3.20
