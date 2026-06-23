@@ -185,7 +185,7 @@
 |---|---|---|---|---|---|
 | PR-PUSH-1 | Android: восстановить FCM-сервис (регистрация токена + notifications) | done | 2026-04-25 | P0 | `MessengerFirebaseService`, runtime-permission, prime-токен — реализованы в `a09eecf`. Smoke-тест требует реального Firebase-проекта. |
 | PR-PUSH-2 | iOS: реализовать APNs (AppDelegate, регистрация токена, foreground/background presentation) | done | 2026-04-25 | P0 | `AppDelegate` с `@UIApplicationDelegateAdaptor`, deep-link через `pendingChatId` — реализованы в `778dfee`. Xcode-проект и `.p8` ключ — на стороне владельца. |
-| PR-DOCS-1 | Финализация `docs/main/*` по чеклисту `docs-main-update-plan.md` | in_progress | 2026-04-23 | P1 | 4 файла переработаны, осталась сверка внутренних ссылок + ENV-переменных против `config.go`. |
+| PR-DOCS-1 | Финализация `docs/main/*` по чеклисту `docs-main-update-plan.md` | done | 2026-06-23 | P1 | 4 файла переработаны. Сверка завершена 2026-06-23: все 33 ENV-переменные из `config.go` присутствуют в `technical-documentation.md` (§10.1–10.7) с верными дефолтами; deployment.md/usersguid.md согласованы; терминология `request`→`approval` зафиксирована; кросс-ссылок между `docs/main/*` нет — ломать нечего. Расхождений не выявлено. |
 | PR-TEST-1 | Minimal test-harness для native (Desktop Kotlin Test / Android JUnit / iOS XCTest) | done | 2026-04-25 | P1 | Desktop: 11 тестов (`./gradlew test`); Android: 5 тестов (`./gradlew testDebugUnitTest`); iOS: 12 DtoDecodingTests (`swift test`). CI jobs в `build-native.yml`. |
 | PR-REL-1 | Актуализировать `release-checklist.md` под native-артефакты (DMG/DEB/MSI/APK/IPA) | done | 2026-04-25 | P2 | Добавлены шаги: `npm run test`, `./gradlew test`, `./gradlew testDebugUnitTest`, `swift test`, уточнение GO-2026-4479. |
 
@@ -198,10 +198,10 @@
 | Фаза 2 (Privacy + Multi-device) | 14 | 13 | 1 (P2-LOC-2 переоткрыт) | 0 |
 | Фаза 3 (Scaling) | 15 | 15 | 0 | 0 |
 | Фаза 4 (Release) | 5 | 5 | 0 | 0 |
-| **Фаза 5 (Post-release parity)** | **15** | **13** | **1** | **0** |
-| **Итого** | **68** | **66** | **1** | **0** |
+| **Фаза 5 (Post-release parity)** | **15** | **14** | **0** | **0** |
+| **Итого** | **68** | **67** | **0** | **0** |
 
-Сравнение с предыдущей версией документа (2026-04-23): было 62/68 done (91%). Сейчас 66/68 done (97%) — закрыты PR-PUSH-1 (FCM), PR-PUSH-2 (APNs), PR-TEST-1 (native tests), PR-REL-1 (release-checklist). Осталось: PR-DOCS-1 (in_progress, финализация docs/main/*) и PR-NAT-7 (Touch ID, опционально P3).
+Сравнение с предыдущей версией документа (2026-04-23): было 62/68 done (91%). Сейчас 67/68 done (99%) — закрыты PR-PUSH-1 (FCM), PR-PUSH-2 (APNs), PR-TEST-1 (native tests), PR-REL-1 (release-checklist), PR-DOCS-1 (финализация docs/main/*, сверка ENV против config.go завершена 2026-06-23). Осталось: PR-NAT-7 (Touch ID, опционально P3).
 
 ---
 

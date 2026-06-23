@@ -1368,10 +1368,13 @@ func GetPasswordResetRequest(db *sql.DB, id string) (*PasswordResetRequest, erro
 	return r, err
 }
 
-func ResolvePasswordResetRequest(db *sql.DB, id, tempPassword, resolvedBy string, resolvedAt int64) error {
+// ResolvePasswordResetRequest помечает заявку выполненной. Временный пароль
+// намеренно НЕ сохраняется в открытом виде: он уже захеширован в users.password_hash,
+// а админу выдаётся одноразово в ответе на запрос. Колонка temp_password остаётся NULL.
+func ResolvePasswordResetRequest(db *sql.DB, id, resolvedBy string, resolvedAt int64) error {
 	_, err := db.Exec(
-		`UPDATE password_reset_requests SET status='completed', temp_password=?, resolved_by=?, resolved_at=? WHERE id=?`,
-		tempPassword, resolvedBy, resolvedAt, id,
+		`UPDATE password_reset_requests SET status='completed', temp_password=NULL, resolved_by=?, resolved_at=? WHERE id=?`,
+		resolvedBy, resolvedAt, id,
 	)
 	return err
 }

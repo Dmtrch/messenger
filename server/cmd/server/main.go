@@ -160,6 +160,8 @@ func main() {
 	authLimiter := secmw.NewRateLimiter(20, time.Minute, cfg.BehindProxy)
 	// Rate limiter для bot endpoints: 60 запросов в минуту с одного IP
 	botLimiter := secmw.NewRateLimiter(60, time.Minute, cfg.BehindProxy)
+	// Rate limiter на установление WebSocket-соединения: лимит/минуту с одного IP.
+	wsConnectLimiter := secmw.NewRateLimiter(cfg.WSConnectRateLimit, time.Minute, cfg.BehindProxy)
 
 	r := chi.NewRouter()
 	r.Use(secmw.RequestLogger)
@@ -266,7 +268,7 @@ func main() {
 		})
 	})
 
-	r.Get("/ws", hub.ServeWS)
+	registerWSRoute(r, wsConnectLimiter, hub.ServeWS)
 
 	// Admin web UI (server-side rendered, separate from API and PWA)
 	r.Route("/admin", func(r chi.Router) {
@@ -329,6 +331,13 @@ func main() {
 	} else {
 		log.Fatal(http.ListenAndServe(addr, r))
 	}
+}
+
+// registerWSRoute монтирует /ws с per-IP rate limiting на установление
+// соединения. Лимитер срабатывает ДО апгрейда, отдавая 429, что закрывает
+// вектор флуда WebSocket-подключений (REST-эндпоинты уже лимитируются).
+func registerWSRoute(r chi.Router, limiter *secmw.RateLimiter, serveWS http.HandlerFunc) {
+	r.With(limiter.Middleware()).Get("/ws", serveWS)
 }
 
 // tlsConfig — P1-TLS-1: принудительно TLS 1.3 без откатов на 1.2/1.1.

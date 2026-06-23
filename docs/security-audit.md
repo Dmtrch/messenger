@@ -12,6 +12,9 @@
 | 2026-04-20 | `4cf2feb` | 1 known (GO-2026-4479) | 0 | 0 |
 | 2026-04-23 | `d7f41fa` | 1 known (GO-2026-4479) | 0 (prod 54, dev 553) | 0 |
 | 2026-04-25 | `778dfee` | 1 known (GO-2026-4479) | 0 | 0 |
+| 2026-06-23 | `fec4923` | 1 known (GO-2026-4479, без патча) | — | — |
+
+**2026-06-23:** проверка версий pion/dtls — `go list -m -versions github.com/pion/dtls/v2`: последняя доступная по-прежнему `v2.2.12` (совпадает с текущей в `go.mod`), новых релизов с патчем нет. `pion/webrtc/v3 v3.3.6` тоже не обновлялся. Версии не менялись. Также исправлена находка «temp_password plaintext» (см. ниже). govulncheck не установлен в окружении (`which govulncheck` → not found).
 
 ---
 
@@ -86,9 +89,12 @@ TypeScript type-check: PASS. Production build: PASS.
 Добавлены верхние границы: `len(username) > 64 || len(password) > 128` → 400.  
 Защищает от DoS через argon2 на сверхдлинных входных данных.
 
+### Исправленные находки
+
+- **temp_password plaintext** (`db/queries.go`, `internal/admin/handler.go`, исправлено 2026-06-23): временный пароль больше не сохраняется в БД в открытом виде. `ResolvePasswordResetRequest` пишет `temp_password=NULL`; сам пароль хешируется (Argon2id) и попадает только в `users.password_hash`. Админ вводит и передаёт временный пароль одноразово (UI хранит его лишь в локальном state и не запрашивает обратно с сервера). Регрессионный тест: `db/password_reset_test.go`. Колонка `temp_password` оставлена в схеме для совместимости миграций, но не используется.
+
 ### Известные ограничения (не исправлены)
 
-- **temp_password plaintext** (`db/schema.go`): временный пароль хранится открытым текстом для отображения администратору. Требует отдельного дизайн-решения (шифрование или удаление после первого входа).
 - **Rate limiting WS**: WebSocket `/ws` не имеет rate limit на соединения. При горизонтальном масштабировании in-memory limiter неэффективен.
 - **Referrer-Policy / Permissions-Policy** заголовки отсутствуют — незначительный пропуск.
 - **Push-уведомления на native**: FCM (Android) реализован в коммите `a09eecf` (`MessengerFirebaseService`, runtime-permission, примирование токена); APNs (iOS) реализован в `778dfee` (`AppDelegate`, `@UIApplicationDelegateAdaptor`, deep-link). Оба клиента регистрируют токен через `POST /api/push/native/register`. Требует dev-окружения для smoke-теста: `google-services.json` (Android), `.p8` ключ + Xcode-проект (iOS). TLS pinning не реализован — риск принятый.

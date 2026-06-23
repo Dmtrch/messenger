@@ -37,6 +37,8 @@ type Config struct {
 	AllowUsersCreateGroups bool `yaml:"allow_users_create_groups"`
 	// Максимальный размер загружаемого файла в байтах (P3-UX-3a). 0 = дефолт 100 МБ.
 	MaxUploadBytes int64 `yaml:"max_upload_bytes"`
+	// Лимит установления WebSocket-соединений с одного IP в минуту. 0 = дефолт 30.
+	WSConnectRateLimit int `yaml:"ws_connect_rate_limit"`
 	// App version info (P3-UPD-1)
 	AppVersion       string `yaml:"app_version"`
 	MinClientVersion string `yaml:"min_client_version"`
@@ -64,6 +66,10 @@ func defaults() Config {
 		MaxGroupMembers:        50,
 		AllowUsersCreateGroups: true,
 		MaxUploadBytes:         100 << 20, // 100 МБ
+		// Консервативный дефолт: легитимный клиент держит одно постоянное WS-соединение
+		// и переподключается при разрывах; 30/мин с запасом покрывает реконнекты,
+		// но отсекает флуд подключений.
+		WSConnectRateLimit: 30,
 		AppVersion:             "dev",
 		MinClientVersion:       "0.0.0",
 	}
@@ -173,6 +179,11 @@ func loadConfig(path string) (Config, error) {
 	if v := os.Getenv("MAX_UPLOAD_BYTES"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
 			cfg.MaxUploadBytes = n
+		}
+	}
+	if v := os.Getenv("WS_CONNECT_RATE_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.WSConnectRateLimit = n
 		}
 	}
 	if v := os.Getenv("APP_VERSION"); v != "" {

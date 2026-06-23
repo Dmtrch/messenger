@@ -328,7 +328,7 @@ func (h *Handler) ResolvePasswordResetRequest(w http.ResponseWriter, r *http.Req
 		httpErr(w, "server error", 500)
 		return
 	}
-	if err := db.ResolvePasswordResetRequest(h.DB, id, body.TempPassword, adminID, time.Now().UnixMilli()); err != nil {
+	if err := db.ResolvePasswordResetRequest(h.DB, id, adminID, time.Now().UnixMilli()); err != nil {
 		httpErr(w, "server error", 500)
 		return
 	}

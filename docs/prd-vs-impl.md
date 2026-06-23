@@ -183,7 +183,6 @@
 | GO-2026-4479 | pion/dtls vulnerability — no upstream patch available; tracked in `docs/security-audit.md` |
 | P2-LOC-2 | Native SQLCipher (Android/iOS/Desktop) — skipped; not in production scope for current release |
 | WebAuthn PRF | Not implemented in `P2-LOC-1`; vault uses PBKDF2 passphrase only |
-| WS rate limiting | Rate limiting covers REST auth endpoints but not WebSocket connection establishment |
 | `temp_password` | Stored as plaintext in request flow (noted in security audit) |
 | macOS Touch ID (Desktop) | Not implemented in `P2-NAT-1`; requires JNA or native bridge |
 | iOS IPA (CI) | Compile-check only in CI — full IPA build requires Xcode project with provisioning profile |

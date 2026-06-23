@@ -46,6 +46,14 @@ apps/mobile/android/*.hprof
 # Windows
 Thumbs.db
 
+# Built client/app artifacts (не храним бинари в git)
+mess_client_macos/
+*.dmg
+*.apk
+*.msi
+*.deb
+*.ipa
+
 # IDE
 .idea/
 .vscode/

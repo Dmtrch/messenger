@@ -218,8 +218,9 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
     id           TEXT PRIMARY KEY,
     user_id      TEXT NOT NULL REFERENCES users(id),
     status       TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'completed', 'rejected')),
-    -- temp_password хранится в открытом виде — нужен для отображения администратору
-    -- должен быть немедленно сменён пользователем после использования
+    -- temp_password устарела и больше не используется: временный пароль не хранится
+    -- в открытом виде, он хешируется в users.password_hash. Колонка остаётся NULL
+    -- (сохранена для совместимости со старой схемой).
     temp_password TEXT,
     created_at   INTEGER NOT NULL,
     resolved_at  INTEGER,
