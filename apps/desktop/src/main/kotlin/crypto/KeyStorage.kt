@@ -1,6 +1,13 @@
 package crypto
 
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.attribute.AclEntry
+import java.nio.file.attribute.AclEntryPermission
+import java.nio.file.attribute.AclEntryType
+import java.nio.file.attribute.AclFileAttributeView
+import java.nio.file.attribute.PosixFilePermissions
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.util.Base64
@@ -71,6 +78,33 @@ class KeyStorage(
     companion object {
         private const val PWD_PATH = ".messenger/keystore.pwd"
 
+        /**
+         * Создаёт файл с содержимым и правами owner-only (600 на POSIX, ACL-только-владелец на Windows).
+         * Операция атомарна на POSIX: файл создаётся сразу с ограниченными правами,
+         * без промежуточного окна с открытыми permissions.
+         */
+        private fun writeOwnerOnly(path: Path, content: String) {
+            Files.deleteIfExists(path)
+            try {
+                val perms = PosixFilePermissions.fromString("rw-------")
+                Files.createFile(path, PosixFilePermissions.asFileAttribute(perms))
+            } catch (_: UnsupportedOperationException) {
+                // Windows или не-POSIX ФС: создаём обычно, потом ограничиваем ACL
+                Files.createFile(path)
+                val aclView = Files.getFileAttributeView(path, AclFileAttributeView::class.java)
+                if (aclView != null) {
+                    val owner = Files.getOwner(path)
+                    val entry = AclEntry.newBuilder()
+                        .setType(AclEntryType.ALLOW)
+                        .setPrincipal(owner)
+                        .setPermissions(AclEntryPermission.entries.toSet())
+                        .build()
+                    aclView.acl = listOf(entry)
+                }
+            }
+            Files.write(path, content.toByteArray(Charsets.UTF_8))
+        }
+
         fun loadOrCreatePassword(): CharArray {
             val pwdFile = File("${System.getProperty("user.home")}/$PWD_PATH")
             if (pwdFile.exists()) {
@@ -80,12 +114,7 @@ class KeyStorage(
             val bytes = ByteArray(48).also { SecureRandom().nextBytes(it) }
             val pwd = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
             pwdFile.parentFile.mkdirs()
-            pwdFile.writeText(pwd, Charsets.UTF_8)
-            // owner read/write only (аналог chmod 600)
-            pwdFile.setReadable(false, false)
-            pwdFile.setReadable(true, true)
-            pwdFile.setWritable(false, false)
-            pwdFile.setWritable(true, true)
+            writeOwnerOnly(pwdFile.toPath(), pwd)
             return pwd.toCharArray()
         }
     }

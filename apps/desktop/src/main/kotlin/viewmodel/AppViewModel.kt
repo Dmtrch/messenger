@@ -179,7 +179,7 @@ class AppViewModel {
             },
             onDisconnect = { },
         )
-        wsInstance.connect(client.wsUrl(token))
+        wsInstance.connect(client.wsUrl())
         ws = wsInstance
     }
 

@@ -457,12 +457,12 @@ class ApiClient(
     suspend fun adminGetSystemStats(): AdminSystemStatsDto =
         http.get("$baseUrl/api/admin/system/stats").body()
 
-    fun wsUrl(token: String): String {
+    fun wsUrl(): String {
         val wsBase = when {
             baseUrl.startsWith("https://") -> baseUrl.replaceFirst("https://", "wss://")
             baseUrl.startsWith("http://") -> baseUrl.replaceFirst("http://", "ws://")
             else -> baseUrl
         }
-        return "$wsBase/ws?token=$token"
+        return "$wsBase/ws"
     }
 }

@@ -3,9 +3,11 @@ package main
 import (
 	"crypto/tls"
 	"embed"
+	"flag"
 	"io/fs"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -38,11 +40,15 @@ import (
 var staticFiles embed.FS
 
 func main() {
-	if err := logger.Init("logs"); err != nil {
+	configPath := flag.String("config", "config.yaml", "path to config file")
+	flag.Parse()
+
+	logDir := filepath.Join(filepath.Dir(*configPath), "logs")
+	if err := logger.Init(logDir); err != nil {
 		log.Printf("WARNING: could not init file logger: %v", err)
 	}
 
-	cfg, err := loadConfig("config.yaml")
+	cfg, err := loadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}

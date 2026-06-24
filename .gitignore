@@ -46,7 +46,8 @@ apps/mobile/android/*.hprof
 # Windows
 Thumbs.db
 
-# Built client/app artifacts (не храним бинари в git)
+# Deploy artifacts (не храним бинари в git)
+deploy/
 mess_client_macos/
 *.dmg
 *.apk

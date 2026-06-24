@@ -78,11 +78,15 @@ func (h *Hub) checkOrigin(r *http.Request) bool {
 	return r.Header.Get("Origin") == h.allowedOrigin
 }
 
-// ServeWS upgrades HTTP → WebSocket. Auth via ?token=<JWT>&deviceId=<id>.
-// Апгрейд выполняется всегда — при невалидном токене закрываем с кодом 4001,
-// чтобы клиент мог отличить auth failure от сетевой ошибки.
+// ServeWS upgrades HTTP → WebSocket.
+// Auth: prefer Authorization: Bearer <JWT> header; fall back to ?token= query param for
+// backward compatibility. Апгрейд выполняется всегда — при невалидном токене закрываем
+// с кодом 4001, чтобы клиент мог отличить auth failure от сетевой ошибки.
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	tokenStr := r.URL.Query().Get("token")
+	if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+		tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+	}
 	deviceIDParam := r.URL.Query().Get("deviceId")
 	userID, authErr := h.verifyJWT(tokenStr)
 
