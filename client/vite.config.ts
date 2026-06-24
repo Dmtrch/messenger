@@ -59,6 +59,10 @@ export default defineConfig({
       workbox: {
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // 4 МБ (libsodium увеличивает бандл)
         importScripts: ['/push-handler.js'],
+        // Не перехватывать навигацию на серверные маршруты: админ-панель (SSR)
+        // и API. Иначе SW отдаёт SPA index.html вместо страницы сервера, и
+        // /admin/login уводит в клиент-роутер (→ /auth → чат).
+        navigateFallbackDenylist: [/^\/admin/, /^\/api/],
         runtimeCaching: [
           {
             urlPattern: /^\/api\//,
