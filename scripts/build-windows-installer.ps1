@@ -48,7 +48,8 @@ if (-not $SkipClient) {
 if (-not $SkipInno) {
     $InnoPath = @(
         "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-        "C:\Program Files\Inno Setup 6\ISCC.exe"
+        "C:\Program Files\Inno Setup 6\ISCC.exe",
+        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
     if (-not $InnoPath) {
@@ -68,7 +69,7 @@ if (-not $SkipClient) {
 
     Push-Location (Join-Path $Root "client")
     try {
-        npm install
+        npm install --legacy-peer-deps
         npm run build
     } finally {
         Pop-Location

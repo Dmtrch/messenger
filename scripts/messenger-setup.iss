@@ -48,6 +48,32 @@ var
   AdminPage:   TInputQueryWizardPage;
   RegModePage: TInputOptionWizardPage;
 
+{ SetEnvironmentVariableW — для передачи Unicode-контента дочернему процессу }
+function SetEnvironmentVariable(lpName: String; lpValue: String): BOOL;
+  external 'SetEnvironmentVariableW@kernel32.dll stdcall';
+
+{ Запись файла в кодировке UTF-8 без BOM.
+  Контент передаётся через переменную окружения (Unicode), поэтому никакой
+  ANSI-перекодировки не происходит — работает корректно на PS5 и PS7. }
+procedure WriteUtf8File(const FileName, Content: String);
+var
+  TempPS: String;
+  ResultCode: Integer;
+begin
+  TempPS := ExpandConstant('{tmp}\messenger_write_utf8.ps1');
+  SetEnvironmentVariable('_MSG_CONTENT', Content);
+  SaveStringToFile(TempPS,
+    '[System.IO.File]::WriteAllText(' +
+    '"' + FileName + '", ' +
+    '$env:_MSG_CONTENT, ' +
+    '[System.Text.UTF8Encoding]::new($false))' + #13#10,
+    False);
+  Exec('powershell.exe',
+    '-NoProfile -ExecutionPolicy Bypass -File "' + TempPS + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  SetEnvironmentVariable('_MSG_CONTENT', '');
+end;
+
 { Экранирование специальных символов для YAML double-quoted строки }
 function EscapeYaml(const S: String): String;
 var
@@ -217,10 +243,15 @@ begin
 
   { ── Генерация JWT_SECRET ──────────────────────────────────────────────── }
   TempJWT := ExpandConstant('{tmp}\messenger_jwt.txt');
+  TempPS  := ExpandConstant('{tmp}\gen_jwt.ps1');
+  SaveStringToFile(TempPS,
+    '$b = New-Object byte[] 32; ' +
+    '[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); ' +
+    '[System.BitConverter]::ToString($b).Replace("-","").ToLower() | ' +
+    'Out-File -FilePath "' + TempJWT + '" -Encoding ascii -NoNewline' + #13#10,
+    False);
   Exec('powershell.exe',
-    '-NoProfile -Command "[System.BitConverter]::ToString(' +
-    '[System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)' +
-    ').Replace(''-'','''').ToLower() | Out-File -FilePath ''' + TempJWT + ''' -Encoding ascii -NoNewline"',
+    '-NoProfile -ExecutionPolicy Bypass -File "' + TempPS + '"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if LoadStringFromFile(TempJWT, FileContent) then
     JWTSecret := Trim(String(FileContent));
@@ -230,9 +261,9 @@ begin
     '# Сгенерировано установщиком Messenger Server' + #13#10 +
     'port: "' + EscapeYaml(Port) + '"' + #13#10 +
     'jwt_secret: "' + EscapeYaml(JWTSecret) + '"' + #13#10 +
-    'db_path: "' + ToSlash(EscapeYaml(DataDir)) + '/data/messenger.db"' + #13#10 +
-    'media_dir: "' + ToSlash(EscapeYaml(DataDir)) + '/data/media"' + #13#10 +
-    'downloads_dir: "' + ToSlash(EscapeYaml(DataDir)) + '/data/downloads"' + #13#10 +
+    'db_path: "' + EscapeYaml(ToSlash(DataDir)) + '/data/messenger.db"' + #13#10 +
+    'media_dir: "' + EscapeYaml(ToSlash(DataDir)) + '/data/media"' + #13#10 +
+    'downloads_dir: "' + EscapeYaml(ToSlash(DataDir)) + '/data/downloads"' + #13#10 +
     'server_name: "' + EscapeYaml(ServerName) + '"' + #13#10 +
     'server_description: "' + EscapeYaml(ServerDesc) + '"' + #13#10 +
     'registration_mode: "' + RegMode + '"' + #13#10 +
@@ -241,7 +272,7 @@ begin
     'stun_url: "stun:stun.l.google.com:19302"' + #13#10 +
     'vapid_private_key: ""' + #13#10 +
     'vapid_public_key: ""' + #13#10;
-  SaveStringToFile(ConfigFile, Cfg, False);
+  WriteUtf8File(ConfigFile, Cfg);
 
   { ── Кратковременный запуск сервера для генерации VAPID-ключей ─────────── }
   TempStdout := ExpandConstant('{tmp}\messenger_stdout.txt');
@@ -279,9 +310,9 @@ begin
       '# Сгенерировано установщиком Messenger Server' + #13#10 +
       'port: "' + EscapeYaml(Port) + '"' + #13#10 +
       'jwt_secret: "' + EscapeYaml(JWTSecret) + '"' + #13#10 +
-      'db_path: "' + ToSlash(EscapeYaml(DataDir)) + '/data/messenger.db"' + #13#10 +
-      'media_dir: "' + ToSlash(EscapeYaml(DataDir)) + '/data/media"' + #13#10 +
-      'downloads_dir: "' + ToSlash(EscapeYaml(DataDir)) + '/data/downloads"' + #13#10 +
+      'db_path: "' + EscapeYaml(ToSlash(DataDir)) + '/data/messenger.db"' + #13#10 +
+      'media_dir: "' + EscapeYaml(ToSlash(DataDir)) + '/data/media"' + #13#10 +
+      'downloads_dir: "' + EscapeYaml(ToSlash(DataDir)) + '/data/downloads"' + #13#10 +
       'server_name: "' + EscapeYaml(ServerName) + '"' + #13#10 +
       'server_description: "' + EscapeYaml(ServerDesc) + '"' + #13#10 +
       'registration_mode: "' + RegMode + '"' + #13#10 +
@@ -290,7 +321,7 @@ begin
       'stun_url: "stun:stun.l.google.com:19302"' + #13#10 +
       'vapid_private_key: "' + EscapeYaml(VapidPriv) + '"' + #13#10 +
       'vapid_public_key: "' + EscapeYaml(VapidPub) + '"' + #13#10;
-    SaveStringToFile(ConfigFile, Cfg, False);
+    WriteUtf8File(ConfigFile, Cfg);
   end;
 
   { ── Вспомогательные .bat файлы ───────────────────────────────────────── }
@@ -385,7 +416,7 @@ begin
     '  НИКОГДА не публикуйте JWT_SECRET и VAPID_PRIVATE_KEY.' + #13#10 +
     '=============================================================' + #13#10;
 
-  SaveStringToFile(AppDir + '\server-main.txt', AdminInfo, False);
+  WriteUtf8File(AppDir + '\server-main.txt', AdminInfo);
 
   { Показать файл с данными }
   Exec('notepad.exe', AppDir + '\server-main.txt', '', SW_SHOWNORMAL, ewNoWait, ResultCode);

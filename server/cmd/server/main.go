@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"embed"
 	"flag"
@@ -326,16 +327,39 @@ func main() {
 	addr := ":" + cfg.Port
 	log.Printf("listening on %s (tls=%v)", addr, isHTTPS)
 
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	if isHTTPS {
-		srv := &http.Server{
-			Addr:              addr,
-			Handler:           r,
-			ReadHeaderTimeout: 10 * time.Second,
-			TLSConfig:         tlsConfig(),
+		srv.TLSConfig = tlsConfig()
+	}
+
+	// serve блокирует до остановки сервера; shutdown инициирует graceful-выход.
+	serve := func() error {
+		if isHTTPS {
+			return srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
 		}
-		log.Fatal(srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey))
+		return srv.ListenAndServe()
+	}
+	shutdown := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf("graceful shutdown error: %v", err)
+		}
+	}
+
+	if isWindowsService() {
+		// Запуск под Windows SCM: обёртка отвечает на Stop/Shutdown.
+		if err := runService(serve, shutdown); err != nil {
+			log.Fatalf("service run: %v", err)
+		}
 	} else {
-		log.Fatal(http.ListenAndServe(addr, r))
+		if err := serve(); err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
 	}
 }
 
