@@ -330,8 +330,11 @@ begin
     'start http://localhost:' + Port + '/admin/' + #13#10,
     False);
 
-  SaveStringToFile(AppDir + '\server-ctl.bat',
+  { server-ctl.bat пишем через WriteUtf8File (UTF-8 без BOM) + chcp 65001,
+    иначе кириллица в консоли выводится кракозябрами (ANSI/cp1251 vs OEM cp866). }
+  WriteUtf8File(AppDir + '\server-ctl.bat',
     '@echo off' + #13#10 +
+    'chcp 65001 >nul' + #13#10 +
     'setlocal' + #13#10 +
     'echo  Управление Messenger Server' + #13#10 +
     'echo  ==============================' + #13#10 +
@@ -347,8 +350,7 @@ begin
     'if "%choice%"=="3" (sc stop {#ServiceName} && timeout /t 3 >nul && sc start {#ServiceName})' + #13#10 +
     'if "%choice%"=="4" sc query {#ServiceName}' + #13#10 +
     'if "%choice%"=="5" explorer "' + DataDir + '\logs"' + #13#10 +
-    'pause' + #13#10,
-    False);
+    'pause' + #13#10);
 
   { ── Остановить и удалить старый сервис (при переустановке) ───────────── }
   Exec('sc.exe', 'stop {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);

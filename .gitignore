@@ -39,6 +39,11 @@ apps/mobile/ios/.build/
 apps/mobile/android/.gradle/
 apps/mobile/android/build/
 apps/mobile/android/*.hprof
+# Машинный путь к Android SDK — не хранить в git
+apps/mobile/android/local.properties
+
+# Локальный тулчейн (JDK + Android SDK, скачивается локально)
+.toolchain/
 
 # macOS
 .DS_Store
