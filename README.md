@@ -87,6 +87,9 @@ Optional — Cloudflare Tunnel sidecar:
 docker compose --profile cloudflare up -d
 ```
 
+To publish a home/family server over HTTPS (no public IP needed, works for iOS PWA),
+see [`docs/cloudflare-tunnel.md`](docs/cloudflare-tunnel.md).
+
 ### Option 2: Local development
 
 ```bash
@@ -174,6 +177,7 @@ The `/downloads` page auto-detects the visitor's OS and serves the appropriate i
 ## Documentation
 
 - [`docs/`](docs/) — architecture overviews, feature specs, plans
+- [`docs/cloudflare-tunnel.md`](docs/cloudflare-tunnel.md) — expose a home/family server over HTTPS via Cloudflare Tunnel (Windows & Ubuntu, no public IP required)
 - [`shared/protocol/`](shared/protocol/) — REST/WS API contracts and JSON schemas
 - [`shared/crypto-contracts/`](shared/crypto-contracts/) — E2E encryption specification
 - [`shared/test-vectors/`](shared/test-vectors/) — crypto and protocol test vectors
