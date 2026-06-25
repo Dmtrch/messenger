@@ -776,7 +776,9 @@ func (h *UIHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check for a newly-created invite passed via flash param.
-	if newCode := r.URL.Query().Get("new_invite"); newCode != "" {
+	// QR-приглашение со ссылкой имеет смысл только в режиме invite —
+	// в open регистрация свободна, в approval вход идёт через заявку.
+	if newCode := r.URL.Query().Get("new_invite"); newCode != "" && h.RegistrationMode == "invite" {
 		invURL := fmt.Sprintf("%s/register?invite=%s", serverBase, newCode)
 		data.NewInvite = &newInviteInfo{
 			URL:        invURL,

@@ -56,6 +56,8 @@ function AppRoutes({ initiateCall, handleCallFrame }: AppRoutesProps) {
       <Routes>
         <Route path="/setup" element={<ServerSetupPage />} />
         <Route path="/auth" element={<AuthPage />} />
+        {/* Deep-link приглашения: /register?invite=КОД ведёт на форму регистрации */}
+        <Route path="/register" element={<AuthPage />} />
         <Route path="/link-device" element={<LinkDevicePage />} />
         <Route path="*" element={<Navigate to="/auth" replace />} />
       </Routes>

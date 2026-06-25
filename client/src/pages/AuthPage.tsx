@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { initSodium, generateIdentityKeyPair, generateDHKeyPair, signData, toBase64 } from '@/crypto/x3dh'
 import { saveIdentityKey, saveSignedPreKey, saveOneTimePreKeys, saveDeviceId } from '@/crypto/keystore'
 import { api, setAccessToken } from '@/api/client'
 import type { User, ServerInfo } from '@/types'
 import { getServerUrl } from '@/config/serverConfig'
+import InstallPwaBanner from '@/components/InstallPwaBanner/InstallPwaBanner'
 import s from './pages.module.css'
 
 const OPK_COUNT = 10
@@ -13,12 +14,16 @@ const OPK_COUNT = 10
 export default function AuthPage() {
   const login = useAuthStore((st) => st.login)
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
-  const [tab, setTab] = useState<'login' | 'register' | 'forgot'>('login')
+  const initialInvite = searchParams.get('invite') ?? ''
+  // По приглашению (есть invite-код или путь /register) сразу открываем вкладку регистрации.
+  const cameForRegister = Boolean(initialInvite) || location.pathname === '/register'
+  const [tab, setTab] = useState<'login' | 'register' | 'forgot'>(cameForRegister ? 'register' : 'login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [inviteCode, setInviteCode] = useState(searchParams.get('invite') ?? '')
+  const [inviteCode, setInviteCode] = useState(initialInvite)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -274,6 +279,9 @@ export default function AuthPage() {
             </button>
           </>
         )}
+
+        {/* Баннер установки PWA — показывается на форме регистрации (в т.ч. при заходе по приглашению) */}
+        {tab === 'register' && <InstallPwaBanner />}
 
         {/* Вкладка регистрации — approval режим */}
         {tab === 'register' && serverInfo?.registrationMode === 'approval' && (

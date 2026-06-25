@@ -44,7 +44,11 @@ export function LinkDeviceModal({ onClose }: Props) {
 
   const expired = timeLeft === 0 && linkToken !== null
   const serverUrl = window.location.origin
-  const qrPayload = linkToken ? JSON.stringify({ serverUrl, token: linkToken.token }) : ''
+  // QR содержит прямую ссылку: системная камера телефона распознает её и откроет
+  // LinkDevicePage, который автоактивирует токен по параметру ?link= (serverUrl = origin ссылки).
+  const qrPayload = linkToken
+    ? `${serverUrl}/link-device?link=${encodeURIComponent(linkToken.token)}`
+    : ''
 
   const mm = String(Math.floor(timeLeft / 60)).padStart(2, '0')
   const ss = String(timeLeft % 60).padStart(2, '0')
